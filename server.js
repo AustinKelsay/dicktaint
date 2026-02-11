@@ -5,6 +5,7 @@ const path = require('path');
 const PORT = process.env.PORT || 3000;
 const OLLAMA_HOST = process.env.OLLAMA_HOST || 'http://127.0.0.1:11434';
 const PUBLIC_DIR = path.join(__dirname, 'public');
+const DEFAULT_INSTRUCTION = 'Clean up this raw speech-to-text transcript into readable text while preserving the speaker\'s intent.';
 
 function sendJson(res, statusCode, data) {
   res.writeHead(statusCode, {
@@ -37,8 +38,19 @@ function readJsonBody(req) {
   });
 }
 
-async function fetchOllamaModels() {
-  const response = await fetch(`${OLLAMA_HOST}/api/tags`);
+function buildRefinePrompt(transcript, instruction) {
+  return [
+    instruction || DEFAULT_INSTRUCTION,
+    '',
+    'Raw transcript:',
+    transcript,
+    '',
+    'Output only the cleaned dictation text.'
+  ].join('\n');
+}
+
+async function fetchOllamaModels(fetchImpl, ollamaHost) {
+  const response = await fetchImpl(`${ollamaHost}/api/tags`);
   if (!response.ok) {
     throw new Error(`Ollama /api/tags failed with status ${response.status}`);
   }
@@ -47,37 +59,41 @@ async function fetchOllamaModels() {
   return (data.models || []).map((item) => item.name);
 }
 
-async function handleApi(req, res) {
+async function handleApi(req, res, deps) {
+  const { fetchImpl, ollamaHost } = deps;
+
   if (req.method === 'GET' && req.url === '/api/health') {
     try {
-      const models = await fetchOllamaModels();
-      return sendJson(res, 200, {
+      const models = await fetchOllamaModels(fetchImpl, ollamaHost);
+      sendJson(res, 200, {
         ok: true,
-        ollamaHost: OLLAMA_HOST,
+        ollamaHost,
         modelCount: models.length
       });
     } catch (error) {
-      return sendJson(res, 503, {
+      sendJson(res, 503, {
         ok: false,
-        ollamaHost: OLLAMA_HOST,
+        ollamaHost,
         error: error.message
       });
     }
+    return true;
   }
 
   if (req.method === 'GET' && req.url === '/api/models') {
     try {
-      const models = await fetchOllamaModels();
-      return sendJson(res, 200, {
+      const models = await fetchOllamaModels(fetchImpl, ollamaHost);
+      sendJson(res, 200, {
         ok: true,
         models
       });
     } catch (error) {
-      return sendJson(res, 503, {
+      sendJson(res, 503, {
         ok: false,
         error: error.message
       });
     }
+    return true;
   }
 
   if (req.method === 'POST' && req.url === '/api/refine') {
@@ -88,29 +104,23 @@ async function handleApi(req, res) {
       const instruction = (body.instruction || '').trim();
 
       if (!model) {
-        return sendJson(res, 400, {
+        sendJson(res, 400, {
           ok: false,
           error: 'Missing model'
         });
+        return true;
       }
 
       if (!transcript) {
-        return sendJson(res, 400, {
+        sendJson(res, 400, {
           ok: false,
           error: 'Missing transcript'
         });
+        return true;
       }
 
-      const prompt = [
-        instruction || 'Clean up this raw speech-to-text transcript into readable text while preserving the speaker\'s intent.',
-        '',
-        'Raw transcript:',
-        transcript,
-        '',
-        'Output only the cleaned dictation text.'
-      ].join('\n');
-
-      const response = await fetch(`${OLLAMA_HOST}/api/generate`, {
+      const prompt = buildRefinePrompt(transcript, instruction);
+      const response = await fetchImpl(`${ollamaHost}/api/generate`, {
         method: 'POST',
         headers: {
           'Content-Type': 'application/json'
@@ -131,16 +141,18 @@ async function handleApi(req, res) {
       }
 
       const data = await response.json();
-      return sendJson(res, 200, {
+      sendJson(res, 200, {
         ok: true,
         text: data.response || ''
       });
     } catch (error) {
-      return sendJson(res, 500, {
+      sendJson(res, 500, {
         ok: false,
         error: error.message
       });
     }
+
+    return true;
   }
 
   return false;
@@ -155,60 +167,84 @@ function getContentType(filePath) {
   return 'text/plain; charset=utf-8';
 }
 
-function safePublicPath(urlPath) {
+function safePublicPath(urlPath, publicDir = PUBLIC_DIR) {
   const decoded = decodeURIComponent(urlPath.split('?')[0]);
   const normalized = path.normalize(decoded).replace(/^\/+/, '');
-  const resolved = path.join(PUBLIC_DIR, normalized);
+  const resolved = path.join(publicDir, normalized);
 
-  if (!resolved.startsWith(PUBLIC_DIR)) {
+  if (!resolved.startsWith(publicDir)) {
     return null;
   }
 
   return resolved;
 }
 
-const server = http.createServer(async (req, res) => {
-  try {
-    const apiHandled = await handleApi(req, res);
-    if (apiHandled !== false) return;
+function createServer(options = {}) {
+  const deps = {
+    fetchImpl: options.fetchImpl || fetch,
+    ollamaHost: options.ollamaHost || OLLAMA_HOST,
+    publicDir: options.publicDir || PUBLIC_DIR
+  };
 
-    const targetPath = req.url === '/' ? path.join(PUBLIC_DIR, 'index.html') : safePublicPath(req.url);
+  return http.createServer(async (req, res) => {
+    try {
+      const apiHandled = await handleApi(req, res, deps);
+      if (apiHandled) return;
 
-    if (!targetPath) {
-      res.writeHead(400);
-      return res.end('Bad Request');
-    }
+      const targetPath = req.url === '/'
+        ? path.join(deps.publicDir, 'index.html')
+        : safePublicPath(req.url, deps.publicDir);
 
-    fs.readFile(targetPath, (err, file) => {
-      if (err) {
-        if (req.url !== '/') {
-          fs.readFile(path.join(PUBLIC_DIR, 'index.html'), (fallbackErr, fallback) => {
-            if (fallbackErr) {
-              res.writeHead(404);
-              return res.end('Not Found');
-            }
-            res.writeHead(200, { 'Content-Type': 'text/html; charset=utf-8' });
-            return res.end(fallback);
-          });
+      if (!targetPath) {
+        res.writeHead(400);
+        res.end('Bad Request');
+        return;
+      }
+
+      fs.readFile(targetPath, (err, file) => {
+        if (err) {
+          if (req.url !== '/') {
+            fs.readFile(path.join(deps.publicDir, 'index.html'), (fallbackErr, fallback) => {
+              if (fallbackErr) {
+                res.writeHead(404);
+                res.end('Not Found');
+                return;
+              }
+              res.writeHead(200, { 'Content-Type': 'text/html; charset=utf-8' });
+              res.end(fallback);
+            });
+            return;
+          }
+
+          res.writeHead(404);
+          res.end('Not Found');
           return;
         }
 
-        res.writeHead(404);
-        return res.end('Not Found');
-      }
-
-      res.writeHead(200, {
-        'Content-Type': getContentType(targetPath)
+        res.writeHead(200, {
+          'Content-Type': getContentType(targetPath)
+        });
+        res.end(file);
       });
-      res.end(file);
-    });
-  } catch (error) {
-    res.writeHead(500, { 'Content-Type': 'text/plain; charset=utf-8' });
-    res.end(`Server error: ${error.message}`);
-  }
-});
+    } catch (error) {
+      res.writeHead(500, { 'Content-Type': 'text/plain; charset=utf-8' });
+      res.end(`Server error: ${error.message}`);
+    }
+  });
+}
 
-server.listen(PORT, () => {
-  console.log(`Dictation starter running at http://localhost:${PORT}`);
-  console.log(`Using Ollama host: ${OLLAMA_HOST}`);
-});
+if (require.main === module) {
+  const server = createServer();
+  server.listen(PORT, () => {
+    console.log(`Dictation starter running at http://localhost:${PORT}`);
+    console.log(`Using Ollama host: ${OLLAMA_HOST}`);
+  });
+}
+
+module.exports = {
+  buildRefinePrompt,
+  createServer,
+  fetchOllamaModels,
+  getContentType,
+  safePublicPath
+};

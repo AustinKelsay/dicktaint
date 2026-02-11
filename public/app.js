@@ -7,13 +7,20 @@ const stopDictationBtn = document.getElementById('stopDictation');
 const clearTranscriptBtn = document.getElementById('clearTranscript');
 const transcriptInput = document.getElementById('transcriptInput');
 const output = document.getElementById('output');
+const appShell = document.querySelector('.app-shell');
 
-const DEFAULT_MODEL = 'karanchopda333/whisper:latest';
+const {
+  DEFAULT_MODEL = 'karanchopda333/whisper:latest',
+  pickDefaultModel = (models) => (Array.isArray(models) && models[0]) || '',
+  withSpeechSupportHint = (message) => message
+} = window.DictationLogic || {};
 const SpeechRecognitionApi = window.SpeechRecognition || window.webkitSpeechRecognition || null;
 
 let recognition = null;
 let finalTranscript = '';
 let isDictating = false;
+let isBusy = false;
+const runBtnLabel = runBtn.textContent;
 
 function getTauriInvoke() {
   return window.__TAURI__?.core?.invoke || null;
@@ -52,44 +59,47 @@ async function refineViaHttp(model, transcript, instruction) {
   return data.text || '';
 }
 
-function setStatus(message) {
-  statusEl.textContent = message;
+function setUiMode(mode) {
+  document.body.dataset.mode = mode;
 }
 
-function setBusy(isBusy) {
+function setStatus(message, tone = 'neutral') {
+  statusEl.textContent = message;
+  statusEl.dataset.tone = tone;
+}
+
+function syncControls() {
   runBtn.disabled = isBusy;
   refreshBtn.disabled = isBusy;
   startDictationBtn.disabled = isBusy || !SpeechRecognitionApi || isDictating;
   stopDictationBtn.disabled = isBusy || !SpeechRecognitionApi || !isDictating;
   clearTranscriptBtn.disabled = isBusy;
+
+  runBtn.dataset.busy = isBusy ? 'true' : 'false';
+  runBtn.textContent = isBusy ? 'Polishing...' : runBtnLabel;
+  if (appShell) {
+    appShell.setAttribute('aria-busy', isBusy ? 'true' : 'false');
+  }
+}
+
+function setBusy(busy) {
+  isBusy = Boolean(busy);
+  syncControls();
 }
 
 function setDictationState(dictating) {
   isDictating = dictating;
-  startDictationBtn.disabled = !SpeechRecognitionApi || dictating;
-  stopDictationBtn.disabled = !SpeechRecognitionApi || !dictating;
+  syncControls();
 }
 
-function pickDefaultModel(models) {
-  if (!models.length) return '';
-  if (models.includes(DEFAULT_MODEL)) return DEFAULT_MODEL;
-
-  const baseName = DEFAULT_MODEL.split(':')[0];
-  const fallbackByBase = models.find((model) => model.startsWith(`${baseName}:`) || model === baseName);
-  return fallbackByBase || models[0];
-}
-
-function withSpeechSupportHint(message) {
-  if (SpeechRecognitionApi) return message;
-  return `${message} Speech capture unavailable here; paste or type transcript manually.`;
-}
 
 function initDictation() {
   clearTranscriptBtn.addEventListener('click', () => {
     finalTranscript = '';
     transcriptInput.value = '';
     output.value = '';
-    setStatus('Transcript cleared.');
+    setUiMode('idle');
+    setStatus('Transcript cleared.', 'neutral');
   });
 
   transcriptInput.addEventListener('input', () => {
@@ -97,8 +107,7 @@ function initDictation() {
   });
 
   if (!SpeechRecognitionApi) {
-    startDictationBtn.disabled = true;
-    stopDictationBtn.disabled = true;
+    syncControls();
     return;
   }
 
@@ -125,13 +134,15 @@ function initDictation() {
 
   recognition.onerror = (event) => {
     setDictationState(false);
-    setStatus(`Dictation error: ${event.error}`);
+    setUiMode('error');
+    setStatus(`Dictation error: ${event.error}`, 'error');
   };
 
   recognition.onend = () => {
     if (isDictating) {
       setDictationState(false);
-      setStatus('Dictation stopped.');
+      setUiMode('idle');
+      setStatus('Dictation stopped.', 'neutral');
     }
   };
 
@@ -139,10 +150,12 @@ function initDictation() {
     try {
       recognition.start();
       setDictationState(true);
-      setStatus('Listening... speak now.');
+      setUiMode('listening');
+      setStatus('Listening... speak now.', 'live');
     } catch (error) {
-      setStatus(`Could not start dictation: ${error.message}`);
       setDictationState(false);
+      setUiMode('error');
+      setStatus(`Could not start dictation: ${error.message}`, 'error');
     }
   });
 
@@ -150,14 +163,16 @@ function initDictation() {
     if (!recognition) return;
     recognition.stop();
     setDictationState(false);
-    setStatus('Dictation stopped.');
+    setUiMode('idle');
+    setStatus('Dictation stopped.', 'neutral');
   });
 }
 
 async function loadModels() {
   const tauriInvoke = getTauriInvoke();
   const modeLabel = tauriInvoke ? 'desktop mode' : 'web mode';
-  setStatus('Loading models from Ollama...');
+  setUiMode('loading');
+  setStatus('Loading models from Ollama...', 'working');
 
   try {
     const models = tauriInvoke
@@ -172,7 +187,8 @@ async function loadModels() {
       option.textContent = 'No models found (run ollama pull <model>)';
       modelSelect.appendChild(option);
       modelSelect.disabled = true;
-      setStatus(withSpeechSupportHint('Connected. No local models found yet.'));
+      setUiMode('idle');
+      setStatus(withSpeechSupportHint('Connected. No local models found yet.', Boolean(SpeechRecognitionApi)), 'ok');
       return;
     }
 
@@ -186,9 +202,11 @@ async function loadModels() {
     modelSelect.value = pickDefaultModel(models);
     modelSelect.disabled = false;
     if (modelSelect.value === DEFAULT_MODEL) {
-      setStatus(withSpeechSupportHint(`Connected (${modeLabel}). Default model selected: ${DEFAULT_MODEL}`));
+      setUiMode('idle');
+      setStatus(withSpeechSupportHint(`Connected (${modeLabel}). Default model selected: ${DEFAULT_MODEL}`, Boolean(SpeechRecognitionApi)), 'ok');
     } else {
-      setStatus(withSpeechSupportHint(`Connected (${modeLabel}). ${DEFAULT_MODEL} not found, using ${modelSelect.value}.`));
+      setUiMode('idle');
+      setStatus(withSpeechSupportHint(`Connected (${modeLabel}). ${DEFAULT_MODEL} not found, using ${modelSelect.value}.`, Boolean(SpeechRecognitionApi)), 'ok');
     }
   } catch (error) {
     modelSelect.innerHTML = '';
@@ -197,7 +215,8 @@ async function loadModels() {
     option.textContent = 'Unable to connect to Ollama';
     modelSelect.appendChild(option);
     modelSelect.disabled = true;
-    setStatus(withSpeechSupportHint(`Connection error: ${error.message}`));
+    setUiMode('error');
+    setStatus(withSpeechSupportHint(`Connection error: ${error.message}`, Boolean(SpeechRecognitionApi)), 'error');
   }
 }
 
@@ -208,17 +227,20 @@ async function refineDictation() {
   const instruction = 'Clean this raw dictation transcript into readable text with punctuation. Keep intent and wording natural.';
 
   if (!model) {
-    setStatus('Pick a model first.');
+    setUiMode('error');
+    setStatus('Pick a model first.', 'error');
     return;
   }
 
   if (!transcript) {
-    setStatus('Paste a transcript before running.');
+    setUiMode('error');
+    setStatus('Paste a transcript before running.', 'error');
     return;
   }
 
   setBusy(true);
-  setStatus('Cleaning transcript...');
+  setUiMode('refining');
+  setStatus('Cleaning transcript...', 'working');
   output.value = '';
 
   try {
@@ -227,9 +249,11 @@ async function refineDictation() {
       : await refineViaHttp(model, transcript, instruction);
 
     output.value = text;
-    setStatus('Done. Clean dictation output generated.');
+    setUiMode('success');
+    setStatus('Done. Clean dictation output generated.', 'ok');
   } catch (error) {
-    setStatus(`Run failed: ${error.message}`);
+    setUiMode('error');
+    setStatus(`Run failed: ${error.message}`, 'error');
   } finally {
     setBusy(false);
   }
@@ -238,5 +262,7 @@ async function refineDictation() {
 refreshBtn.addEventListener('click', loadModels);
 runBtn.addEventListener('click', refineDictation);
 
+setUiMode('loading');
+syncControls();
 initDictation();
 loadModels();

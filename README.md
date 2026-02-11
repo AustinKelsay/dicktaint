@@ -25,6 +25,14 @@ A local ai dictation tool suitable for the most private chats and dirtiest langu
 bun run dev
 ```
 
+## Testing
+
+```bash
+bun run test
+bun run test:rust
+bun run test:all
+```
+
 ## Desktop (Tauri)
 
 This repo now includes a Tauri v2 boilerplate in `/src-tauri`.

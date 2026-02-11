@@ -130,6 +130,27 @@ async fn refine_dictation(
   Ok(generated.response.unwrap_or_default())
 }
 
+#[cfg(test)]
+mod tests {
+  use super::{make_prompt, normalize_host};
+
+  #[test]
+  fn make_prompt_includes_instruction_and_transcript() {
+    let prompt = make_prompt("raw words here", "Clean this please");
+
+    assert!(prompt.contains("Clean this please"));
+    assert!(prompt.contains("Raw transcript:"));
+    assert!(prompt.contains("raw words here"));
+    assert!(prompt.contains("Output only the cleaned dictation text."));
+  }
+
+  #[test]
+  fn normalize_host_trims_only_trailing_slash() {
+    assert_eq!(normalize_host("http://127.0.0.1:11434/"), "http://127.0.0.1:11434");
+    assert_eq!(normalize_host("http://127.0.0.1:11434"), "http://127.0.0.1:11434");
+  }
+}
+
 fn main() {
   let ollama_host = std::env::var("OLLAMA_HOST").unwrap_or_else(|_| "http://127.0.0.1:11434".to_string());
 

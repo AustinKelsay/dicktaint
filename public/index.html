@@ -3,48 +3,92 @@
   <head>
     <meta charset="UTF-8" />
     <meta name="viewport" content="width=device-width, initial-scale=1.0" />
-    <title>Local Dictation Starter</title>
+    <title>dicktaint | private local dictation</title>
+    <link rel="preconnect" href="https://fonts.googleapis.com" />
+    <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin />
+    <link
+      href="https://fonts.googleapis.com/css2?family=Archivo+Black&family=Space+Grotesk:wght@400;500;700&display=swap"
+      rel="stylesheet"
+    />
     <link rel="stylesheet" href="/styles.css" />
   </head>
   <body>
-    <main class="shell">
-      <header class="hero">
-        <p class="eyebrow">OLLAMA LOCAL</p>
-        <h1>Dictation Starter</h1>
-        <p class="subtitle">Start dictation, speak, stop, then clean the transcript with your selected model.</p>
+    <main class="app-shell">
+      <header class="panel masthead">
+        <div class="masthead-top">
+          <p class="eyebrow">PRIVATE LOCAL DICTATION</p>
+          <p class="badge">No cloud snitching</p>
+        </div>
+        <h1>dicktaint</h1>
+        <p class="subtitle">
+          A local ai dictation tool suitable for the most private chats and dirtiest language
+        </p>
+        <div class="feature-grid">
+          <article>
+            <h2>Capture</h2>
+            <p>Start and stop live speech, then nudge the transcript however you want.</p>
+          </article>
+          <article>
+            <h2>Refine</h2>
+            <p>One click runs your chosen Ollama model and punctuates the chaos.</p>
+          </article>
+          <article>
+            <h2>Keep It Local</h2>
+            <p>Everything runs on your machine for maximum privacy and no network drama.</p>
+          </article>
+        </div>
       </header>
 
-      <section class="panel controls">
-        <div class="field-row">
-          <label for="modelSelect">Model</label>
-          <div class="inline-actions">
-            <select id="modelSelect"></select>
-            <button id="refreshModels" type="button">Refresh</button>
+      <div class="workspace">
+        <section class="panel controls-card">
+          <div class="panel-head">
+            <h2>Engine Room</h2>
+            <p>Choose the local model that cleans your transcript.</p>
           </div>
-        </div>
-      </section>
+          <div class="field-row">
+            <label for="modelSelect">Model</label>
+            <div class="inline-actions">
+              <select id="modelSelect"></select>
+              <button id="refreshModels" class="ghost" type="button">Refresh</button>
+            </div>
+          </div>
+          <p class="hint">
+            Tip: load more choices with <code>ollama pull &lt;model&gt;</code> and refresh.
+          </p>
+        </section>
 
-      <section class="panel">
-        <label for="transcriptInput">Live Transcript</label>
-        <div class="dictation-actions">
-          <button id="startDictation" class="primary" type="button">Start Dictation</button>
-          <button id="stopDictation" type="button" disabled>Stop</button>
-          <button id="clearTranscript" type="button">Clear</button>
-        </div>
-        <textarea id="transcriptInput" rows="8" placeholder="Paste transcript text here..."></textarea>
-        <button id="runRefine" class="primary" type="button">Clean With Model</button>
-      </section>
+        <section class="panel transcript-card">
+          <div class="panel-head">
+            <h2>Raw Dictation</h2>
+            <p>Talk first. Edit if needed. Then polish.</p>
+          </div>
+          <div class="dictation-actions">
+            <button id="startDictation" class="primary" type="button">Start Dictation</button>
+            <button id="stopDictation" class="secondary" type="button" disabled>Stop</button>
+            <button id="clearTranscript" class="ghost" type="button">Clear</button>
+          </div>
+          <label for="transcriptInput">Transcript</label>
+          <textarea id="transcriptInput" rows="8" placeholder="Speak or paste your raw transcript here..."></textarea>
+          <button id="runRefine" class="primary refine-btn" type="button">Polish With Model</button>
+        </section>
 
-      <section class="panel">
-        <label for="output">Clean Dictation Output</label>
-        <textarea id="output" rows="8" readonly placeholder="Model output will appear here..."></textarea>
-      </section>
+        <section class="panel output-card">
+          <div class="panel-head">
+            <h2>Clean Output</h2>
+            <p>Readable, punctuated text appears below.</p>
+          </div>
+          <label for="output">Result</label>
+          <textarea id="output" rows="8" readonly placeholder="Your cleaned dictation appears here..."></textarea>
+        </section>
+      </div>
 
-      <footer>
+      <footer class="panel status-bar">
+        <p class="status-label">Status</p>
         <p id="status">Connecting to Ollama...</p>
       </footer>
     </main>
 
+    <script src="/dictation-logic.js" defer></script>
     <script src="/app.js" defer></script>
   </body>
 </html>
