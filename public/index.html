@@ -1,0 +1,50 @@
+<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="UTF-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+    <title>Local Dictation Starter</title>
+    <link rel="stylesheet" href="/styles.css" />
+  </head>
+  <body>
+    <main class="shell">
+      <header class="hero">
+        <p class="eyebrow">OLLAMA LOCAL</p>
+        <h1>Dictation Starter</h1>
+        <p class="subtitle">Start dictation, speak, stop, then clean the transcript with your selected model.</p>
+      </header>
+
+      <section class="panel controls">
+        <div class="field-row">
+          <label for="modelSelect">Model</label>
+          <div class="inline-actions">
+            <select id="modelSelect"></select>
+            <button id="refreshModels" type="button">Refresh</button>
+          </div>
+        </div>
+      </section>
+
+      <section class="panel">
+        <label for="transcriptInput">Live Transcript</label>
+        <div class="dictation-actions">
+          <button id="startDictation" class="primary" type="button">Start Dictation</button>
+          <button id="stopDictation" type="button" disabled>Stop</button>
+          <button id="clearTranscript" type="button">Clear</button>
+        </div>
+        <textarea id="transcriptInput" rows="8" placeholder="Paste transcript text here..."></textarea>
+        <button id="runRefine" class="primary" type="button">Clean With Model</button>
+      </section>
+
+      <section class="panel">
+        <label for="output">Clean Dictation Output</label>
+        <textarea id="output" rows="8" readonly placeholder="Model output will appear here..."></textarea>
+      </section>
+
+      <footer>
+        <p id="status">Connecting to Ollama...</p>
+      </footer>
+    </main>
+
+    <script src="/app.js" defer></script>
+  </body>
+</html>
