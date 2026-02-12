@@ -784,10 +784,15 @@ fn build_onboarding_payload(
     } else {
         settings.selected_model_id.clone()
     };
+    let list_selected_model_id = if override_model_path.is_some() {
+        None
+    } else {
+        settings.selected_model_id.as_deref()
+    };
     let models = build_model_options(
         &model_state.models_dir,
         device.total_memory_gb,
-        settings.selected_model_id.as_deref(),
+        list_selected_model_id,
     );
     let configured_whisper_cli_path = resolve_whisper_cli_path(
         config.whisper_cli_path_override.as_deref(),
