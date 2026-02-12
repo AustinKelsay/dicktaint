@@ -3,8 +3,11 @@ use cpal::{SampleFormat, Stream};
 use reqwest::Client;
 use serde::{Deserialize, Serialize};
 use std::fs;
+use std::io::Write;
+#[cfg(unix)]
+use std::os::unix::fs::PermissionsExt;
 use std::path::{Path, PathBuf};
-use std::process::Command;
+use std::process::{Command, Output};
 use std::sync::{mpsc, Arc, Mutex};
 use std::thread;
 use std::time::{Duration, SystemTime, UNIX_EPOCH};
@@ -307,60 +310,173 @@ fn resolve_whisper_model_path(path: Option<&str>) -> Result<PathBuf, String> {
 }
 
 fn resolve_whisper_cli_path(override_path: Option<&str>, bundled_path: Option<&str>) -> String {
-    if let Some(path) = override_path.map(str::trim).filter(|v| !v.is_empty()) {
-        return path.to_string();
-    }
-    if let Some(path) = bundled_path.map(str::trim).filter(|v| !v.is_empty()) {
-        return path.to_string();
-    }
-    DEFAULT_WHISPER_CLI_PATH.to_string()
+    let preferred = if let Some(path) = override_path.map(str::trim).filter(|v| !v.is_empty()) {
+        path.to_string()
+    } else if let Some(path) = bundled_path.map(str::trim).filter(|v| !v.is_empty()) {
+        path.to_string()
+    } else {
+        DEFAULT_WHISPER_CLI_PATH.to_string()
+    };
+
+    detect_whisper_cli_path(&preferred).unwrap_or(preferred)
 }
 
 fn ensure_whisper_cli_available(whisper_cli_path: &str) -> Result<(), String> {
-    let output = Command::new(whisper_cli_path)
-        .arg("--help")
-        .output()
-        .map_err(|e| {
-            format!(
-                "Could not execute '{whisper_cli_path}': {e}. Install whisper.cpp (whisper-cli) or set WHISPER_CLI_PATH."
-            )
-        })?;
-
-    if output.status.success() {
+    let executable = validate_whisper_cli_candidate(whisper_cli_path).map_err(|detail| {
+        format!(
+            "Could not execute '{whisper_cli_path}': {detail}. Install whisper.cpp (whisper-cli) or set WHISPER_CLI_PATH."
+        )
+    })?;
+    let output = run_help_probe(&executable).map_err(|e| {
+        format!(
+            "Could not execute '{whisper_cli_path}' (resolved to {}): {e}. Install whisper.cpp (whisper-cli) or set WHISPER_CLI_PATH.",
+            executable.display()
+        )
+    })?;
+    if output.status.success() || help_probe_has_output(&output) {
         return Ok(());
     }
 
-    let stderr = String::from_utf8_lossy(&output.stderr).trim().to_string();
-    let stdout = String::from_utf8_lossy(&output.stdout).trim().to_string();
-    let detail = if !stderr.is_empty() {
-        stderr
-    } else if !stdout.is_empty() {
-        stdout
-    } else {
-        format!("exited with status {}", output.status)
-    };
-
     Err(format!(
-        "Could not execute '{whisper_cli_path}': {detail}. Install whisper.cpp (whisper-cli) or set WHISPER_CLI_PATH."
+        "Could not execute '{whisper_cli_path}' (resolved to {}): exited with status {} and produced no help output. Install whisper.cpp (whisper-cli) or set WHISPER_CLI_PATH.",
+        executable.display(),
+        output.status
     ))
 }
 
-fn resolve_home_dir() -> Result<PathBuf, String> {
-    if let Some(home) = std::env::var_os("HOME") {
-        return Ok(PathBuf::from(home));
-    }
-    if let Some(home) = std::env::var_os("USERPROFILE") {
-        return Ok(PathBuf::from(home));
-    }
-    Err("Could not resolve user home directory for local model storage.".to_string())
+fn can_execute_command(executable: &str) -> bool {
+    let path = match validate_whisper_cli_candidate(executable) {
+        Ok(path) => path,
+        Err(_) => return false,
+    };
+    run_help_probe(&path)
+        .map(|output| output.status.success() || help_probe_has_output(&output))
+        .unwrap_or(false)
 }
 
-fn can_execute_command(executable: &str) -> bool {
-    Command::new(executable)
-        .arg("--help")
-        .output()
-        .map(|output| output.status.success())
-        .unwrap_or(false)
+fn run_help_probe(executable: &Path) -> Result<Output, std::io::Error> {
+    Command::new(executable).arg("--help").output()
+}
+
+fn help_probe_has_output(output: &Output) -> bool {
+    !String::from_utf8_lossy(&output.stdout).trim().is_empty()
+        || !String::from_utf8_lossy(&output.stderr).trim().is_empty()
+}
+
+fn validate_whisper_cli_candidate(candidate: &str) -> Result<PathBuf, String> {
+    let resolved_path = resolve_command_path(candidate).ok_or_else(|| {
+        if is_explicit_path(candidate) {
+            format!("whisper-cli file not found at {}", Path::new(candidate).display())
+        } else {
+            format!("whisper-cli command '{candidate}' was not found in PATH")
+        }
+    })?;
+
+    let metadata = fs::metadata(&resolved_path).map_err(|e| {
+        format!(
+            "failed to read file metadata for {}: {e}",
+            resolved_path.display()
+        )
+    })?;
+    if !metadata.is_file() {
+        return Err(format!("{} exists but is not a file", resolved_path.display()));
+    }
+
+    #[cfg(unix)]
+    {
+        if metadata.permissions().mode() & 0o111 == 0 {
+            return Err(format!(
+                "{} is not executable (missing execute permission bits)",
+                resolved_path.display()
+            ));
+        }
+    }
+
+    #[cfg(target_os = "windows")]
+    {
+        let extension = resolved_path
+            .extension()
+            .and_then(|ext| ext.to_str())
+            .map(|ext| ext.to_ascii_lowercase())
+            .unwrap_or_default();
+        let has_executable_extension =
+            matches!(extension.as_str(), "exe" | "com" | "bat" | "cmd");
+        if !has_executable_extension {
+            return Err(format!(
+                "{} is not an executable file (expected .exe/.com/.bat/.cmd)",
+                resolved_path.display()
+            ));
+        }
+    }
+
+    Ok(resolved_path)
+}
+
+fn resolve_command_path(candidate: &str) -> Option<PathBuf> {
+    let trimmed = candidate.trim();
+    if trimmed.is_empty() {
+        return None;
+    }
+
+    if is_explicit_path(trimmed) {
+        return Some(PathBuf::from(trimmed));
+    }
+
+    let path_var = std::env::var_os("PATH")?;
+
+    #[cfg(target_os = "windows")]
+    {
+        let has_extension = Path::new(trimmed).extension().is_some();
+        let extensions = std::env::var("PATHEXT")
+            .ok()
+            .filter(|value| !value.trim().is_empty())
+            .unwrap_or_else(|| ".COM;.EXE;.BAT;.CMD".to_string())
+            .split(';')
+            .map(str::trim)
+            .filter(|value| !value.is_empty())
+            .map(|value| {
+                if value.starts_with('.') {
+                    value.to_string()
+                } else {
+                    format!(".{value}")
+                }
+            })
+            .collect::<Vec<_>>();
+
+        for dir in std::env::split_paths(&path_var) {
+            if has_extension {
+                let candidate_path = dir.join(trimmed);
+                if candidate_path.exists() {
+                    return Some(candidate_path);
+                }
+                continue;
+            }
+
+            for extension in &extensions {
+                let candidate_path = dir.join(format!("{trimmed}{extension}"));
+                if candidate_path.exists() {
+                    return Some(candidate_path);
+                }
+            }
+        }
+        return None;
+    }
+
+    #[cfg(not(target_os = "windows"))]
+    {
+        for dir in std::env::split_paths(&path_var) {
+            let candidate_path = dir.join(trimmed);
+            if candidate_path.exists() {
+                return Some(candidate_path);
+            }
+        }
+    }
+
+    None
+}
+
+fn is_explicit_path(value: &str) -> bool {
+    Path::new(value).is_absolute() || value.contains('/') || value.contains('\\')
 }
 
 fn is_whisper_cli_name(name: &str) -> bool {
@@ -466,12 +582,17 @@ fn detect_whisper_cli_path(configured_path: &str) -> Option<String> {
         .find(|candidate| can_execute_command(candidate))
 }
 
-fn resolve_local_paths() -> Result<(PathBuf, PathBuf), String> {
-    let home = resolve_home_dir()?;
-    let app_dir = home.join(APP_SETTINGS_DIR);
+fn resolve_local_paths(base_data_dir: &Path) -> Result<(PathBuf, PathBuf), String> {
+    let app_dir = base_data_dir.join(APP_SETTINGS_DIR);
     let models_dir = app_dir.join(APP_MODELS_DIR);
     let settings_path = app_dir.join(APP_SETTINGS_FILE);
 
+    fs::create_dir_all(&app_dir).map_err(|e| {
+        format!(
+            "Failed to create local app settings directory {}: {e}",
+            app_dir.display()
+        )
+    })?;
     fs::create_dir_all(&models_dir).map_err(|e| {
         format!(
             "Failed to create local model directory {}: {e}",
@@ -502,23 +623,76 @@ fn load_local_settings(settings_path: &Path) -> LocalSettings {
 }
 
 fn save_local_settings(settings_path: &Path, settings: &LocalSettings) -> Result<(), String> {
-    if let Some(parent) = settings_path.parent() {
-        fs::create_dir_all(parent).map_err(|e| {
-            format!(
-                "Failed to create settings directory {}: {e}",
-                parent.display()
-            )
-        })?;
-    }
+    let parent = settings_path.parent().ok_or_else(|| {
+        format!(
+            "Failed to determine settings directory for {}",
+            settings_path.display()
+        )
+    })?;
+    fs::create_dir_all(parent).map_err(|e| {
+        format!(
+            "Failed to create settings directory {}: {e}",
+            parent.display()
+        )
+    })?;
 
     let serialized = serde_json::to_string_pretty(settings)
         .map_err(|e| format!("Failed to serialize dictation settings: {e}"))?;
-    fs::write(settings_path, serialized).map_err(|e| {
+
+    let timestamp_nanos = SystemTime::now()
+        .duration_since(UNIX_EPOCH)
+        .map(|d| d.as_nanos())
+        .unwrap_or(0);
+    let target_name = settings_path
+        .file_name()
+        .and_then(|name| name.to_str())
+        .unwrap_or("dictation-settings.json");
+    let temp_path = parent.join(format!(
+        ".{}.tmp-{}-{}",
+        target_name,
+        std::process::id(),
+        timestamp_nanos
+    ));
+
+    let mut temp_file = fs::OpenOptions::new()
+        .write(true)
+        .create_new(true)
+        .open(&temp_path)
+        .map_err(|e| {
+            format!(
+                "Failed to create temp settings file {}: {e}",
+                temp_path.display()
+            )
+        })?;
+    temp_file.write_all(serialized.as_bytes()).map_err(|e| {
         format!(
-            "Failed to write dictation settings file {}: {e}",
-            settings_path.display()
+            "Failed to write temp settings file {}: {e}",
+            temp_path.display()
         )
-    })
+    })?;
+    temp_file.flush().map_err(|e| {
+        format!(
+            "Failed to flush temp settings file {}: {e}",
+            temp_path.display()
+        )
+    })?;
+    temp_file.sync_all().map_err(|e| {
+        format!(
+            "Failed to sync temp settings file {}: {e}",
+            temp_path.display()
+        )
+    })?;
+    drop(temp_file);
+
+    fs::rename(&temp_path, settings_path).map_err(|e| {
+        format!(
+            "Failed to replace dictation settings file {} with temp file {}: {e}",
+            settings_path.display(),
+            temp_path.display()
+        )
+    })?;
+
+    Ok(())
 }
 
 fn whisper_model_catalog() -> &'static [WhisperModelSpec] {
@@ -1427,6 +1601,9 @@ mod tests {
 }
 
 fn main() {
+    let _ = env_logger::Builder::from_env(env_logger::Env::default().default_filter_or("warn"))
+        .try_init();
+
     let ollama_host =
         std::env::var("OLLAMA_HOST").unwrap_or_else(|_| "http://127.0.0.1:11434".to_string());
     let whisper_model_path_override = std::env::var("WHISPER_MODEL_PATH").ok();
@@ -1435,8 +1612,17 @@ fn main() {
     tauri::Builder::default()
         .setup(move |app| {
             let bundled_whisper_cli_path = resolve_bundled_whisper_cli_path(app.handle());
-            let (models_dir, settings_path) =
-                resolve_local_paths().expect("failed to initialize local dictation model paths");
+            let app_data_dir = app.path().app_data_dir().map_err(|e| {
+                format!(
+                    "Failed to resolve Tauri app data directory while initializing local dictation paths: {e}"
+                )
+            })?;
+            let (models_dir, settings_path) = resolve_local_paths(&app_data_dir).map_err(|e| {
+                format!(
+                    "Failed to initialize local dictation model paths under {}: {e}",
+                    app_data_dir.display()
+                )
+            })?;
             let initial_settings = load_local_settings(&settings_path);
 
             app.manage(AppConfig {
