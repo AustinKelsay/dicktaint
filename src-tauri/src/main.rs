@@ -8,20 +8,21 @@ use std::process::Command;
 use std::sync::{mpsc, Arc, Mutex};
 use std::thread;
 use std::time::{Duration, SystemTime, UNIX_EPOCH};
-use tauri::State;
+use tauri::{Manager, State};
 
 const WHISPER_SAMPLE_RATE: u32 = 16_000;
 const APP_SETTINGS_DIR: &str = ".dicktaint";
 const APP_SETTINGS_FILE: &str = "dictation-settings.json";
-const APP_MODELS_DIR: &str = "wispr-models";
-const DEFAULT_WISPR_CLI_PATH: &str = "wispr";
+const APP_MODELS_DIR: &str = "whisper-models";
+const DEFAULT_WHISPER_CLI_PATH: &str = "whisper-cli";
+const WHISPER_CPP_SETUP_URL: &str = "https://github.com/ggml-org/whisper.cpp#quick-start";
 
 #[derive(Clone)]
 struct AppConfig {
     ollama_host: String,
     whisper_model_path_override: Option<String>,
-    whisper_cli_path: Option<String>,
-    wispr_cli_path: String,
+    whisper_cli_path_override: Option<String>,
+    bundled_whisper_cli_path: Option<String>,
 }
 
 #[derive(Default)]
@@ -30,10 +31,10 @@ struct DictationState {
 }
 
 #[derive(Clone, Copy)]
-struct WisprModelSpec {
+struct WhisperModelSpec {
     id: &'static str,
     display_name: &'static str,
-    wispr_ref: &'static str,
+    whisper_ref: &'static str,
     file_name: &'static str,
     approx_size_gb: f32,
     min_ram_gb: u64,
@@ -42,11 +43,11 @@ struct WisprModelSpec {
     quality_note: &'static str,
 }
 
-const WISPR_MODEL_CATALOG: [WisprModelSpec; 4] = [
-    WisprModelSpec {
+const WHISPER_MODEL_CATALOG: [WhisperModelSpec; 12] = [
+    WhisperModelSpec {
         id: "tiny-en",
-        display_name: "Wispr Tiny (English)",
-        wispr_ref: "tiny.en",
+        display_name: "Whisper Tiny (English)",
+        whisper_ref: "tiny.en",
         file_name: "ggml-tiny.en.bin",
         approx_size_gb: 0.08,
         min_ram_gb: 4,
@@ -54,10 +55,21 @@ const WISPR_MODEL_CATALOG: [WisprModelSpec; 4] = [
         speed_note: "Fastest",
         quality_note: "Lowest accuracy",
     },
-    WisprModelSpec {
+    WhisperModelSpec {
+        id: "tiny",
+        display_name: "Whisper Tiny (Multilingual)",
+        whisper_ref: "tiny",
+        file_name: "ggml-tiny.bin",
+        approx_size_gb: 0.15,
+        min_ram_gb: 6,
+        recommended_ram_gb: 8,
+        speed_note: "Very fast",
+        quality_note: "Low accuracy",
+    },
+    WhisperModelSpec {
         id: "base-en",
-        display_name: "Wispr Base (English)",
-        wispr_ref: "base.en",
+        display_name: "Whisper Base (English)",
+        whisper_ref: "base.en",
         file_name: "ggml-base.en.bin",
         approx_size_gb: 0.15,
         min_ram_gb: 6,
@@ -65,10 +77,21 @@ const WISPR_MODEL_CATALOG: [WisprModelSpec; 4] = [
         speed_note: "Fast",
         quality_note: "Balanced",
     },
-    WisprModelSpec {
+    WhisperModelSpec {
+        id: "base",
+        display_name: "Whisper Base (Multilingual)",
+        whisper_ref: "base",
+        file_name: "ggml-base.bin",
+        approx_size_gb: 0.29,
+        min_ram_gb: 8,
+        recommended_ram_gb: 12,
+        speed_note: "Fast",
+        quality_note: "Balanced multilingual",
+    },
+    WhisperModelSpec {
         id: "small-en",
-        display_name: "Wispr Small (English)",
-        wispr_ref: "small.en",
+        display_name: "Whisper Small (English)",
+        whisper_ref: "small.en",
         file_name: "ggml-small.en.bin",
         approx_size_gb: 0.46,
         min_ram_gb: 8,
@@ -76,16 +99,82 @@ const WISPR_MODEL_CATALOG: [WisprModelSpec; 4] = [
         speed_note: "Medium",
         quality_note: "Better accuracy",
     },
-    WisprModelSpec {
+    WhisperModelSpec {
+        id: "small",
+        display_name: "Whisper Small (Multilingual)",
+        whisper_ref: "small",
+        file_name: "ggml-small.bin",
+        approx_size_gb: 0.93,
+        min_ram_gb: 10,
+        recommended_ram_gb: 18,
+        speed_note: "Medium",
+        quality_note: "Better multilingual accuracy",
+    },
+    WhisperModelSpec {
         id: "medium-en",
-        display_name: "Wispr Medium (English)",
-        wispr_ref: "medium.en",
+        display_name: "Whisper Medium (English)",
+        whisper_ref: "medium.en",
         file_name: "ggml-medium.en.bin",
         approx_size_gb: 1.5,
         min_ram_gb: 16,
         recommended_ram_gb: 24,
         speed_note: "Slowest in starter set",
         quality_note: "Best accuracy in starter set",
+    },
+    WhisperModelSpec {
+        id: "medium",
+        display_name: "Whisper Medium (Multilingual)",
+        whisper_ref: "medium",
+        file_name: "ggml-medium.bin",
+        approx_size_gb: 1.5,
+        min_ram_gb: 18,
+        recommended_ram_gb: 28,
+        speed_note: "Slower",
+        quality_note: "Strong multilingual accuracy",
+    },
+    WhisperModelSpec {
+        id: "large-v1",
+        display_name: "Whisper Large v1",
+        whisper_ref: "large-v1",
+        file_name: "ggml-large-v1.bin",
+        approx_size_gb: 2.9,
+        min_ram_gb: 24,
+        recommended_ram_gb: 32,
+        speed_note: "Heavy",
+        quality_note: "High accuracy",
+    },
+    WhisperModelSpec {
+        id: "large-v2",
+        display_name: "Whisper Large v2",
+        whisper_ref: "large-v2",
+        file_name: "ggml-large-v2.bin",
+        approx_size_gb: 2.9,
+        min_ram_gb: 24,
+        recommended_ram_gb: 32,
+        speed_note: "Heavy",
+        quality_note: "High accuracy",
+    },
+    WhisperModelSpec {
+        id: "large-v3",
+        display_name: "Whisper Large v3",
+        whisper_ref: "large-v3",
+        file_name: "ggml-large-v3.bin",
+        approx_size_gb: 3.1,
+        min_ram_gb: 32,
+        recommended_ram_gb: 48,
+        speed_note: "Heaviest",
+        quality_note: "Top accuracy",
+    },
+    WhisperModelSpec {
+        id: "turbo",
+        display_name: "Whisper Turbo",
+        whisper_ref: "turbo",
+        file_name: "ggml-large-v3-turbo.bin",
+        approx_size_gb: 1.62,
+        min_ram_gb: 20,
+        recommended_ram_gb: 32,
+        speed_note: "Fast large-class",
+        quality_note: "Great quality/speed tradeoff",
     },
 ];
 
@@ -113,7 +202,7 @@ struct DeviceProfile {
 struct DictationModelOption {
     id: String,
     display_name: String,
-    wispr_ref: String,
+    whisper_ref: String,
     file_name: String,
     path: String,
     installed: bool,
@@ -132,8 +221,8 @@ struct DictationOnboardingPayload {
     selected_model_id: Option<String>,
     selected_model_path: Option<String>,
     selected_model_exists: bool,
-    wispr_cli_available: bool,
-    wispr_cli_path: String,
+    whisper_cli_available: bool,
+    whisper_cli_path: String,
     models_dir: String,
     device: DeviceProfile,
     models: Vec<DictationModelOption>,
@@ -217,23 +306,43 @@ fn resolve_whisper_model_path(path: Option<&str>) -> Result<PathBuf, String> {
     Ok(model_path)
 }
 
-fn resolve_whisper_cli_path(path: Option<&str>) -> String {
-    path.map(str::trim)
-        .filter(|v| !v.is_empty())
-        .unwrap_or("whisper-cli")
-        .to_string()
+fn resolve_whisper_cli_path(override_path: Option<&str>, bundled_path: Option<&str>) -> String {
+    if let Some(path) = override_path.map(str::trim).filter(|v| !v.is_empty()) {
+        return path.to_string();
+    }
+    if let Some(path) = bundled_path.map(str::trim).filter(|v| !v.is_empty()) {
+        return path.to_string();
+    }
+    DEFAULT_WHISPER_CLI_PATH.to_string()
 }
 
 fn ensure_whisper_cli_available(whisper_cli_path: &str) -> Result<(), String> {
-    Command::new(whisper_cli_path)
-    .arg("--help")
-    .output()
-    .map(|_| ())
-    .map_err(|e| {
-      format!(
-        "Could not execute '{whisper_cli_path}': {e}. Install whisper.cpp (whisper-cli) or set WHISPER_CLI_PATH."
-      )
-    })
+    let output = Command::new(whisper_cli_path)
+        .arg("--help")
+        .output()
+        .map_err(|e| {
+            format!(
+                "Could not execute '{whisper_cli_path}': {e}. Install whisper.cpp (whisper-cli) or set WHISPER_CLI_PATH."
+            )
+        })?;
+
+    if output.status.success() {
+        return Ok(());
+    }
+
+    let stderr = String::from_utf8_lossy(&output.stderr).trim().to_string();
+    let stdout = String::from_utf8_lossy(&output.stdout).trim().to_string();
+    let detail = if !stderr.is_empty() {
+        stderr
+    } else if !stdout.is_empty() {
+        stdout
+    } else {
+        format!("exited with status {}", output.status)
+    };
+
+    Err(format!(
+        "Could not execute '{whisper_cli_path}': {detail}. Install whisper.cpp (whisper-cli) or set WHISPER_CLI_PATH."
+    ))
 }
 
 fn resolve_home_dir() -> Result<PathBuf, String> {
@@ -244,6 +353,117 @@ fn resolve_home_dir() -> Result<PathBuf, String> {
         return Ok(PathBuf::from(home));
     }
     Err("Could not resolve user home directory for local model storage.".to_string())
+}
+
+fn can_execute_command(executable: &str) -> bool {
+    Command::new(executable)
+        .arg("--help")
+        .output()
+        .map(|output| output.status.success())
+        .unwrap_or(false)
+}
+
+fn is_whisper_cli_name(name: &str) -> bool {
+    if cfg!(target_os = "windows") {
+        let lower = name.to_ascii_lowercase();
+        return lower == "whisper-cli.exe"
+            || (lower.starts_with("whisper-cli-") && lower.ends_with(".exe"));
+    }
+    name == "whisper-cli" || name.starts_with("whisper-cli-")
+}
+
+fn find_whisper_cli_in_dir(dir: &Path) -> Option<PathBuf> {
+    let entries = fs::read_dir(dir).ok()?;
+    for entry in entries.flatten() {
+        let path = entry.path();
+        if !path.is_file() {
+            continue;
+        }
+        let name = path.file_name()?.to_str()?;
+        if is_whisper_cli_name(name) {
+            return Some(path);
+        }
+    }
+    None
+}
+
+fn resolve_bundled_whisper_cli_path(app: &tauri::AppHandle) -> Option<String> {
+    let mut candidate_dirs = Vec::<PathBuf>::new();
+
+    if let Ok(resource_dir) = app.path().resource_dir() {
+        candidate_dirs.push(resource_dir.clone());
+        candidate_dirs.push(resource_dir.join("bin"));
+        candidate_dirs.push(resource_dir.join("binaries"));
+    }
+
+    if let Ok(exe) = std::env::current_exe() {
+        if let Some(parent) = exe.parent() {
+            candidate_dirs.push(parent.to_path_buf());
+            if cfg!(target_os = "macos") {
+                candidate_dirs.push(parent.join("../Resources"));
+                candidate_dirs.push(parent.join("../Resources/bin"));
+            }
+        }
+    }
+
+    let mut deduped = Vec::<PathBuf>::new();
+    for dir in candidate_dirs {
+        if !deduped.iter().any(|seen| seen == &dir) {
+            deduped.push(dir);
+        }
+    }
+
+    for dir in deduped {
+        if let Some(path) = find_whisper_cli_in_dir(&dir) {
+            return Some(path.to_string_lossy().to_string());
+        }
+    }
+
+    None
+}
+
+fn candidate_whisper_cli_paths(configured_path: &str) -> Vec<String> {
+    let mut candidates = Vec::<String>::new();
+
+    if !configured_path.trim().is_empty() {
+        candidates.push(configured_path.trim().to_string());
+    }
+    if configured_path.trim() != DEFAULT_WHISPER_CLI_PATH {
+        candidates.push(DEFAULT_WHISPER_CLI_PATH.to_string());
+    }
+
+    #[cfg(target_os = "macos")]
+    {
+        candidates.push("/opt/homebrew/bin/whisper-cli".to_string());
+        candidates.push("/usr/local/bin/whisper-cli".to_string());
+        candidates.push("/opt/homebrew/opt/whisper-cpp/bin/whisper-cli".to_string());
+    }
+
+    #[cfg(target_os = "linux")]
+    {
+        candidates.push("/usr/local/bin/whisper-cli".to_string());
+        candidates.push("/usr/bin/whisper-cli".to_string());
+    }
+
+    #[cfg(target_os = "windows")]
+    {
+        candidates.push("C:\\Program Files\\whisper.cpp\\whisper-cli.exe".to_string());
+        candidates.push("C:\\Program Files (x86)\\whisper.cpp\\whisper-cli.exe".to_string());
+    }
+
+    let mut deduped = Vec::new();
+    for candidate in candidates {
+        if !deduped.contains(&candidate) {
+            deduped.push(candidate);
+        }
+    }
+    deduped
+}
+
+fn detect_whisper_cli_path(configured_path: &str) -> Option<String> {
+    candidate_whisper_cli_paths(configured_path)
+        .into_iter()
+        .find(|candidate| can_execute_command(candidate))
 }
 
 fn resolve_local_paths() -> Result<(PathBuf, PathBuf), String> {
@@ -291,12 +511,12 @@ fn save_local_settings(settings_path: &Path, settings: &LocalSettings) -> Result
     })
 }
 
-fn wispr_model_catalog() -> &'static [WisprModelSpec] {
-    &WISPR_MODEL_CATALOG
+fn whisper_model_catalog() -> &'static [WhisperModelSpec] {
+    &WHISPER_MODEL_CATALOG
 }
 
-fn find_wispr_model_spec(id: &str) -> Option<WisprModelSpec> {
-    wispr_model_catalog()
+fn find_whisper_model_spec(id: &str) -> Option<WhisperModelSpec> {
+    whisper_model_catalog()
         .iter()
         .copied()
         .find(|spec| spec.id == id)
@@ -369,8 +589,39 @@ fn build_device_profile() -> DeviceProfile {
     }
 }
 
-fn model_path_for_spec(models_dir: &Path, spec: WisprModelSpec) -> PathBuf {
+fn model_path_for_spec(models_dir: &Path, spec: WhisperModelSpec) -> PathBuf {
     models_dir.join(spec.file_name)
+}
+
+fn model_fit_level(spec: WhisperModelSpec, total_memory_gb: u64) -> u8 {
+    if total_memory_gb >= spec.recommended_ram_gb {
+        2
+    } else if total_memory_gb >= spec.min_ram_gb {
+        1
+    } else {
+        0
+    }
+}
+
+fn pick_recommended_model_id(total_memory_gb: u64) -> Option<&'static str> {
+    whisper_model_catalog()
+        .iter()
+        .copied()
+        .filter(|spec| model_fit_level(*spec, total_memory_gb) > 0)
+        .max_by(|a, b| {
+            let a_key = (
+                model_fit_level(*a, total_memory_gb),
+                a.recommended_ram_gb,
+                a.approx_size_gb.to_bits(),
+            );
+            let b_key = (
+                model_fit_level(*b, total_memory_gb),
+                b.recommended_ram_gb,
+                b.approx_size_gb.to_bits(),
+            );
+            a_key.cmp(&b_key)
+        })
+        .map(|spec| spec.id)
 }
 
 fn build_model_options(
@@ -378,13 +629,15 @@ fn build_model_options(
     total_memory_gb: u64,
     selected_model_id: Option<&str>,
 ) -> Vec<DictationModelOption> {
-    wispr_model_catalog()
+    let recommended_model_id = pick_recommended_model_id(total_memory_gb);
+
+    whisper_model_catalog()
         .iter()
         .map(|spec| {
             let path = model_path_for_spec(models_dir, *spec);
             let installed = path.exists();
             let likely_runnable = total_memory_gb >= spec.min_ram_gb;
-            let recommended = total_memory_gb >= spec.recommended_ram_gb;
+            let recommended = recommended_model_id.is_some_and(|id| id == spec.id);
             let is_selected = selected_model_id.is_some_and(|id| id == spec.id);
 
             DictationModelOption {
@@ -394,7 +647,7 @@ fn build_model_options(
                 } else {
                     spec.display_name.to_string()
                 },
-                wispr_ref: spec.wispr_ref.to_string(),
+                whisper_ref: spec.whisper_ref.to_string(),
                 file_name: spec.file_name.to_string(),
                 path: path.to_string_lossy().to_string(),
                 installed,
@@ -443,109 +696,52 @@ fn resolve_active_model_path(
     Ok(path)
 }
 
-fn command_render(exe: &str, args: &[&str]) -> String {
-    let mut parts = vec![exe.to_string()];
-    parts.extend(args.iter().map(|arg| (*arg).to_string()));
-    parts.join(" ")
-}
-
-fn candidate_model_locations(file_name: &str) -> Vec<PathBuf> {
-    let home = resolve_home_dir().ok();
-    let mut paths = Vec::new();
-    if let Some(home_dir) = home {
-        paths.push(home_dir.join(".cache/wispr/models").join(file_name));
-        paths.push(home_dir.join(".wispr/models").join(file_name));
-        paths.push(home_dir.join(".local/share/wispr/models").join(file_name));
-        paths.push(home_dir.join(".local/share/whisper-models").join(file_name));
-    }
-    paths
-}
-
-fn try_copy_from_common_model_locations(
-    file_name: &str,
-    target_path: &Path,
-) -> Result<bool, String> {
-    for candidate in candidate_model_locations(file_name) {
-        if candidate.exists() {
-            fs::copy(&candidate, target_path).map_err(|e| {
-                format!(
-                    "Model appeared in {} but could not be copied to {}: {e}",
-                    candidate.display(),
-                    target_path.display()
-                )
-            })?;
-            return Ok(true);
-        }
-    }
-    Ok(false)
-}
-
-fn run_wispr_pull(
-    wispr_cli_path: &str,
-    model_spec: WisprModelSpec,
-    target_path: &Path,
-) -> Result<(), String> {
+fn download_whisper_model(model_spec: WhisperModelSpec, target_path: &Path) -> Result<(), String> {
     let target_str = target_path.to_string_lossy().to_string();
-    let pull_refs = [model_spec.wispr_ref, model_spec.file_name, model_spec.id];
-    let mut attempts = Vec::new();
+    let model_url = format!(
+        "https://huggingface.co/ggerganov/whisper.cpp/resolve/main/{}",
+        model_spec.file_name
+    );
 
-    for pull_ref in pull_refs {
-        let arg_sets: [&[&str]; 6] = [
-            &["pull", pull_ref, "--output", &target_str],
-            &["model", "pull", pull_ref, "--output", &target_str],
-            &["models", "pull", pull_ref, "--output", &target_str],
-            &["pull", pull_ref],
-            &["model", "pull", pull_ref],
-            &["models", "pull", pull_ref],
-        ];
+    #[cfg(target_os = "windows")]
+    let output = Command::new("powershell")
+        .args([
+            "-NoProfile",
+            "-Command",
+            "Invoke-WebRequest",
+            "-Uri",
+            &model_url,
+            "-OutFile",
+            &target_str,
+        ])
+        .output();
 
-        for args in arg_sets {
-            let rendered = command_render(wispr_cli_path, args);
-            let output = Command::new(wispr_cli_path).args(args).output();
-            match output {
-                Ok(result) if result.status.success() => {
-                    if target_path.exists() {
-                        return Ok(());
-                    }
+    #[cfg(not(target_os = "windows"))]
+    let output = Command::new("curl")
+        .args(["-L", "--fail", "--output", &target_str, &model_url])
+        .output();
 
-                    if try_copy_from_common_model_locations(model_spec.file_name, target_path)? {
-                        return Ok(());
-                    }
-
-                    attempts.push(format!(
-                        "{rendered} succeeded but no model file was found at {}",
-                        target_path.display()
-                    ));
-                }
-                Ok(result) => {
-                    let stderr = String::from_utf8_lossy(&result.stderr).trim().to_string();
-                    let stdout = String::from_utf8_lossy(&result.stdout).trim().to_string();
-                    let detail = if !stderr.is_empty() {
-                        stderr
-                    } else if !stdout.is_empty() {
-                        stdout
-                    } else {
-                        "no output".to_string()
-                    };
-                    attempts.push(format!("{rendered} failed: {detail}"));
-                }
-                Err(e) => {
-                    attempts.push(format!("{rendered} failed to start: {e}"));
-                }
-            }
+    match output {
+        Ok(result) if result.status.success() && target_path.exists() => Ok(()),
+        Ok(result) => {
+            let stderr = String::from_utf8_lossy(&result.stderr).trim().to_string();
+            let stdout = String::from_utf8_lossy(&result.stdout).trim().to_string();
+            let detail = if !stderr.is_empty() {
+                stderr
+            } else if !stdout.is_empty() {
+                stdout
+            } else {
+                "no output".to_string()
+            };
+            Err(format!(
+                "Could not download whisper model '{}' from {}: {}",
+                model_spec.id, model_url, detail
+            ))
         }
+        Err(e) => Err(format!(
+            "Could not start model download command. Install curl or PowerShell support and retry: {e}"
+        )),
     }
-
-    Err(format!(
-        "Could not pull model via Wispr CLI. Tried command patterns for '{}'. Last errors:\n{}",
-        model_spec.id,
-        attempts
-            .into_iter()
-            .rev()
-            .take(4)
-            .collect::<Vec<_>>()
-            .join("\n")
-    ))
 }
 
 fn build_onboarding_payload(
@@ -588,29 +784,65 @@ fn build_onboarding_payload(
     } else {
         settings.selected_model_id.clone()
     };
-    let onboarding_required = !selected_model_exists;
     let models = build_model_options(
         &model_state.models_dir,
         device.total_memory_gb,
         settings.selected_model_id.as_deref(),
     );
-    let wispr_cli_available = Command::new(&config.wispr_cli_path)
-        .arg("--help")
-        .output()
-        .map(|o| o.status.success())
-        .unwrap_or(false);
+    let configured_whisper_cli_path = resolve_whisper_cli_path(
+        config.whisper_cli_path_override.as_deref(),
+        config.bundled_whisper_cli_path.as_deref(),
+    );
+    let detected_whisper_cli_path = detect_whisper_cli_path(&configured_whisper_cli_path);
+    let whisper_cli_available = detected_whisper_cli_path.is_some();
+    let onboarding_required = !selected_model_exists || !whisper_cli_available;
 
     Ok(DictationOnboardingPayload {
         onboarding_required,
         selected_model_id,
         selected_model_path,
         selected_model_exists,
-        wispr_cli_available,
-        wispr_cli_path: config.wispr_cli_path.clone(),
+        whisper_cli_available,
+        whisper_cli_path: detected_whisper_cli_path.unwrap_or(configured_whisper_cli_path),
         models_dir: model_state.models_dir.to_string_lossy().to_string(),
         device,
         models,
     })
+}
+
+#[tauri::command]
+fn open_whisper_setup_page() -> Result<(), String> {
+    #[cfg(target_os = "macos")]
+    let mut command = {
+        let mut cmd = Command::new("open");
+        cmd.arg(WHISPER_CPP_SETUP_URL);
+        cmd
+    };
+
+    #[cfg(target_os = "linux")]
+    let mut command = {
+        let mut cmd = Command::new("xdg-open");
+        cmd.arg(WHISPER_CPP_SETUP_URL);
+        cmd
+    };
+
+    #[cfg(target_os = "windows")]
+    let mut command = {
+        let mut cmd = Command::new("cmd");
+        cmd.args(["/C", "start", "", WHISPER_CPP_SETUP_URL]);
+        cmd
+    };
+
+    let status = command
+        .status()
+        .map_err(|e| format!("Failed to open download page: {e}"))?;
+    if !status.success() {
+        return Err(format!(
+            "Could not open setup page automatically. Open {WHISPER_CPP_SETUP_URL} manually."
+        ));
+    }
+
+    Ok(())
 }
 
 fn push_downmixed<T, F>(data: &[T], channels: usize, target: &Arc<Mutex<Vec<f32>>>, to_f32: F)
@@ -911,13 +1143,20 @@ fn install_dictation_model(
     config: State<'_, AppConfig>,
     model_state: State<'_, LocalModelState>,
 ) -> Result<DictationModelSelection, String> {
+    let configured_whisper_cli_path = resolve_whisper_cli_path(
+        config.whisper_cli_path_override.as_deref(),
+        config.bundled_whisper_cli_path.as_deref(),
+    );
+    let whisper_cli_path = detect_whisper_cli_path(&configured_whisper_cli_path)
+        .unwrap_or(configured_whisper_cli_path);
+    ensure_whisper_cli_available(&whisper_cli_path)?;
     let trimmed_id = model.trim();
     if trimmed_id.is_empty() {
         return Err("Missing model id".to_string());
     }
 
-    let model_spec = find_wispr_model_spec(trimmed_id).ok_or_else(|| {
-        let ids = wispr_model_catalog()
+    let model_spec = find_whisper_model_spec(trimmed_id).ok_or_else(|| {
+        let ids = whisper_model_catalog()
             .iter()
             .map(|spec| spec.id)
             .collect::<Vec<_>>()
@@ -934,10 +1173,10 @@ fn install_dictation_model(
 
     let target_path = model_path_for_spec(&model_state.models_dir, model_spec);
     if !target_path.exists() {
-        run_wispr_pull(&config.wispr_cli_path, model_spec, &target_path)?;
+        download_whisper_model(model_spec, &target_path)?;
         if !target_path.exists() {
             return Err(format!(
-                "Wispr CLI completed but model file is still missing at {}.",
+                "Model download completed but file is still missing at {}.",
                 target_path.display()
             ));
         }
@@ -968,7 +1207,12 @@ fn start_native_dictation(
     model_state: State<'_, LocalModelState>,
 ) -> Result<(), String> {
     resolve_active_model_path(config.inner(), model_state.inner())?;
-    let whisper_cli_path = resolve_whisper_cli_path(config.whisper_cli_path.as_deref());
+    let configured_whisper_cli_path = resolve_whisper_cli_path(
+        config.whisper_cli_path_override.as_deref(),
+        config.bundled_whisper_cli_path.as_deref(),
+    );
+    let whisper_cli_path = detect_whisper_cli_path(&configured_whisper_cli_path)
+        .unwrap_or(configured_whisper_cli_path);
     ensure_whisper_cli_available(&whisper_cli_path)?;
 
     let mut guard = dictation
@@ -1019,7 +1263,12 @@ async fn stop_native_dictation(
         .map_err(|_| "Failed to read captured audio".to_string())?
         .clone();
     let model_path = resolve_active_model_path(config.inner(), model_state.inner())?;
-    let whisper_cli_path = resolve_whisper_cli_path(config.whisper_cli_path.as_deref());
+    let configured_whisper_cli_path = resolve_whisper_cli_path(
+        config.whisper_cli_path_override.as_deref(),
+        config.bundled_whisper_cli_path.as_deref(),
+    );
+    let whisper_cli_path = detect_whisper_cli_path(&configured_whisper_cli_path)
+        .unwrap_or(configured_whisper_cli_path);
 
     tauri::async_runtime::spawn_blocking(move || {
         transcribe_samples(
@@ -1155,29 +1404,33 @@ fn main() {
     let ollama_host =
         std::env::var("OLLAMA_HOST").unwrap_or_else(|_| "http://127.0.0.1:11434".to_string());
     let whisper_model_path_override = std::env::var("WHISPER_MODEL_PATH").ok();
-    let whisper_cli_path = std::env::var("WHISPER_CLI_PATH").ok();
-    let wispr_cli_path =
-        std::env::var("WISPR_CLI_PATH").unwrap_or_else(|_| DEFAULT_WISPR_CLI_PATH.to_string());
-    let (models_dir, settings_path) =
-        resolve_local_paths().expect("failed to initialize local dictation model paths");
-    let initial_settings = load_local_settings(&settings_path);
+    let whisper_cli_path_override = std::env::var("WHISPER_CLI_PATH").ok();
 
     tauri::Builder::default()
-        .manage(AppConfig {
-            ollama_host,
-            whisper_model_path_override,
-            whisper_cli_path,
-            wispr_cli_path,
+        .setup(move |app| {
+            let bundled_whisper_cli_path = resolve_bundled_whisper_cli_path(app.handle());
+            let (models_dir, settings_path) =
+                resolve_local_paths().expect("failed to initialize local dictation model paths");
+            let initial_settings = load_local_settings(&settings_path);
+
+            app.manage(AppConfig {
+                ollama_host: ollama_host.clone(),
+                whisper_model_path_override: whisper_model_path_override.clone(),
+                whisper_cli_path_override: whisper_cli_path_override.clone(),
+                bundled_whisper_cli_path,
+            });
+            app.manage(LocalModelState {
+                settings_path,
+                models_dir,
+                settings: Mutex::new(initial_settings),
+            });
+            app.manage(DictationState::default());
+            Ok(())
         })
-        .manage(LocalModelState {
-            settings_path,
-            models_dir,
-            settings: Mutex::new(initial_settings),
-        })
-        .manage(DictationState::default())
         .invoke_handler(tauri::generate_handler![
             list_models,
             get_dictation_onboarding,
+            open_whisper_setup_page,
             install_dictation_model,
             start_native_dictation,
             stop_native_dictation,

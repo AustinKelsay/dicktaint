@@ -6,7 +6,7 @@ Important: this native Whisper CLI path is desktop-only. Mobile runtime currentl
 
 ## Architecture
 
-Desktop mode (`bun run tauri:dev`) uses a native speech path:
+Desktop mode uses a native speech path:
 
 1. Rust captures microphone audio with `cpal`.
 2. Rust writes a temporary mono 16 kHz WAV.
@@ -18,20 +18,42 @@ Important: Ollama is not doing speech-to-text in this desktop flow.
 
 Model onboarding path:
 
-1. App profiles local hardware (RAM + CPU basics).
-2. App shows the primary Wispr model options with likely fit labels.
-3. User picks a model and clicks download in onboarding.
-4. App runs Wispr CLI pull commands and stores a local model file for that device.
+1. App checks whether `whisper-cli` is available on this machine.
+2. App profiles local hardware (RAM + CPU basics).
+3. App shows the full Whisper model list with fit labels and one best-fit recommendation.
+4. User downloads one model locally for this device.
 5. Selected model is persisted in `$HOME/.dicktaint/dictation-settings.json`.
+6. Start Dictation stays blocked until both `whisper-cli` and a local model are ready.
 
 ## Requirements
 
-- macOS with microphone access enabled for the app process.
-- `whisper-cli` installed and executable.
-- `wispr` CLI installed for model onboarding pulls.
+- Desktop OS with microphone access enabled for the app process.
+- `whisper-cli` installed and executable (for `tauri:dev`), or bundled as a sidecar in packaged builds.
 - Ollama running for refinement (`/api/tags` and `/api/generate`).
 
-## Install whisper-cli
+## Bundled CLI Strategy
+
+Packaged desktop builds are configured to ship `whisper-cli` as an external sidecar binary.
+
+- Config: `src-tauri/tauri.conf.json` `bundle.externalBin`
+- Sidecar placement: `src-tauri/binaries/` (see `src-tauri/binaries/README.md`)
+
+Runtime path resolution order:
+
+1. `WHISPER_CLI_PATH` override (if set)
+2. Bundled sidecar path
+3. `whisper-cli` from system `PATH`
+
+## Primary Shipping Flow
+
+For packaged desktop users, first-run should look like this:
+
+1. App starts with bundled `whisper-cli` already present.
+2. Onboarding profiles device hardware and shows the full model list.
+3. App marks one recommended model for the machine.
+4. User downloads that model locally and starts dictating.
+
+## Install whisper-cli (`tauri:dev` only)
 
 Homebrew:
 
@@ -46,28 +68,17 @@ Expected result:
 /opt/homebrew/bin/whisper-cli
 ```
 
-## Install Wispr CLI
-
-Install Wispr CLI using your preferred install method, then verify:
-
-```bash
-wispr --help
-```
-
-If it is not on your `PATH`, set:
-
-```bash
-WISPR_CLI_PATH=/absolute/path/to/wispr bun run tauri:dev
-```
-
 ## Choose and Download a Model
 
 In desktop mode, use onboarding in the app:
 
-1. Open the `Dictation Model (Wispr CLI)` panel.
+1. Open the `Dictation Setup (whisper.cpp)` panel.
 2. Review the device profile and fit notes.
-3. Click `Download + Use` on a selected model.
-4. Wait for the model to finish downloading locally.
+3. If `whisper-cli` is missing, click `Get whisper-cli (dev)` and then `Retry Check`.
+4. Click `Download + Use` on the recommended model (or another model you want).
+5. Wait for the model to finish downloading locally.
+
+In packaged desktop builds, `whisper-cli` should already be bundled as a sidecar. In `tauri:dev`, it comes from your local install or `WHISPER_CLI_PATH`.
 
 ## Run Desktop Dictation
 
@@ -94,7 +105,7 @@ WHISPER_MODEL_PATH="/absolute/path/to/ggml-base.en.bin" bun run tauri:dev
 3. Speak for 3-5 seconds.
 4. Click `Stop`.
 5. Verify transcript appears in `Transcript`.
-6. Click `Polish With Model` to run Ollama cleanup.
+6. Click `Polish with Ollama` to run Ollama cleanup.
 
 ## Fast Functional Test Model
 
@@ -111,9 +122,14 @@ You can use this to validate pipeline wiring quickly. Accuracy is low.
 `No local dictation model selected yet`
 - Complete onboarding and download/select a model in the app.
 
-`Could not pull model via Wispr CLI`
-- Confirm `wispr --help` works.
-- If needed set `WISPR_CLI_PATH` and retry onboarding pull.
+`Start Dictation` stays disabled
+- Verify `whisper-cli` availability in onboarding.
+- In `tauri:dev`, install `whisper-cpp` or set `WHISPER_CLI_PATH`.
+- Download/select a local model in onboarding.
+
+`Could not download whisper model ...`
+- Check internet access and retry.
+- Verify the destination folder is writable.
 
 `Could not execute 'whisper-cli'`
 - Install `whisper-cpp` or set `WHISPER_CLI_PATH`.
@@ -142,7 +158,7 @@ And with a known sample WAV:
 
 ```bash
 whisper-cli \
-  -m "$HOME/.local/share/whisper-models/ggml-base.en.bin" \
+  -m "$HOME/.dicktaint/whisper-models/ggml-base.en.bin" \
   -f /opt/homebrew/opt/whisper-cpp/share/whisper-cpp/jfk.wav \
   -l en \
   -otxt \

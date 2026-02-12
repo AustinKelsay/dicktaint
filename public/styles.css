@@ -196,6 +196,12 @@ body::before {
   font-size: 0.9rem;
 }
 
+.dictation-setup-actions {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 0.45rem;
+}
+
 #dictationModelStatus {
   margin: 0;
 }
