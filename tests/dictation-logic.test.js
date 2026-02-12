@@ -13,8 +13,8 @@ describe('dictation logic', () => {
   });
 
   it('falls back to same base name when default tag is missing', () => {
-    const models = ['karanchopda333/whisper:q4', 'foo:latest'];
-    expect(pickDefaultModel(models)).toBe('karanchopda333/whisper:q4');
+    const models = ['llama3.2:1b', 'foo:latest'];
+    expect(pickDefaultModel(models)).toBe('llama3.2:1b');
   });
 
   it('falls back to first model for unrelated list', () => {

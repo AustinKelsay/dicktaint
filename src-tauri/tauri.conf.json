@@ -4,7 +4,7 @@
   "version": "0.1.0",
   "identifier": "com.plebdev.dicktaint",
   "build": {
-    "beforeDevCommand": "PORT=43210 bun run start",
+    "beforeDevCommand": "HOST=${HOST:-127.0.0.1} PORT=43210 bun run start",
     "devUrl": "http://localhost:43210",
     "frontendDist": "../public"
   },
@@ -26,6 +26,9 @@
   "bundle": {
     "active": false,
     "targets": "all",
+    "macOS": {
+      "infoPlist": "Info.plist"
+    },
     "icon": [
       "icons/32x32.png",
       "icons/128x128.png",

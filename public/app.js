@@ -10,7 +10,7 @@ const output = document.getElementById('output');
 const appShell = document.querySelector('.app-shell');
 
 const {
-  DEFAULT_MODEL = 'karanchopda333/whisper:latest',
+  DEFAULT_MODEL = 'llama3.2:3b',
   pickDefaultModel = (models) => (Array.isArray(models) && models[0]) || '',
   withSpeechSupportHint = (message) => message
 } = window.DictationLogic || {};
@@ -19,11 +19,28 @@ const SpeechRecognitionApi = window.SpeechRecognition || window.webkitSpeechReco
 let recognition = null;
 let finalTranscript = '';
 let isDictating = false;
+let isStartingDictation = false;
 let isBusy = false;
+let shouldKeepDictating = false;
+let restartTimer = null;
+let hasMicrophoneAccess = false;
 const runBtnLabel = runBtn.textContent;
 
 function getTauriInvoke() {
   return window.__TAURI__?.core?.invoke || null;
+}
+
+function isMobileUserAgent() {
+  const ua = navigator.userAgent || '';
+  return /Android|iPhone|iPad|iPod/i.test(ua);
+}
+
+function isNativeDesktopMode() {
+  return Boolean(getTauriInvoke()) && !isMobileUserAgent();
+}
+
+function shouldUseTauriCommands() {
+  return isNativeDesktopMode();
 }
 
 async function listModelsViaHttp() {
@@ -69,10 +86,11 @@ function setStatus(message, tone = 'neutral') {
 }
 
 function syncControls() {
+  const hasCaptureSupport = isNativeDesktopMode() || Boolean(SpeechRecognitionApi);
   runBtn.disabled = isBusy;
   refreshBtn.disabled = isBusy;
-  startDictationBtn.disabled = isBusy || !SpeechRecognitionApi || isDictating;
-  stopDictationBtn.disabled = isBusy || !SpeechRecognitionApi || !isDictating;
+  startDictationBtn.disabled = isBusy || !hasCaptureSupport || isDictating || isStartingDictation;
+  stopDictationBtn.disabled = isBusy || !hasCaptureSupport || (!isDictating && !isStartingDictation);
   clearTranscriptBtn.disabled = isBusy;
 
   runBtn.dataset.busy = isBusy ? 'true' : 'false';
@@ -92,9 +110,92 @@ function setDictationState(dictating) {
   syncControls();
 }
 
+function clearRestartTimer() {
+  if (!restartTimer) return;
+  clearTimeout(restartTimer);
+  restartTimer = null;
+}
+
+function describeSpeechError(errorCode) {
+  if (errorCode === 'not-allowed' || errorCode === 'service-not-allowed') {
+    if (hasMicrophoneAccess) {
+      return isNativeDesktopMode()
+        ? 'Speech recognition permission denied. In macOS Settings > Privacy & Security > Speech Recognition, allow this app/terminal and relaunch.'
+        : 'Speech recognition permission denied by browser/runtime. Allow speech recognition and retry.';
+    }
+
+    return isNativeDesktopMode()
+      ? 'Microphone permission denied. In macOS Settings > Privacy & Security > Microphone, allow this app (or Terminal during tauri:dev), then relaunch.'
+      : 'Microphone permission denied in your browser. Allow mic access for this site and try again.';
+  }
+
+  if (errorCode === 'audio-capture') {
+    return 'No microphone input was found. In macOS Settings > Sound > Input, select your AirPods microphone and retry.';
+  }
+
+  if (errorCode === 'no-speech') {
+    return 'Mic opened but no speech was detected. Check input level and speak again.';
+  }
+
+  if (errorCode === 'network') {
+    return 'Speech recognition service was unreachable. Check connectivity or try again in web mode.';
+  }
+
+  if (errorCode === 'aborted') {
+    return 'Speech recognition stopped unexpectedly.';
+  }
+
+  if (errorCode === 'language-not-supported') {
+    return 'Speech recognition does not support the configured language.';
+  }
+
+  return errorCode || 'unknown';
+}
+
+function isFatalSpeechError(errorCode) {
+  return ['not-allowed', 'service-not-allowed', 'audio-capture', 'network', 'language-not-supported'].includes(errorCode);
+}
+
+async function ensureMicrophoneAccess() {
+  if (!navigator.mediaDevices?.getUserMedia) return;
+
+  const stream = await navigator.mediaDevices.getUserMedia({ audio: true });
+  hasMicrophoneAccess = true;
+  for (const track of stream.getTracks()) {
+    track.stop();
+  }
+}
+
+function scheduleRecognitionRestart() {
+  clearRestartTimer();
+
+  restartTimer = setTimeout(() => {
+    if (!recognition || !shouldKeepDictating || isStartingDictation || isDictating) return;
+
+    try {
+      isStartingDictation = true;
+      syncControls();
+      recognition.start();
+      setUiMode('loading');
+      setStatus('Reconnecting dictation...', 'working');
+    } catch {
+      isStartingDictation = false;
+      syncControls();
+    }
+  }, 250);
+}
+
 
 function initDictation() {
   clearTranscriptBtn.addEventListener('click', () => {
+    const tauriInvoke = shouldUseTauriCommands() ? getTauriInvoke() : null;
+    if (tauriInvoke) {
+      tauriInvoke('cancel_native_dictation').catch(() => {});
+    }
+
+    shouldKeepDictating = false;
+    isStartingDictation = false;
+    clearRestartTimer();
     finalTranscript = '';
     transcriptInput.value = '';
     output.value = '';
@@ -106,6 +207,54 @@ function initDictation() {
     finalTranscript = transcriptInput.value.trim();
   });
 
+  if (isNativeDesktopMode()) {
+    startDictationBtn.addEventListener('click', async () => {
+      const tauriInvoke = getTauriInvoke();
+      if (!tauriInvoke || isDictating || isStartingDictation) return;
+
+      try {
+        isStartingDictation = true;
+        syncControls();
+        setUiMode('loading');
+        setStatus('Opening microphone...', 'working');
+        await tauriInvoke('start_native_dictation');
+        isStartingDictation = false;
+        setDictationState(true);
+        setUiMode('listening');
+        setStatus('Listening... click Stop to transcribe.', 'live');
+      } catch (error) {
+        isStartingDictation = false;
+        setDictationState(false);
+        setUiMode('error');
+        setStatus(`Could not start dictation: ${error.message}`, 'error');
+      }
+    });
+
+    stopDictationBtn.addEventListener('click', async () => {
+      const tauriInvoke = getTauriInvoke();
+      if (!tauriInvoke || (!isDictating && !isStartingDictation)) return;
+
+      try {
+        setUiMode('loading');
+        setStatus('Transcribing captured audio...', 'working');
+        const transcript = await tauriInvoke('stop_native_dictation');
+        finalTranscript = `${finalTranscript} ${String(transcript || '').trim()}`.trim();
+        transcriptInput.value = finalTranscript;
+        setUiMode('idle');
+        setStatus('Dictation captured and transcribed.', 'ok');
+      } catch (error) {
+        setUiMode('error');
+        setStatus(`Could not stop dictation: ${error.message}`, 'error');
+      } finally {
+        isStartingDictation = false;
+        setDictationState(false);
+      }
+    });
+
+    syncControls();
+    return;
+  }
+
   if (!SpeechRecognitionApi) {
     syncControls();
     return;
@@ -115,6 +264,13 @@ function initDictation() {
   recognition.continuous = true;
   recognition.interimResults = true;
   recognition.lang = 'en-US';
+
+  recognition.onstart = () => {
+    isStartingDictation = false;
+    setDictationState(true);
+    setUiMode('listening');
+    setStatus('Listening... speak now.', 'live');
+  };
 
   recognition.onresult = (event) => {
     let interimTranscript = '';
@@ -133,26 +289,52 @@ function initDictation() {
   };
 
   recognition.onerror = (event) => {
+    const errorCode = event.error || '';
+    const speechError = describeSpeechError(errorCode);
     setDictationState(false);
+    isStartingDictation = false;
+    syncControls();
     setUiMode('error');
-    setStatus(`Dictation error: ${event.error}`, 'error');
-  };
+    setStatus(`Dictation error: ${speechError}`, 'error');
 
-  recognition.onend = () => {
-    if (isDictating) {
-      setDictationState(false);
-      setUiMode('idle');
-      setStatus('Dictation stopped.', 'neutral');
+    if (isFatalSpeechError(errorCode)) {
+      shouldKeepDictating = false;
+      clearRestartTimer();
     }
   };
 
-  startDictationBtn.addEventListener('click', () => {
+  recognition.onend = () => {
+    setDictationState(false);
+    isStartingDictation = false;
+    syncControls();
+
+    if (shouldKeepDictating) {
+      scheduleRecognitionRestart();
+      return;
+    }
+
+    clearRestartTimer();
+    setUiMode('idle');
+    setStatus('Dictation stopped.', 'neutral');
+  };
+
+  startDictationBtn.addEventListener('click', async () => {
+    if (!recognition || isDictating || isStartingDictation) return;
+
     try {
+      shouldKeepDictating = true;
+      clearRestartTimer();
+      isStartingDictation = true;
+      syncControls();
+      setUiMode('loading');
+      setStatus('Requesting microphone access...', 'working');
+      await ensureMicrophoneAccess();
       recognition.start();
-      setDictationState(true);
-      setUiMode('listening');
-      setStatus('Listening... speak now.', 'live');
+      setStatus('Starting dictation...', 'working');
     } catch (error) {
+      hasMicrophoneAccess = false;
+      shouldKeepDictating = false;
+      isStartingDictation = false;
       setDictationState(false);
       setUiMode('error');
       setStatus(`Could not start dictation: ${error.message}`, 'error');
@@ -160,6 +342,9 @@ function initDictation() {
   });
 
   stopDictationBtn.addEventListener('click', () => {
+    shouldKeepDictating = false;
+    isStartingDictation = false;
+    clearRestartTimer();
     if (!recognition) return;
     recognition.stop();
     setDictationState(false);
@@ -169,8 +354,12 @@ function initDictation() {
 }
 
 async function loadModels() {
-  const tauriInvoke = getTauriInvoke();
-  const modeLabel = tauriInvoke ? 'desktop mode' : 'web mode';
+  const useTauri = shouldUseTauriCommands();
+  const tauriInvoke = useTauri ? getTauriInvoke() : null;
+  const hasLiveCapture = useTauri || Boolean(SpeechRecognitionApi);
+  const modeLabel = useTauri
+    ? 'desktop mode'
+    : (getTauriInvoke() ? 'mobile mode' : 'web mode');
   setUiMode('loading');
   setStatus('Loading models from Ollama...', 'working');
 
@@ -188,7 +377,7 @@ async function loadModels() {
       modelSelect.appendChild(option);
       modelSelect.disabled = true;
       setUiMode('idle');
-      setStatus(withSpeechSupportHint('Connected. No local models found yet.', Boolean(SpeechRecognitionApi)), 'ok');
+      setStatus(withSpeechSupportHint('Connected. No local models found yet.', hasLiveCapture), 'ok');
       return;
     }
 
@@ -203,10 +392,10 @@ async function loadModels() {
     modelSelect.disabled = false;
     if (modelSelect.value === DEFAULT_MODEL) {
       setUiMode('idle');
-      setStatus(withSpeechSupportHint(`Connected (${modeLabel}). Default model selected: ${DEFAULT_MODEL}`, Boolean(SpeechRecognitionApi)), 'ok');
+      setStatus(withSpeechSupportHint(`Connected (${modeLabel}). Default model selected: ${DEFAULT_MODEL}`, hasLiveCapture), 'ok');
     } else {
       setUiMode('idle');
-      setStatus(withSpeechSupportHint(`Connected (${modeLabel}). ${DEFAULT_MODEL} not found, using ${modelSelect.value}.`, Boolean(SpeechRecognitionApi)), 'ok');
+      setStatus(withSpeechSupportHint(`Connected (${modeLabel}). ${DEFAULT_MODEL} not found, using ${modelSelect.value}.`, hasLiveCapture), 'ok');
     }
   } catch (error) {
     modelSelect.innerHTML = '';
@@ -216,12 +405,13 @@ async function loadModels() {
     modelSelect.appendChild(option);
     modelSelect.disabled = true;
     setUiMode('error');
-    setStatus(withSpeechSupportHint(`Connection error: ${error.message}`, Boolean(SpeechRecognitionApi)), 'error');
+    setStatus(withSpeechSupportHint(`Connection error: ${error.message}`, hasLiveCapture), 'error');
   }
 }
 
 async function refineDictation() {
-  const tauriInvoke = getTauriInvoke();
+  const useTauri = shouldUseTauriCommands();
+  const tauriInvoke = useTauri ? getTauriInvoke() : null;
   const model = modelSelect.value;
   const transcript = transcriptInput.value.trim();
   const instruction = 'Clean this raw dictation transcript into readable text with punctuation. Keep intent and wording natural.';

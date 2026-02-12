@@ -26,11 +26,11 @@
         <div class="feature-grid">
           <article>
             <h2>Capture</h2>
-            <p>Start and stop live speech, then nudge the transcript however you want.</p>
+            <p>Start and stop live speech, then nudge the transcript however you want. Desktop mode uses Whisper CLI.</p>
           </article>
           <article>
             <h2>Refine</h2>
-            <p>One click runs your chosen Ollama model and punctuates the chaos.</p>
+            <p>One click runs your chosen Ollama cleanup model and punctuates the chaos.</p>
           </article>
           <article>
             <h2>Keep It Local</h2>
@@ -43,10 +43,10 @@
         <section class="panel controls-card">
           <div class="panel-head">
             <h2>Engine Room</h2>
-            <p>Choose the local model that cleans your transcript.</p>
+            <p>Choose the local Ollama model that cleans your transcript.</p>
           </div>
           <div class="field-row">
-            <label for="modelSelect">Model</label>
+            <label for="modelSelect">Ollama Model (Cleanup)</label>
             <div class="inline-actions">
               <select id="modelSelect"></select>
               <button id="refreshModels" class="ghost" type="button">Refresh</button>
@@ -60,7 +60,7 @@
         <section class="panel transcript-card">
           <div class="panel-head">
             <h2>Raw Dictation</h2>
-            <p>Talk first. Edit if needed. Then polish.</p>
+            <p>Talk first. Desktop mode transcribes with Whisper CLI. Edit if needed. Then polish.</p>
           </div>
           <div class="dictation-actions">
             <button id="startDictation" class="primary" type="button">Start Dictation</button>
@@ -84,7 +84,7 @@
 
       <footer class="panel status-bar">
         <p class="status-label">Status</p>
-        <p id="status">Connecting to Ollama...</p>
+        <p id="status">Connecting to Ollama cleanup model...</p>
       </footer>
     </main>
 

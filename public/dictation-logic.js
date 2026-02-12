@@ -7,7 +7,7 @@
 
   root.DictationLogic = api;
 })(typeof globalThis !== 'undefined' ? globalThis : this, () => {
-  const DEFAULT_MODEL = 'karanchopda333/whisper:latest';
+  const DEFAULT_MODEL = 'llama3.2:3b';
 
   function pickDefaultModel(models) {
     if (!Array.isArray(models) || !models.length) return '';

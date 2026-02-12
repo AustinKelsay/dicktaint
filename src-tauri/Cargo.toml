@@ -1,13 +1,15 @@
 [package]
 name = "dicktaint"
 version = "0.1.0"
-description = "Local Ollama dictation starter"
+description = "Local dictation starter with native Whisper CLI transcription"
 edition = "2021"
 
 [build-dependencies]
 tauri-build = { version = "2", features = [] }
 
 [dependencies]
+cpal = "0.15"
+hound = "3"
 reqwest = { version = "0.12", default-features = false, features = ["json", "rustls-tls"] }
 serde = { version = "1", features = ["derive"] }
 serde_json = "1"

@@ -2,7 +2,7 @@
   "name": "dicktaint",
   "version": "0.1.0",
   "private": true,
-  "description": "Minimal local Ollama dictation interface",
+  "description": "Local dictation app with native Whisper CLI transcription and local model cleanup",
   "scripts": {
     "start": "bun run server.js",
     "dev": "bun --watch server.js",
@@ -10,7 +10,15 @@
     "test:rust": "cargo test --manifest-path src-tauri/Cargo.toml",
     "test:all": "bun run test && bun run test:rust",
     "tauri:dev": "bunx tauri dev",
-    "tauri:build": "bunx tauri build"
+    "tauri:build": "bunx tauri build",
+    "tauri:android:init": "bunx tauri android init --ci",
+    "tauri:android:dev": "HOST=0.0.0.0 PORT=43210 bunx tauri android dev",
+    "tauri:android:run": "bunx tauri android run",
+    "tauri:android:build": "bunx tauri android build",
+    "tauri:ios:init": "bunx tauri ios init --ci",
+    "tauri:ios:dev": "HOST=0.0.0.0 PORT=43210 bunx tauri ios dev",
+    "tauri:ios:run": "bunx tauri ios run",
+    "tauri:ios:build": "bunx tauri ios build"
   },
   "engines": {
     "bun": ">=1.0.0"

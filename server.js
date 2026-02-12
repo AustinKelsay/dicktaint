@@ -3,6 +3,7 @@ const fs = require('fs');
 const path = require('path');
 
 const PORT = process.env.PORT || 3000;
+const HOST = process.env.HOST || '127.0.0.1';
 const OLLAMA_HOST = process.env.OLLAMA_HOST || 'http://127.0.0.1:11434';
 const PUBLIC_DIR = path.join(__dirname, 'public');
 const DEFAULT_INSTRUCTION = 'Clean up this raw speech-to-text transcript into readable text while preserving the speaker\'s intent.';
@@ -235,8 +236,8 @@ function createServer(options = {}) {
 
 if (require.main === module) {
   const server = createServer();
-  server.listen(PORT, () => {
-    console.log(`Dictation starter running at http://localhost:${PORT}`);
+  server.listen(PORT, HOST, () => {
+    console.log(`Dictation starter running at http://${HOST}:${PORT}`);
     console.log(`Using Ollama host: ${OLLAMA_HOST}`);
   });
 }
