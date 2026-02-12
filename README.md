@@ -4,10 +4,10 @@ A local AI dictation tool suitable for the most private chats and dirtiest langu
 ## Quick start
 
 1. Install [Bun](https://bun.sh/).
-2. Install [whisper.cpp](https://github.com/ggml-org/whisper.cpp) (`whisper-cli`) for native desktop dictation.
-3. Set `WHISPER_MODEL_PATH` to a local GGML Whisper model file.
+2. Install [whisper.cpp](https://github.com/ggml-org/whisper.cpp) (`whisper-cli`) for native desktop transcription.
+3. Install Wispr CLI (`wispr`) so onboarding can pull dictation models locally per device.
 4. Install and run [Ollama](https://ollama.com/) for cleanup/refine.
-5. Pull at least one model, for example:
+5. Pull at least one cleanup model, for example:
    ```bash
    ollama pull llama3.2:3b
    ```
@@ -49,21 +49,26 @@ Notes:
 - Tauri dev launches your web server automatically on `http://localhost:43210` and opens a native desktop window.
 - In desktop mode, the frontend calls Rust Tauri commands for both dictation capture/transcription and Ollama refinement.
 - Ollama host defaults to `http://127.0.0.1:11434`.
-- Desktop dictation capture/transcription is native (Rust): microphone audio is captured with `cpal` and transcribed locally by invoking `whisper-cli` from `whisper.cpp`.
-- Native Whisper CLI dictation is desktop-only in the current code path.
-- Install `whisper.cpp` (or otherwise provide `whisper-cli`) and set `WHISPER_MODEL_PATH` to a local GGML Whisper model file before running desktop dictation.
+- Desktop dictation capture/transcription is native (Rust): microphone audio is captured with `cpal` and transcribed locally by invoking `whisper-cli`.
+- Desktop onboarding is now model-first: the app inspects hardware, surfaces Wispr model options, and pulls/selects one local model per device.
+- Selected dictation model state is saved at `$HOME/.dicktaint/dictation-settings.json`, and model files are stored under `$HOME/.dicktaint/wispr-models/`.
+- If `WHISPER_MODEL_PATH` is set, it overrides onboarding selection for desktop dictation.
 - Full setup and troubleshooting guide: [`docs/native-dictation.md`](docs/native-dictation.md).
 - Override host for desktop runs with:
   ```bash
   OLLAMA_HOST=http://127.0.0.1:11434 bun run tauri:dev
   ```
-  Example with Whisper model:
+  Optional legacy override with an explicit model path:
   ```bash
   WHISPER_MODEL_PATH=/absolute/path/to/ggml-base.en.bin bun run tauri:dev
   ```
   If `whisper-cli` is not on your `PATH`, also set:
   ```bash
-  WHISPER_CLI_PATH=/absolute/path/to/whisper-cli WHISPER_MODEL_PATH=/absolute/path/to/ggml-base.en.bin bun run tauri:dev
+  WHISPER_CLI_PATH=/absolute/path/to/whisper-cli bun run tauri:dev
+  ```
+  If `wispr` is not on your `PATH`, also set:
+  ```bash
+  WISPR_CLI_PATH=/absolute/path/to/wispr bun run tauri:dev
   ```
 
 Desktop build (currently configured for compile checks, bundling disabled):
@@ -160,7 +165,7 @@ Notes:
 - Provides a basic dictation flow: start dictation, stop, edit transcript, clean with model.
 - Returns cleaned dictation output.
 - Web mode dictation uses browser speech recognition when available.
-- Desktop mode dictation uses native Rust audio capture + `whisper-cli`.
+- Desktop mode dictation uses native Rust audio capture + `whisper-cli`, with onboarding that recommends and installs local Wispr models per device.
 - Mobile mode currently does not use native Whisper CLI dictation; it uses manual text input or runtime speech API support.
 - If live speech capture is unavailable in your runtime, you can still paste/type transcript text.
 
@@ -169,8 +174,9 @@ Notes:
 - `PORT` (default `3000`)
 - `HOST` (default `127.0.0.1`; use `0.0.0.0` for mobile dev on physical devices)
 - `OLLAMA_HOST` (default `http://127.0.0.1:11434`)
-- `WHISPER_MODEL_PATH` (desktop dictation only; path to a local GGML Whisper model file)
+- `WISPR_CLI_PATH` (desktop onboarding; optional override for `wispr` executable path)
 - `WHISPER_CLI_PATH` (desktop dictation only; optional override for `whisper-cli` executable path)
+- `WHISPER_MODEL_PATH` (desktop dictation only; optional hard override path that bypasses onboarding selection)
 
 Example:
 

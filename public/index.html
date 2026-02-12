@@ -45,6 +45,18 @@
             <h2>Engine Room</h2>
             <p>Choose the local Ollama model that cleans your transcript.</p>
           </div>
+          <section id="dictationModelCard" class="model-onboarding" hidden>
+            <h3>Dictation Model (Wispr CLI)</h3>
+            <p id="dictationDeviceProfile" class="hint"></p>
+            <div class="field-row">
+              <label for="dictationModelSelect">Local Dictation Model</label>
+              <div class="inline-actions">
+                <select id="dictationModelSelect"></select>
+                <button id="installDictationModel" class="secondary" type="button">Download + Use</button>
+              </div>
+            </div>
+            <p id="dictationModelStatus" class="hint"></p>
+          </section>
           <div class="field-row">
             <label for="modelSelect">Ollama Model (Cleanup)</label>
             <div class="inline-actions">

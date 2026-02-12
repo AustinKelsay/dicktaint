@@ -16,11 +16,19 @@ Desktop mode (`bun run tauri:dev`) uses a native speech path:
 
 Important: Ollama is not doing speech-to-text in this desktop flow.
 
+Model onboarding path:
+
+1. App profiles local hardware (RAM + CPU basics).
+2. App shows the primary Wispr model options with likely fit labels.
+3. User picks a model and clicks download in onboarding.
+4. App runs Wispr CLI pull commands and stores a local model file for that device.
+5. Selected model is persisted in `$HOME/.dicktaint/dictation-settings.json`.
+
 ## Requirements
 
 - macOS with microphone access enabled for the app process.
 - `whisper-cli` installed and executable.
-- A local Whisper GGML `.bin` model file.
+- `wispr` CLI installed for model onboarding pulls.
 - Ollama running for refinement (`/api/tags` and `/api/generate`).
 
 ## Install whisper-cli
@@ -38,51 +46,45 @@ Expected result:
 /opt/homebrew/bin/whisper-cli
 ```
 
-## Choose a Whisper Model
+## Install Wispr CLI
 
-Good defaults for English dictation:
-
-- `ggml-base.en.bin` (recommended start)
-- `ggml-small.en.bin` (better accuracy, slower)
-- `ggml-tiny.en.bin` (fastest, least accurate)
-
-Model sources:
-
-- https://huggingface.co/ggerganov/whisper.cpp/tree/main
-- https://ggml.ggerganov.com/
-
-## Download a Model
-
-Example (`ggml-base.en.bin`):
+Install Wispr CLI using your preferred install method, then verify:
 
 ```bash
-mkdir -p "$HOME/.local/share/whisper-models"
-
-curl -L --fail \
-  -o "$HOME/.local/share/whisper-models/ggml-base.en.bin" \
-  "https://huggingface.co/ggerganov/whisper.cpp/resolve/main/ggml-base.en.bin"
-
-shasum -a 256 "$HOME/.local/share/whisper-models/ggml-base.en.bin"
+wispr --help
 ```
 
-Expected SHA256:
+If it is not on your `PATH`, set:
 
-```text
-a03779c86df3323075f5e796cb2ce5029f00ec8869eee3fdfb897afe36c6d002
+```bash
+WISPR_CLI_PATH=/absolute/path/to/wispr bun run tauri:dev
 ```
+
+## Choose and Download a Model
+
+In desktop mode, use onboarding in the app:
+
+1. Open the `Dictation Model (Wispr CLI)` panel.
+2. Review the device profile and fit notes.
+3. Click `Download + Use` on a selected model.
+4. Wait for the model to finish downloading locally.
 
 ## Run Desktop Dictation
 
 ```bash
-WHISPER_MODEL_PATH="$HOME/.local/share/whisper-models/ggml-base.en.bin" bun run tauri:dev
+bun run tauri:dev
 ```
 
 If `whisper-cli` is not on `PATH`:
 
 ```bash
-WHISPER_CLI_PATH="/absolute/path/to/whisper-cli" \
-WHISPER_MODEL_PATH="$HOME/.local/share/whisper-models/ggml-base.en.bin" \
-bun run tauri:dev
+WHISPER_CLI_PATH="/absolute/path/to/whisper-cli" bun run tauri:dev
+```
+
+Optional hard override (bypasses onboarding selection):
+
+```bash
+WHISPER_MODEL_PATH="/absolute/path/to/ggml-base.en.bin" bun run tauri:dev
 ```
 
 ## First Smoke Test
@@ -106,11 +108,12 @@ You can use this to validate pipeline wiring quickly. Accuracy is low.
 
 ## Troubleshooting
 
-`Could not start dictation: WHISPER_MODEL_PATH is not set`
-- Set `WHISPER_MODEL_PATH` to a real `.bin` model file.
+`No local dictation model selected yet`
+- Complete onboarding and download/select a model in the app.
 
-`WHISPER_MODEL_PATH file not found`
-- Path is wrong or file does not exist.
+`Could not pull model via Wispr CLI`
+- Confirm `wispr --help` works.
+- If needed set `WISPR_CLI_PATH` and retry onboarding pull.
 
 `Could not execute 'whisper-cli'`
 - Install `whisper-cpp` or set `WHISPER_CLI_PATH`.

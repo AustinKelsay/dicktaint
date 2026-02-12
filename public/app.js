@@ -8,6 +8,11 @@ const clearTranscriptBtn = document.getElementById('clearTranscript');
 const transcriptInput = document.getElementById('transcriptInput');
 const output = document.getElementById('output');
 const appShell = document.querySelector('.app-shell');
+const dictationModelCard = document.getElementById('dictationModelCard');
+const dictationModelSelect = document.getElementById('dictationModelSelect');
+const installDictationModelBtn = document.getElementById('installDictationModel');
+const dictationModelStatusEl = document.getElementById('dictationModelStatus');
+const dictationDeviceProfileEl = document.getElementById('dictationDeviceProfile');
 
 const {
   DEFAULT_MODEL = 'llama3.2:3b',
@@ -24,6 +29,8 @@ let isBusy = false;
 let shouldKeepDictating = false;
 let restartTimer = null;
 let hasMicrophoneAccess = false;
+let isInstallingDictationModel = false;
+let nativeDictationModelReady = !isNativeDesktopMode();
 const runBtnLabel = runBtn.textContent;
 
 function getTauriInvoke() {
@@ -85,13 +92,27 @@ function setStatus(message, tone = 'neutral') {
   statusEl.dataset.tone = tone;
 }
 
+function setDictationModelStatus(message, tone = 'neutral') {
+  if (!dictationModelStatusEl) return;
+  dictationModelStatusEl.textContent = message;
+  dictationModelStatusEl.dataset.tone = tone;
+}
+
 function syncControls() {
   const hasCaptureSupport = isNativeDesktopMode() || Boolean(SpeechRecognitionApi);
-  runBtn.disabled = isBusy;
-  refreshBtn.disabled = isBusy;
-  startDictationBtn.disabled = isBusy || !hasCaptureSupport || isDictating || isStartingDictation;
-  stopDictationBtn.disabled = isBusy || !hasCaptureSupport || (!isDictating && !isStartingDictation);
-  clearTranscriptBtn.disabled = isBusy;
+  const dictationModelMissing = isNativeDesktopMode() && !nativeDictationModelReady;
+  const lockControls = isBusy || isInstallingDictationModel;
+  runBtn.disabled = lockControls;
+  refreshBtn.disabled = lockControls;
+  startDictationBtn.disabled = lockControls || !hasCaptureSupport || isDictating || isStartingDictation || dictationModelMissing;
+  stopDictationBtn.disabled = lockControls || !hasCaptureSupport || (!isDictating && !isStartingDictation);
+  clearTranscriptBtn.disabled = lockControls;
+  if (installDictationModelBtn) {
+    installDictationModelBtn.disabled = lockControls || !dictationModelSelect?.value;
+  }
+  if (dictationModelSelect) {
+    dictationModelSelect.disabled = lockControls;
+  }
 
   runBtn.dataset.busy = isBusy ? 'true' : 'false';
   runBtn.textContent = isBusy ? 'Polishing...' : runBtnLabel;
@@ -185,6 +206,145 @@ function scheduleRecognitionRestart() {
   }, 250);
 }
 
+function describeDeviceProfile(device) {
+  if (!device) return '';
+  const ram = Number(device.total_memory_gb) || 0;
+  const cores = Number(device.logical_cpu_cores) || 1;
+  return `${ram} GB RAM • ${cores} logical CPU cores • ${device.architecture || 'unknown arch'} • ${device.os || 'unknown os'}`;
+}
+
+function buildDictationModelLabel(model) {
+  const performance = model.recommended
+    ? 'Recommended for this device'
+    : (model.likely_runnable ? `Runs on >= ${model.min_ram_gb} GB RAM` : `Likely too heavy (< ${model.min_ram_gb} GB RAM)`);
+  const installed = model.installed ? 'Installed' : 'Not installed';
+  return `${model.display_name} • ${model.approx_size_gb} GB • ${performance} • ${installed}`;
+}
+
+function renderDictationModelOptions(models, selectedModelId) {
+  if (!dictationModelSelect) return;
+
+  dictationModelSelect.innerHTML = '';
+  for (const model of models || []) {
+    const option = document.createElement('option');
+    option.value = model.id;
+    option.textContent = buildDictationModelLabel(model);
+    dictationModelSelect.appendChild(option);
+  }
+
+  if (selectedModelId) {
+    dictationModelSelect.value = selectedModelId;
+  } else if (dictationModelSelect.options.length > 0) {
+    const best = (models || []).find((model) => model.recommended || model.likely_runnable) || models[0];
+    dictationModelSelect.value = best?.id || '';
+  }
+}
+
+async function loadDictationOnboarding({ quietStatus = false } = {}) {
+  if (!isNativeDesktopMode()) {
+    nativeDictationModelReady = true;
+    if (dictationModelCard) {
+      dictationModelCard.hidden = true;
+    }
+    syncControls();
+    return null;
+  }
+
+  const tauriInvoke = getTauriInvoke();
+  if (!tauriInvoke) {
+    nativeDictationModelReady = false;
+    syncControls();
+    return null;
+  }
+
+  try {
+    if (!quietStatus) {
+      setStatus('Checking local dictation model setup...', 'working');
+    }
+    const onboarding = await tauriInvoke('get_dictation_onboarding');
+    nativeDictationModelReady = Boolean(onboarding.selected_model_exists);
+
+    if (dictationModelCard) {
+      dictationModelCard.hidden = false;
+    }
+    if (dictationDeviceProfileEl) {
+      dictationDeviceProfileEl.textContent = describeDeviceProfile(onboarding.device);
+    }
+    renderDictationModelOptions(onboarding.models, onboarding.selected_model_id);
+
+    if (!onboarding.wispr_cli_available && !onboarding.selected_model_exists) {
+      setDictationModelStatus(
+        `Wispr CLI not found at "${onboarding.wispr_cli_path}". Install it or set WISPR_CLI_PATH.`,
+        'error'
+      );
+      nativeDictationModelReady = false;
+    } else if (!onboarding.wispr_cli_available && onboarding.selected_model_exists) {
+      setDictationModelStatus(
+        `Selected model is ready. Wispr CLI missing at "${onboarding.wispr_cli_path}", so you cannot pull a different model until it is installed.`,
+        'neutral'
+      );
+    } else if (onboarding.selected_model_exists) {
+      const selected = (onboarding.models || []).find((item) => item.id === onboarding.selected_model_id);
+      setDictationModelStatus(
+        `Ready on this device: ${selected?.display_name || onboarding.selected_model_id}.`,
+        'ok'
+      );
+      if (!quietStatus) {
+        setStatus('Dictation model ready. You can start dictation.', 'ok');
+      }
+    } else {
+      setDictationModelStatus(
+        'Select a model and download it to this device before starting dictation.',
+        'neutral'
+      );
+      if (!quietStatus) {
+        setStatus('Onboarding required: choose and download a local dictation model.', 'neutral');
+      }
+    }
+
+    syncControls();
+    return onboarding;
+  } catch (error) {
+    nativeDictationModelReady = false;
+    setDictationModelStatus(`Could not read onboarding state: ${error.message}`, 'error');
+    if (!quietStatus) {
+      setStatus(`Could not load dictation onboarding: ${error.message}`, 'error');
+    }
+    syncControls();
+    return null;
+  }
+}
+
+async function installSelectedDictationModel() {
+  const tauriInvoke = getTauriInvoke();
+  if (!tauriInvoke || !isNativeDesktopMode()) return;
+  const model = (dictationModelSelect?.value || '').trim();
+  if (!model) {
+    setStatus('Pick a dictation model first.', 'error');
+    return;
+  }
+
+  try {
+    isInstallingDictationModel = true;
+    syncControls();
+    setUiMode('loading');
+    setDictationModelStatus('Downloading model to local device storage...', 'neutral');
+    setStatus('Downloading dictation model with Wispr CLI...', 'working');
+    await tauriInvoke('install_dictation_model', { model });
+    await loadDictationOnboarding({ quietStatus: true });
+    setUiMode('idle');
+    setStatus('Dictation model downloaded and selected for this device.', 'ok');
+  } catch (error) {
+    nativeDictationModelReady = false;
+    setUiMode('error');
+    setDictationModelStatus(`Install failed: ${error.message}`, 'error');
+    setStatus(`Could not install dictation model: ${error.message}`, 'error');
+  } finally {
+    isInstallingDictationModel = false;
+    syncControls();
+  }
+}
+
 
 function initDictation() {
   clearTranscriptBtn.addEventListener('click', () => {
@@ -208,6 +368,17 @@ function initDictation() {
   });
 
   if (isNativeDesktopMode()) {
+    if (installDictationModelBtn) {
+      installDictationModelBtn.addEventListener('click', installSelectedDictationModel);
+    }
+    if (dictationModelSelect) {
+      dictationModelSelect.addEventListener('change', () => {
+        const selectedLabel = dictationModelSelect.selectedOptions[0]?.textContent || 'Selected model';
+        setDictationModelStatus(`${selectedLabel}`, 'neutral');
+        syncControls();
+      });
+    }
+
     startDictationBtn.addEventListener('click', async () => {
       const tauriInvoke = getTauriInvoke();
       if (!tauriInvoke || isDictating || isStartingDictation) return;
@@ -452,7 +623,12 @@ async function refineDictation() {
 refreshBtn.addEventListener('click', loadModels);
 runBtn.addEventListener('click', refineDictation);
 
+async function initApp() {
+  await loadModels();
+  await loadDictationOnboarding();
+}
+
 setUiMode('loading');
 syncControls();
 initDictation();
-loadModels();
+initApp();
