@@ -6,7 +6,7 @@ Important: this native Whisper CLI path is desktop-only. Mobile runtime currentl
 
 ## Architecture
 
-Desktop mode (`bun run tauri:dev`) uses a native speech path:
+Desktop mode uses a native speech path:
 
 1. Rust captures microphone audio with `cpal`.
 2. Rust writes a temporary mono 16 kHz WAV.
@@ -16,14 +16,44 @@ Desktop mode (`bun run tauri:dev`) uses a native speech path:
 
 Important: Ollama is not doing speech-to-text in this desktop flow.
 
+Model onboarding path:
+
+1. App checks whether `whisper-cli` is available on this machine.
+2. App profiles local hardware (RAM + CPU basics).
+3. App shows the full Whisper model list with fit labels and one best-fit recommendation.
+4. User downloads one model locally for this device.
+5. Selected model is persisted in `$HOME/.dicktaint/dictation-settings.json`.
+6. Start Dictation stays blocked until both `whisper-cli` and a local model are ready.
+
 ## Requirements
 
-- macOS with microphone access enabled for the app process.
-- `whisper-cli` installed and executable.
-- A local Whisper GGML `.bin` model file.
+- Desktop OS with microphone access enabled for the app process.
+- `whisper-cli` installed and executable (for `tauri:dev`), or bundled as a sidecar in packaged builds.
 - Ollama running for refinement (`/api/tags` and `/api/generate`).
 
-## Install whisper-cli
+## Bundled CLI Strategy
+
+Packaged desktop builds are configured to ship `whisper-cli` as an external sidecar binary.
+
+- Config: `src-tauri/tauri.conf.json` `bundle.externalBin`
+- Sidecar placement: `src-tauri/binaries/` (see `src-tauri/binaries/README.md`)
+
+Runtime path resolution order:
+
+1. `WHISPER_CLI_PATH` override (if set)
+2. Bundled sidecar path
+3. `whisper-cli` from system `PATH`
+
+## Primary Shipping Flow
+
+For packaged desktop users, first-run should look like this:
+
+1. App starts with bundled `whisper-cli` already present.
+2. Onboarding profiles device hardware and shows the full model list.
+3. App marks one recommended model for the machine.
+4. User downloads that model locally and starts dictating.
+
+## Install whisper-cli (`tauri:dev` only)
 
 Homebrew:
 
@@ -38,51 +68,34 @@ Expected result:
 /opt/homebrew/bin/whisper-cli
 ```
 
-## Choose a Whisper Model
+## Choose and Download a Model
 
-Good defaults for English dictation:
+In desktop mode, use onboarding in the app:
 
-- `ggml-base.en.bin` (recommended start)
-- `ggml-small.en.bin` (better accuracy, slower)
-- `ggml-tiny.en.bin` (fastest, least accurate)
+1. Open the `Dictation Setup (whisper.cpp)` panel.
+2. Review the device profile and fit notes.
+3. If `whisper-cli` is missing, click `Get whisper-cli (dev)` and then `Retry Check`.
+4. Click `Download + Use` on the recommended model (or another model you want).
+5. Wait for the model to finish downloading locally.
 
-Model sources:
-
-- https://huggingface.co/ggerganov/whisper.cpp/tree/main
-- https://ggml.ggerganov.com/
-
-## Download a Model
-
-Example (`ggml-base.en.bin`):
-
-```bash
-mkdir -p "$HOME/.local/share/whisper-models"
-
-curl -L --fail \
-  -o "$HOME/.local/share/whisper-models/ggml-base.en.bin" \
-  "https://huggingface.co/ggerganov/whisper.cpp/resolve/main/ggml-base.en.bin"
-
-shasum -a 256 "$HOME/.local/share/whisper-models/ggml-base.en.bin"
-```
-
-Expected SHA256:
-
-```text
-a03779c86df3323075f5e796cb2ce5029f00ec8869eee3fdfb897afe36c6d002
-```
+In packaged desktop builds, `whisper-cli` should already be bundled as a sidecar. In `tauri:dev`, it comes from your local install or `WHISPER_CLI_PATH`.
 
 ## Run Desktop Dictation
 
 ```bash
-WHISPER_MODEL_PATH="$HOME/.local/share/whisper-models/ggml-base.en.bin" bun run tauri:dev
+bun run tauri:dev
 ```
 
 If `whisper-cli` is not on `PATH`:
 
 ```bash
-WHISPER_CLI_PATH="/absolute/path/to/whisper-cli" \
-WHISPER_MODEL_PATH="$HOME/.local/share/whisper-models/ggml-base.en.bin" \
-bun run tauri:dev
+WHISPER_CLI_PATH="/absolute/path/to/whisper-cli" bun run tauri:dev
+```
+
+Optional hard override (bypasses onboarding selection):
+
+```bash
+WHISPER_MODEL_PATH="/absolute/path/to/ggml-base.en.bin" bun run tauri:dev
 ```
 
 ## First Smoke Test
@@ -92,7 +105,7 @@ bun run tauri:dev
 3. Speak for 3-5 seconds.
 4. Click `Stop`.
 5. Verify transcript appears in `Transcript`.
-6. Click `Polish With Model` to run Ollama cleanup.
+6. Click `Polish with Ollama` to run Ollama cleanup.
 
 ## Fast Functional Test Model
 
@@ -106,11 +119,17 @@ You can use this to validate pipeline wiring quickly. Accuracy is low.
 
 ## Troubleshooting
 
-`Could not start dictation: WHISPER_MODEL_PATH is not set`
-- Set `WHISPER_MODEL_PATH` to a real `.bin` model file.
+`No local dictation model selected yet`
+- Complete onboarding and download/select a model in the app.
 
-`WHISPER_MODEL_PATH file not found`
-- Path is wrong or file does not exist.
+`Start Dictation` stays disabled
+- Verify `whisper-cli` availability in onboarding.
+- In `tauri:dev`, install `whisper-cpp` or set `WHISPER_CLI_PATH`.
+- Download/select a local model in onboarding.
+
+`Could not download whisper model ...`
+- Check internet access and retry.
+- Verify the destination folder is writable.
 
 `Could not execute 'whisper-cli'`
 - Install `whisper-cpp` or set `WHISPER_CLI_PATH`.
@@ -139,7 +158,7 @@ And with a known sample WAV:
 
 ```bash
 whisper-cli \
-  -m "$HOME/.local/share/whisper-models/ggml-base.en.bin" \
+  -m "$HOME/.dicktaint/whisper-models/ggml-base.en.bin" \
   -f /opt/homebrew/opt/whisper-cpp/share/whisper-cpp/jfk.wav \
   -l en \
   -otxt \

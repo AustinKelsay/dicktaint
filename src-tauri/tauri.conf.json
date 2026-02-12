@@ -26,6 +26,9 @@
   "bundle": {
     "active": false,
     "targets": "all",
+    "externalBin": [
+      "binaries/whisper-cli"
+    ],
     "macOS": {
       "infoPlist": "Info.plist"
     },
