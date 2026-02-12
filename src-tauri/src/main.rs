@@ -488,7 +488,17 @@ fn load_local_settings(settings_path: &Path) -> LocalSettings {
         Err(_) => return LocalSettings::default(),
     };
 
-    serde_json::from_str::<LocalSettings>(&raw).unwrap_or_default()
+    match serde_json::from_str::<LocalSettings>(&raw) {
+        Ok(settings) => settings,
+        Err(error) => {
+            log::warn!(
+                "load_local_settings: failed to parse LocalSettings from {}: {}",
+                settings_path.display(),
+                error
+            );
+            LocalSettings::default()
+        }
+    }
 }
 
 fn save_local_settings(settings_path: &Path, settings: &LocalSettings) -> Result<(), String> {
@@ -551,18 +561,20 @@ fn total_memory_bytes() -> Option<u64> {
 
     #[cfg(target_os = "windows")]
     {
-        let output = Command::new("wmic")
-            .args(["ComputerSystem", "get", "TotalPhysicalMemory", "/Value"])
+        let output = Command::new("powershell.exe")
+            .args([
+                "-NoProfile",
+                "-Command",
+                "(Get-CimInstance Win32_ComputerSystem).TotalPhysicalMemory",
+            ])
             .output()
             .ok()?;
         if !output.status.success() {
             return None;
         }
-        let raw = String::from_utf8_lossy(&output.stdout);
-        let value = raw
-            .lines()
-            .find_map(|line| line.strip_prefix("TotalPhysicalMemory="))?
-            .trim()
+        let value = String::from_utf8(output.stdout)
+            .ok()?
+            .trim_matches(|c| c == '\r' || c == '\n' || c == ' ')
             .to_string();
         return value.parse::<u64>().ok();
     }
