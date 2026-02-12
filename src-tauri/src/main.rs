@@ -187,7 +187,7 @@ struct LocalSettings {
 struct LocalModelState {
     settings_path: PathBuf,
     models_dir: PathBuf,
-    settings: Mutex<LocalSettings>,
+    settings: Arc<Mutex<LocalSettings>>,
 }
 
 #[derive(Serialize)]
@@ -1138,7 +1138,7 @@ fn get_dictation_onboarding(
 }
 
 #[tauri::command]
-fn install_dictation_model(
+async fn install_dictation_model(
     model: String,
     config: State<'_, AppConfig>,
     model_state: State<'_, LocalModelState>,
@@ -1163,41 +1163,50 @@ fn install_dictation_model(
             .join(", ");
         format!("Unsupported dictation model '{trimmed_id}'. Available models: {ids}")
     })?;
+    let models_dir = model_state.models_dir.clone();
+    let settings_path = model_state.settings_path.clone();
+    let settings = Arc::clone(&model_state.settings);
 
-    fs::create_dir_all(&model_state.models_dir).map_err(|e| {
-        format!(
-            "Failed to create model directory {}: {e}",
-            model_state.models_dir.display()
-        )
-    })?;
+    let install_task =
+        tauri::async_runtime::spawn_blocking(move || -> Result<DictationModelSelection, String> {
+            fs::create_dir_all(&models_dir).map_err(|e| {
+                format!(
+                    "Failed to create model directory {}: {e}",
+                    models_dir.display()
+                )
+            })?;
 
-    let target_path = model_path_for_spec(&model_state.models_dir, model_spec);
-    if !target_path.exists() {
-        download_whisper_model(model_spec, &target_path)?;
-        if !target_path.exists() {
-            return Err(format!(
-                "Model download completed but file is still missing at {}.",
-                target_path.display()
-            ));
-        }
-    }
+            let target_path = model_path_for_spec(&models_dir, model_spec);
+            if !target_path.exists() {
+                download_whisper_model(model_spec, &target_path)?;
+                if !target_path.exists() {
+                    return Err(format!(
+                        "Model download completed but file is still missing at {}.",
+                        target_path.display()
+                    ));
+                }
+            }
 
-    let selected_model_path = target_path.to_string_lossy().to_string();
-    {
-        let mut settings = model_state
-            .settings
-            .lock()
-            .map_err(|_| "Failed to lock local model settings".to_string())?;
-        settings.selected_model_id = Some(model_spec.id.to_string());
-        settings.selected_model_path = Some(selected_model_path.clone());
-        save_local_settings(&model_state.settings_path, &settings)?;
-    }
+            let selected_model_path = target_path.to_string_lossy().to_string();
+            {
+                let mut settings = settings
+                    .lock()
+                    .map_err(|_| "Failed to lock local model settings".to_string())?;
+                settings.selected_model_id = Some(model_spec.id.to_string());
+                settings.selected_model_path = Some(selected_model_path.clone());
+                save_local_settings(&settings_path, &settings)?;
+            }
 
-    Ok(DictationModelSelection {
-        selected_model_id: model_spec.id.to_string(),
-        selected_model_path,
-        installed: true,
-    })
+            Ok(DictationModelSelection {
+                selected_model_id: model_spec.id.to_string(),
+                selected_model_path,
+                installed: true,
+            })
+        });
+
+    install_task
+        .await
+        .map_err(|e| format!("Model install task failed: {e}"))?
 }
 
 #[tauri::command]
@@ -1422,7 +1431,7 @@ fn main() {
             app.manage(LocalModelState {
                 settings_path,
                 models_dir,
-                settings: Mutex::new(initial_settings),
+                settings: Arc::new(Mutex::new(initial_settings)),
             });
             app.manage(DictationState::default());
             Ok(())

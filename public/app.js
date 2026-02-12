@@ -259,21 +259,29 @@ function buildDictationModelLabel(model) {
 
 function renderDictationModelOptions(models, selectedModelId) {
   if (!dictationModelSelect) return;
+  const safeModels = Array.isArray(models) ? models : [];
 
   dictationModelSelect.innerHTML = '';
-  for (const model of models || []) {
+  for (const model of safeModels) {
     const option = document.createElement('option');
     option.value = model.id;
     option.textContent = buildDictationModelLabel(model);
     dictationModelSelect.appendChild(option);
   }
 
-  if (selectedModelId) {
-    dictationModelSelect.value = selectedModelId;
-  } else if (dictationModelSelect.options.length > 0) {
-    const best = (models || []).find((model) => model.recommended || model.likely_runnable) || models[0];
-    dictationModelSelect.value = best?.id || '';
+  if (!dictationModelSelect.options.length) {
+    dictationModelSelect.value = '';
+    return;
   }
+
+  const hasSelectedModel = Boolean(selectedModelId) && safeModels.some((model) => model.id === selectedModelId);
+  if (hasSelectedModel) {
+    dictationModelSelect.value = selectedModelId;
+    return;
+  }
+
+  const best = safeModels.find((model) => model.recommended || model.likely_runnable) || safeModels[0];
+  dictationModelSelect.value = best?.id || '';
 }
 
 async function loadDictationOnboarding({ quietStatus = false } = {}) {
@@ -376,7 +384,16 @@ async function installSelectedDictationModel() {
     setDictationModelStatus('Downloading model to local device storage...', 'neutral');
     setStatus('Downloading selected Whisper model...', 'working');
     await tauriInvoke('install_dictation_model', { model });
-    await loadDictationOnboarding({ quietStatus: true });
+    const onboarding = await loadDictationOnboarding({ quietStatus: true });
+    if (!onboarding) {
+      throw new Error('Model downloaded, but onboarding refresh failed. Click Retry Check.');
+    }
+    if (!onboarding.selected_model_exists) {
+      throw new Error('Model download finished, but selected model is not ready yet. Click Retry Check.');
+    }
+    if (!onboarding.whisper_cli_available) {
+      throw new Error('Model downloaded, but whisper-cli is unavailable. Click Retry Check.');
+    }
     setUiMode('idle');
     setStatus('Local Whisper model downloaded and selected for this device.', 'ok');
   } catch (error) {
