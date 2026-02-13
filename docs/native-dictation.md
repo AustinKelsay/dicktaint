@@ -3,6 +3,10 @@
 This document explains the desktop dictation path end-to-end.
 
 Important: this native Whisper CLI path is desktop-only. Mobile runtime does not invoke these desktop-native commands.
+Current MVP focus: macOS desktop + iPhone (iOS).
+
+Companion reference for exact route/command payloads:
+- [`docs/api-surface.md`](api-surface.md)
 
 ## Architecture
 
@@ -22,10 +26,69 @@ Model onboarding path:
 5. Selected model is persisted in `$HOME/.dicktaint/dictation-settings.json`.
 6. Start Dictation stays blocked until both `whisper-cli` and a local model are ready.
 
+## Native command contract (desktop invoke bridge)
+
+Current frontend flow in `public/app.js` depends on this command sequence:
+
+1. `get_dictation_onboarding`
+2. `install_dictation_model` / `delete_dictation_model` (as needed)
+3. `start_native_dictation`
+4. `stop_native_dictation` (or `cancel_native_dictation`)
+
+Command summary:
+
+- `get_dictation_onboarding`:
+  - returns `whisper_cli_available`, `whisper_cli_path`, `selected_model_*`, `device`, and full model list with `recommended` and `likely_runnable` flags.
+- `install_dictation_model`:
+  - validates model id against the internal catalog, verifies CLI health, downloads from Hugging Face if missing, then persists selection.
+- `delete_dictation_model`:
+  - removes the model file and switches selection to the best remaining installed model when available.
+- `start_native_dictation`:
+  - validates active model + CLI readiness and starts audio capture thread.
+- `stop_native_dictation`:
+  - stops capture, transcribes with `whisper-cli`, returns cleaned transcript text.
+- `cancel_native_dictation`:
+  - force-stops recording without transcription.
+
+Related event channels used during desktop runtime:
+
+- backend -> frontend: `dicktaint://fn-state` (`{ pressed: boolean }`)
+- frontend -> overlay windows: `dicktaint://pill-status` (`{ message, state, visible }`)
+
+## Model catalog and recommendation behavior
+
+The built-in model catalog currently contains 12 entries:
+
+- tiny-en
+- tiny
+- base-en
+- base
+- small-en
+- small
+- medium-en
+- medium
+- large-v1
+- large-v2
+- large-v3
+- turbo
+
+Recommendation logic is memory-driven:
+
+- A model is marked `likely_runnable` when machine RAM is at or above its `min_ram_gb`.
+- A model is marked `recommended` when it is the highest ranked runnable model for that machine.
+- Ranking prefers:
+  - better fit level (`recommended_ram_gb` threshold first, then `min_ram_gb`)
+  - higher `recommended_ram_gb`
+  - larger model size as final tie-break
+
+This intentionally biases toward the strongest model likely to run on the current machine, not the smallest model.
+
 ## Requirements
 
-- Desktop OS with microphone access enabled for the app process.
+- macOS desktop with microphone access enabled for the app process.
 - `whisper-cli` installed and executable (for `tauri:dev`), or bundled as a sidecar in packaged builds.
+
+Note: non-macOS desktop targets are currently de-prioritized in this MVP.
 
 ## Bundled CLI Strategy
 
@@ -40,6 +103,12 @@ Runtime path resolution order:
 2. Bundled sidecar path
 3. `whisper-cli` from system `PATH`
 4. Local `src-tauri/binaries` sidecar candidates in `tauri:dev`
+
+Additional candidate probing (platform-specific) is built in for common install paths, for example:
+
+- macOS: `/opt/homebrew/bin/whisper-cli`, `/usr/local/bin/whisper-cli`
+- Linux: `/usr/local/bin/whisper-cli`, `/usr/bin/whisper-cli`
+- Windows: `C:\Program Files\whisper.cpp\whisper-cli.exe`
 
 ## Primary Shipping Flow
 
@@ -91,6 +160,22 @@ In desktop mode, use onboarding in the app:
 6. Use `Delete Local Model` whenever you want to remove a local model file.
 
 In packaged desktop builds, `whisper-cli` should already be bundled as a sidecar. In `tauri:dev`, it comes from your local install or `WHISPER_CLI_PATH`.
+
+## Local persistence layout
+
+Desktop onboarding/model state is local-first and persisted under app data:
+
+- settings file:
+  - `$HOME/.dicktaint/dictation-settings.json`
+- downloaded models:
+  - `$HOME/.dicktaint/whisper-models/`
+
+Selected model state stores:
+
+- `selected_model_id`
+- `selected_model_path`
+
+Settings writes are atomic (temp file + rename) to reduce corruption risk on interruption.
 
 ## Run Desktop Dictation
 
@@ -153,6 +238,10 @@ You can use this to validate pipeline wiring quickly. Accuracy is low.
 
 `No audio captured` or `No speech detected`
 - Speak longer/louder, check selected input device and input level.
+
+`Model download completed but file is still missing ...`
+- Destination path was not persisted after download.
+- Check local filesystem permissions and available disk space.
 
 `whisper-cli transcription failed: ...`
 - Verify model file is valid, command path is correct, and CLI can run manually.

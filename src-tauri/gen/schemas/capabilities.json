@@ -1,1 +1,1 @@
-{"default":{"identifier":"default","description":"Default desktop capabilities","local":true,"windows":["main"],"permissions":["core:default"]}}
+{"default":{"identifier":"default","description":"Default desktop capabilities","local":true,"windows":["main","pill-0","pill-1","pill-2","pill-3","pill-4","pill-5"],"permissions":["core:default"]}}
