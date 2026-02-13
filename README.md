@@ -4,20 +4,15 @@ A local AI dictation tool suitable for the most private chats and dirtiest langu
 ## Quick start (web mode)
 
 1. Install [Bun](https://bun.sh/).
-2. Install and run [Ollama](https://ollama.com/) for cleanup/refine.
-3. Pull at least one cleanup model, for example:
-   ```bash
-   ollama pull llama3.2:3b
-   ```
-4. Install JS dependencies:
+2. Install JS dependencies:
    ```bash
    bun install
    ```
-5. Start web mode:
+3. Start web mode:
    ```bash
    bun run start
    ```
-6. Open [http://localhost:3000](http://localhost:3000)
+4. Open [http://localhost:3000](http://localhost:3000)
 
 ## Optional dev mode
 
@@ -27,19 +22,22 @@ bun run dev
 
 ## Desktop quick start (local-first)
 
-1. Run desktop dev mode:
+1. Build/update the local sidecar binary (dev helper):
+   ```bash
+   bun run whisper:sidecar
+   ```
+2. Run desktop dev mode:
    ```bash
    bun run tauri:dev
    ```
-2. In the app, open `Dictation Setup (whisper.cpp)`.
-3. Confirm `whisper-cli` availability and download one local Whisper model for this device.
-4. Click `Start Dictation` once setup is marked ready.
+3. In `Speech-to-Text Setup (Whisper)`, wait for setup checks to finish.
+4. Choose a model and click `Download + Use`.
+5. Click `Start Dictation` once status shows ready.
 
-If `whisper-cli` is missing in `tauri:dev`, install it:
+Optional smoke test for sidecar + model pipeline:
 
 ```bash
-brew install whisper-cpp
-which whisper-cli
+bun run whisper:smoke
 ```
 
 ## Testing
@@ -62,23 +60,19 @@ bun run tauri:dev
 
 Notes:
 - Tauri dev launches your web server automatically on `http://localhost:43210` and opens a native desktop window.
-- In desktop mode, the frontend calls Rust Tauri commands for both dictation capture/transcription and Ollama refinement.
-- Ollama host defaults to `http://127.0.0.1:11434`.
+- In desktop mode, the frontend calls Rust Tauri commands for local dictation capture/transcription and model management.
 - Desktop dictation capture/transcription is native (Rust): microphone audio is captured with `cpal` and transcribed locally by invoking `whisper-cli`.
 - Desktop onboarding is local-first and model-first: verify `whisper-cli`, inspect hardware, then download/select one local Whisper model per device.
 - Packaged desktop builds are expected to provide `whisper-cli` as a bundled sidecar.
-- `tauri:dev` resolves `whisper-cli` from `WHISPER_CLI_PATH` or system `PATH`.
+- `tauri:dev` resolves `whisper-cli` from sidecar candidates, `WHISPER_CLI_PATH`, or system `PATH`.
 - Onboarding marks one best-fit recommended model for the current machine (and still shows the full model list).
 - Dictation start is blocked until both prerequisites are met on that device: `whisper-cli` present and a local model selected.
 - Selected dictation model state is saved at `$HOME/.dicktaint/dictation-settings.json`, and model files are stored under `$HOME/.dicktaint/whisper-models/`.
 - Desktop bundle config uses a `whisper-cli` sidecar (`src-tauri/tauri.conf.json` `externalBin`) so packaged app users do not need a separate CLI install.
+- In setup UI, use `Refresh Setup` to re-run checks and `Delete Local Model` to remove a downloaded model file.
 - If `WHISPER_MODEL_PATH` is set, it overrides onboarding selection for desktop dictation.
 - Full setup and troubleshooting guide: [`docs/native-dictation.md`](docs/native-dictation.md).
-- Override host for desktop runs with:
-  ```bash
-  OLLAMA_HOST=http://127.0.0.1:11434 bun run tauri:dev
-  ```
-  Optional legacy override with an explicit model path:
+- Optional legacy override with an explicit model path:
   ```bash
   WHISPER_MODEL_PATH=/absolute/path/to/ggml-base.en.bin bun run tauri:dev
   ```
@@ -154,8 +148,8 @@ export PATH="$ANDROID_HOME/platform-tools:$ANDROID_HOME/emulator:$PATH"
    ```
 6. Smoke test on-device:
    - Type/paste transcript text manually (or use browser speech if available in your runtime).
-   - Click `Polish with Ollama`.
-   - Confirm the cleanup call succeeds.
+   - Confirm transcript capture starts/stops correctly.
+   - Confirm text appears in the transcript box.
 
 ### iOS Smoke Test (physical device)
 
@@ -169,21 +163,19 @@ export PATH="$ANDROID_HOME/platform-tools:$ANDROID_HOME/emulator:$PATH"
    ```
 3. Smoke test on-device:
    - Type/paste transcript text manually (or use browser speech if available in your runtime).
-   - Click `Polish with Ollama`.
-   - Confirm the cleanup call succeeds.
+   - Confirm transcript capture starts/stops correctly.
+   - Confirm text appears in the transcript box.
 
 Notes:
 - Mobile dev binds the local server to `0.0.0.0` so phones can access the dev URL.
-- Mobile runtime intentionally uses the HTTP `/api/*` path (not desktop-only Tauri native Whisper commands).
+- Mobile runtime does not use desktop-only native Whisper commands.
 - If you only want a production smoke test build, use `bun run tauri:android:run` or `bun run tauri:ios:run`.
 - If `android init` says SDK/NDK not found or `ios init` says Xcode/xcodegen missing, install prerequisites above first.
 
 ## What this starter does
 
-- Lists your local Ollama models (with selector).
-- Prefers `llama3.2:3b` by default when available for text refinement.
-- Provides a basic dictation flow: start dictation, stop, edit transcript, and polish with Ollama.
-- Returns cleaned dictation output.
+- Provides a local model management flow: pull, select, and delete Whisper models per device.
+- Provides a basic dictation flow: start dictation, stop, and edit transcript.
 - Web mode dictation uses browser speech recognition when available.
 - Desktop mode dictation uses native Rust audio capture + `whisper-cli`, with onboarding that recommends and installs local Whisper models per device.
 - Mobile mode currently does not use native Whisper CLI dictation; it uses manual text input or runtime speech API support.
@@ -193,12 +185,11 @@ Notes:
 
 - `PORT` (default `3000`)
 - `HOST` (default `127.0.0.1`; use `0.0.0.0` for mobile dev on physical devices)
-- `OLLAMA_HOST` (default `http://127.0.0.1:11434`)
 - `WHISPER_CLI_PATH` (desktop dictation only; optional override for `whisper-cli` executable path)
 - `WHISPER_MODEL_PATH` (desktop dictation only; optional hard override path that bypasses onboarding selection)
 
 Example:
 
 ```bash
-HOST=127.0.0.1 PORT=3001 OLLAMA_HOST=http://127.0.0.1:11434 bun run start
+HOST=127.0.0.1 PORT=3001 bun run start
 ```

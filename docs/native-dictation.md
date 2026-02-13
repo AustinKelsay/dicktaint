@@ -2,7 +2,7 @@
 
 This document explains the desktop dictation path end-to-end.
 
-Important: this native Whisper CLI path is desktop-only. Mobile runtime currently uses the HTTP `/api/*` flow and does not invoke these desktop-native commands.
+Important: this native Whisper CLI path is desktop-only. Mobile runtime does not invoke these desktop-native commands.
 
 ## Architecture
 
@@ -12,9 +12,6 @@ Desktop mode uses a native speech path:
 2. Rust writes a temporary mono 16 kHz WAV.
 3. Rust runs `whisper-cli` (from `whisper.cpp`) to transcribe audio.
 4. Transcript is returned to the frontend.
-5. Ollama is used after that to refine/clean text.
-
-Important: Ollama is not doing speech-to-text in this desktop flow.
 
 Model onboarding path:
 
@@ -29,7 +26,6 @@ Model onboarding path:
 
 - Desktop OS with microphone access enabled for the app process.
 - `whisper-cli` installed and executable (for `tauri:dev`), or bundled as a sidecar in packaged builds.
-- Ollama running for refinement (`/api/tags` and `/api/generate`).
 
 ## Bundled CLI Strategy
 
@@ -43,6 +39,7 @@ Runtime path resolution order:
 1. `WHISPER_CLI_PATH` override (if set)
 2. Bundled sidecar path
 3. `whisper-cli` from system `PATH`
+4. Local `src-tauri/binaries` sidecar candidates in `tauri:dev`
 
 ## Primary Shipping Flow
 
@@ -53,7 +50,21 @@ For packaged desktop users, first-run should look like this:
 3. App marks one recommended model for the machine.
 4. User downloads that model locally and starts dictating.
 
-## Install whisper-cli (`tauri:dev` only)
+## Prepare whisper-cli (`tauri:dev` only)
+
+Preferred dev path (build/update local sidecar):
+
+```bash
+bun run whisper:sidecar
+```
+
+Optional sidecar smoke test:
+
+```bash
+bun run whisper:smoke
+```
+
+Fallback option (system install):
 
 Homebrew:
 
@@ -72,11 +83,12 @@ Expected result:
 
 In desktop mode, use onboarding in the app:
 
-1. Open the `Dictation Setup (whisper.cpp)` panel.
+1. Open the `Speech-to-Text Setup (Whisper)` panel.
 2. Review the device profile and fit notes.
-3. If `whisper-cli` is missing, click `Get whisper-cli (dev)` and then `Retry Check`.
+3. If `whisper-cli` is missing, click `Open CLI Setup (dev)` and then `Refresh Setup`.
 4. Click `Download + Use` on the recommended model (or another model you want).
 5. Wait for the model to finish downloading locally.
+6. Use `Delete Local Model` whenever you want to remove a local model file.
 
 In packaged desktop builds, `whisper-cli` should already be bundled as a sidecar. In `tauri:dev`, it comes from your local install or `WHISPER_CLI_PATH`.
 
@@ -105,7 +117,6 @@ WHISPER_MODEL_PATH="/absolute/path/to/ggml-base.en.bin" bun run tauri:dev
 3. Speak for 3-5 seconds.
 4. Click `Stop`.
 5. Verify transcript appears in `Transcript`.
-6. Click `Polish with Ollama` to run Ollama cleanup.
 
 ## Fast Functional Test Model
 
@@ -124,7 +135,7 @@ You can use this to validate pipeline wiring quickly. Accuracy is low.
 
 `Start Dictation` stays disabled
 - Verify `whisper-cli` availability in onboarding.
-- In `tauri:dev`, install `whisper-cpp` or set `WHISPER_CLI_PATH`.
+- In `tauri:dev`, run `bun run whisper:sidecar` (preferred), or install `whisper-cpp`, or set `WHISPER_CLI_PATH`.
 - Download/select a local model in onboarding.
 
 `Could not download whisper model ...`

@@ -13,6 +13,19 @@ Provide platform-specific binaries named like:
 
 These are consumed at bundle time for multiplatform delivery.
 
-This repo currently includes placeholder files for the listed targets so
-build/test can run with `externalBin` configured. Replace placeholders with real
-`whisper-cli` binaries before shipping builds.
+Current repo state:
+
+- `whisper-cli-aarch64-apple-darwin` is a real built binary (for local macOS arm64 testing).
+- Other target files may still be placeholders.
+
+To rebuild the host macOS sidecar:
+
+```bash
+bun run whisper:sidecar
+```
+
+To smoke test sidecar transcription end-to-end:
+
+```bash
+bun run whisper:smoke
+```
