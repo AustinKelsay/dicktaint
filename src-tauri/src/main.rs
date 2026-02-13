@@ -1,6 +1,5 @@
 use cpal::traits::{DeviceTrait, HostTrait, StreamTrait};
 use cpal::{SampleFormat, Stream};
-use reqwest::Client;
 use serde::{Deserialize, Serialize};
 use std::fs;
 use std::io::Write;
@@ -22,7 +21,6 @@ const WHISPER_CPP_SETUP_URL: &str = "https://github.com/ggml-org/whisper.cpp#qui
 
 #[derive(Clone)]
 struct AppConfig {
-    ollama_host: String,
     whisper_model_path_override: Option<String>,
     whisper_cli_path_override: Option<String>,
     bundled_whisper_cli_path: Option<String>,
@@ -238,56 +236,18 @@ struct DictationModelSelection {
     installed: bool,
 }
 
+#[derive(Serialize)]
+struct DictationModelDeletion {
+    deleted_model_id: String,
+    selected_model_id: Option<String>,
+    selected_model_path: Option<String>,
+}
+
 struct ActiveRecording {
     stop_tx: mpsc::Sender<()>,
     thread_handle: thread::JoinHandle<()>,
     samples: Arc<Mutex<Vec<f32>>>,
     sample_rate: u32,
-}
-
-#[derive(Deserialize)]
-struct TagModel {
-    name: String,
-}
-
-#[derive(Deserialize)]
-struct TagsResponse {
-    #[serde(default)]
-    models: Vec<TagModel>,
-}
-
-#[derive(Serialize)]
-struct GenerateOptions {
-    temperature: f32,
-}
-
-#[derive(Serialize)]
-struct GenerateRequest {
-    model: String,
-    prompt: String,
-    stream: bool,
-    options: GenerateOptions,
-}
-
-#[derive(Deserialize)]
-struct GenerateResponse {
-    response: Option<String>,
-}
-
-fn make_prompt(transcript: &str, instruction: &str) -> String {
-    [
-        instruction,
-        "",
-        "Raw transcript:",
-        transcript,
-        "",
-        "Output only the cleaned dictation text.",
-    ]
-    .join("\n")
-}
-
-fn normalize_host(host: &str) -> String {
-    host.trim_end_matches('/').to_string()
 }
 
 fn resolve_whisper_model_path(path: Option<&str>) -> Result<PathBuf, String> {
@@ -333,12 +293,13 @@ fn ensure_whisper_cli_available(whisper_cli_path: &str) -> Result<(), String> {
             executable.display()
         )
     })?;
-    if output.status.success() || help_probe_has_output(&output) {
+    if help_probe_looks_like_whisper_cli(&output) {
         return Ok(());
     }
 
+    let probe_summary = help_probe_summary(&output);
     Err(format!(
-        "Could not execute '{whisper_cli_path}' (resolved to {}): exited with status {} and produced no help output. Install whisper.cpp (whisper-cli) or set WHISPER_CLI_PATH.",
+        "Could not execute '{whisper_cli_path}' (resolved to {}): probe exited with status {} and did not return recognizable whisper-cli help output ({probe_summary}). Install whisper.cpp (whisper-cli) or set WHISPER_CLI_PATH.",
         executable.display(),
         output.status
     ))
@@ -350,7 +311,7 @@ fn can_execute_command(executable: &str) -> bool {
         Err(_) => return false,
     };
     run_help_probe(&path)
-        .map(|output| output.status.success() || help_probe_has_output(&output))
+        .map(|output| help_probe_looks_like_whisper_cli(&output))
         .unwrap_or(false)
 }
 
@@ -358,15 +319,53 @@ fn run_help_probe(executable: &Path) -> Result<Output, std::io::Error> {
     Command::new(executable).arg("--help").output()
 }
 
-fn help_probe_has_output(output: &Output) -> bool {
-    !String::from_utf8_lossy(&output.stdout).trim().is_empty()
-        || !String::from_utf8_lossy(&output.stderr).trim().is_empty()
+fn help_probe_looks_like_whisper_cli(output: &Output) -> bool {
+    let stdout = String::from_utf8_lossy(&output.stdout);
+    let stderr = String::from_utf8_lossy(&output.stderr);
+    whisper_help_text_looks_valid(&stdout, &stderr)
+}
+
+fn help_probe_summary(output: &Output) -> String {
+    let stderr = String::from_utf8_lossy(&output.stderr);
+    if let Some(line) = stderr.lines().map(str::trim).find(|line| !line.is_empty()) {
+        return line.to_string();
+    }
+
+    let stdout = String::from_utf8_lossy(&output.stdout);
+    if let Some(line) = stdout.lines().map(str::trim).find(|line| !line.is_empty()) {
+        return line.to_string();
+    }
+
+    "no output".to_string()
+}
+
+fn whisper_help_text_looks_valid(stdout: &str, stderr: &str) -> bool {
+    let normalized = format!("{stdout}\n{stderr}").trim().to_ascii_lowercase();
+    if normalized.is_empty() {
+        return false;
+    }
+
+    if normalized.contains("placeholder")
+        && normalized.contains("replace")
+        && normalized.contains("whisper-cli")
+    {
+        return false;
+    }
+
+    let has_usage = normalized.contains("usage") || normalized.contains("options");
+    let has_model_flag = normalized.contains("--model")
+        || normalized.contains("\n-m ")
+        || normalized.contains(" -m ");
+    has_usage && has_model_flag
 }
 
 fn validate_whisper_cli_candidate(candidate: &str) -> Result<PathBuf, String> {
     let resolved_path = resolve_command_path(candidate).ok_or_else(|| {
         if is_explicit_path(candidate) {
-            format!("whisper-cli file not found at {}", Path::new(candidate).display())
+            format!(
+                "whisper-cli file not found at {}",
+                Path::new(candidate).display()
+            )
         } else {
             format!("whisper-cli command '{candidate}' was not found in PATH")
         }
@@ -379,7 +378,10 @@ fn validate_whisper_cli_candidate(candidate: &str) -> Result<PathBuf, String> {
         )
     })?;
     if !metadata.is_file() {
-        return Err(format!("{} exists but is not a file", resolved_path.display()));
+        return Err(format!(
+            "{} exists but is not a file",
+            resolved_path.display()
+        ));
     }
 
     #[cfg(unix)]
@@ -399,8 +401,7 @@ fn validate_whisper_cli_candidate(candidate: &str) -> Result<PathBuf, String> {
             .and_then(|ext| ext.to_str())
             .map(|ext| ext.to_ascii_lowercase())
             .unwrap_or_default();
-        let has_executable_extension =
-            matches!(extension.as_str(), "exe" | "com" | "bat" | "cmd");
+        let has_executable_extension = matches!(extension.as_str(), "exe" | "com" | "bat" | "cmd");
         if !has_executable_extension {
             return Err(format!(
                 "{} is not an executable file (expected .exe/.com/.bat/.cmd)",
@@ -479,25 +480,32 @@ fn is_explicit_path(value: &str) -> bool {
     Path::new(value).is_absolute() || value.contains('/') || value.contains('\\')
 }
 
-fn is_whisper_cli_name(name: &str) -> bool {
-    if cfg!(target_os = "windows") {
-        let lower = name.to_ascii_lowercase();
-        return lower == "whisper-cli.exe"
-            || (lower.starts_with("whisper-cli-") && lower.ends_with(".exe"));
+fn preferred_whisper_cli_names() -> Vec<String> {
+    let arch = std::env::consts::ARCH;
+    let os = std::env::consts::OS;
+    let mut names = Vec::<String>::new();
+
+    if os == "windows" {
+        names.push(format!("whisper-cli-{arch}-pc-windows-msvc.exe"));
+        names.push("whisper-cli.exe".to_string());
+    } else if os == "macos" {
+        names.push(format!("whisper-cli-{arch}-apple-darwin"));
+        names.push("whisper-cli".to_string());
+    } else if os == "linux" {
+        names.push(format!("whisper-cli-{arch}-unknown-linux-gnu"));
+        names.push("whisper-cli".to_string());
+    } else {
+        names.push("whisper-cli".to_string());
     }
-    name == "whisper-cli" || name.starts_with("whisper-cli-")
+
+    names
 }
 
 fn find_whisper_cli_in_dir(dir: &Path) -> Option<PathBuf> {
-    let entries = fs::read_dir(dir).ok()?;
-    for entry in entries.flatten() {
-        let path = entry.path();
-        if !path.is_file() {
-            continue;
-        }
-        let name = path.file_name()?.to_str()?;
-        if is_whisper_cli_name(name) {
-            return Some(path);
+    for name in preferred_whisper_cli_names() {
+        let preferred = dir.join(name);
+        if preferred.is_file() {
+            return Some(preferred);
         }
     }
     None
@@ -522,6 +530,9 @@ fn resolve_bundled_whisper_cli_path(app: &tauri::AppHandle) -> Option<String> {
         }
     }
 
+    // In tauri:dev, sidecar binaries usually live in src-tauri/binaries.
+    candidate_dirs.push(PathBuf::from(env!("CARGO_MANIFEST_DIR")).join("binaries"));
+
     let mut deduped = Vec::<PathBuf>::new();
     for dir in candidate_dirs {
         if !deduped.iter().any(|seen| seen == &dir) {
@@ -538,12 +549,21 @@ fn resolve_bundled_whisper_cli_path(app: &tauri::AppHandle) -> Option<String> {
     None
 }
 
+fn local_dev_sidecar_candidates() -> Vec<String> {
+    let binaries_dir = PathBuf::from(env!("CARGO_MANIFEST_DIR")).join("binaries");
+    preferred_whisper_cli_names()
+        .into_iter()
+        .map(|name| binaries_dir.join(name).to_string_lossy().to_string())
+        .collect()
+}
+
 fn candidate_whisper_cli_paths(configured_path: &str) -> Vec<String> {
     let mut candidates = Vec::<String>::new();
 
     if !configured_path.trim().is_empty() {
         candidates.push(configured_path.trim().to_string());
     }
+    candidates.extend(local_dev_sidecar_candidates());
     if configured_path.trim() != DEFAULT_WHISPER_CLI_PATH {
         candidates.push(DEFAULT_WHISPER_CLI_PATH.to_string());
     }
@@ -847,6 +867,38 @@ fn build_model_options(
             }
         })
         .collect()
+}
+
+fn pick_best_installed_model(
+    models_dir: &Path,
+    total_memory_gb: u64,
+    exclude_model_id: Option<&str>,
+) -> Option<(WhisperModelSpec, PathBuf)> {
+    whisper_model_catalog()
+        .iter()
+        .copied()
+        .filter(|spec| !exclude_model_id.is_some_and(|exclude| exclude == spec.id))
+        .filter_map(|spec| {
+            let path = model_path_for_spec(models_dir, spec);
+            if path.exists() {
+                Some((spec, path))
+            } else {
+                None
+            }
+        })
+        .max_by(|(a, _), (b, _)| {
+            let a_key = (
+                model_fit_level(*a, total_memory_gb),
+                a.recommended_ram_gb,
+                a.approx_size_gb.to_bits(),
+            );
+            let b_key = (
+                model_fit_level(*b, total_memory_gb),
+                b.recommended_ram_gb,
+                b.approx_size_gb.to_bits(),
+            );
+            a_key.cmp(&b_key)
+        })
 }
 
 fn resolve_active_model_path(
@@ -1248,6 +1300,7 @@ fn transcribe_samples(
     .arg(&model_path)
     .arg("-f")
     .arg(&wav_path)
+    .arg("-ng")
     .arg("-l")
     .arg("en")
     .arg("-otxt")
@@ -1295,29 +1348,6 @@ fn transcribe_samples(
     }
 
     Ok(cleaned)
-}
-
-#[tauri::command]
-async fn list_models(state: State<'_, AppConfig>) -> Result<Vec<String>, String> {
-    let client = Client::new();
-    let url = format!("{}/api/tags", normalize_host(&state.ollama_host));
-
-    let response = client
-        .get(url)
-        .send()
-        .await
-        .map_err(|e| format!("Failed to reach Ollama: {e}"))?;
-
-    if !response.status().is_success() {
-        return Err(format!("Ollama /api/tags returned {}", response.status()));
-    }
-
-    let payload = response
-        .json::<TagsResponse>()
-        .await
-        .map_err(|e| format!("Invalid Ollama response: {e}"))?;
-
-    Ok(payload.models.into_iter().map(|m| m.name).collect())
 }
 
 #[tauri::command]
@@ -1398,6 +1428,88 @@ async fn install_dictation_model(
     install_task
         .await
         .map_err(|e| format!("Model install task failed: {e}"))?
+}
+
+#[tauri::command]
+async fn delete_dictation_model(
+    model: String,
+    model_state: State<'_, LocalModelState>,
+) -> Result<DictationModelDeletion, String> {
+    let trimmed_id = model.trim();
+    if trimmed_id.is_empty() {
+        return Err("Missing model id".to_string());
+    }
+
+    let model_spec = find_whisper_model_spec(trimmed_id).ok_or_else(|| {
+        let ids = whisper_model_catalog()
+            .iter()
+            .map(|spec| spec.id)
+            .collect::<Vec<_>>()
+            .join(", ");
+        format!("Unsupported dictation model '{trimmed_id}'. Available models: {ids}")
+    })?;
+
+    let models_dir = model_state.models_dir.clone();
+    let settings_path = model_state.settings_path.clone();
+    let settings = Arc::clone(&model_state.settings);
+    let total_memory_gb = system_memory_gb();
+
+    let delete_task =
+        tauri::async_runtime::spawn_blocking(move || -> Result<DictationModelDeletion, String> {
+            let target_path = model_path_for_spec(&models_dir, model_spec);
+            if let Err(e) = fs::remove_file(&target_path) {
+                if e.kind() != std::io::ErrorKind::NotFound {
+                    return Err(format!(
+                        "Failed to delete model '{}' at {}: {e}",
+                        model_spec.id,
+                        target_path.display()
+                    ));
+                }
+            }
+
+            let target_path_string = target_path.to_string_lossy().to_string();
+            let (selected_model_id, selected_model_path) = {
+                let mut settings = settings
+                    .lock()
+                    .map_err(|_| "Failed to lock local model settings".to_string())?;
+
+                let deleted_selected_model = settings.selected_model_id.as_deref()
+                    == Some(model_spec.id)
+                    || settings
+                        .selected_model_path
+                        .as_deref()
+                        .is_some_and(|path| path == target_path_string);
+
+                if deleted_selected_model {
+                    if let Some((fallback_spec, fallback_path)) =
+                        pick_best_installed_model(&models_dir, total_memory_gb, Some(model_spec.id))
+                    {
+                        settings.selected_model_id = Some(fallback_spec.id.to_string());
+                        settings.selected_model_path =
+                            Some(fallback_path.to_string_lossy().to_string());
+                    } else {
+                        settings.selected_model_id = None;
+                        settings.selected_model_path = None;
+                    }
+                    save_local_settings(&settings_path, &settings)?;
+                }
+
+                (
+                    settings.selected_model_id.clone(),
+                    settings.selected_model_path.clone(),
+                )
+            };
+
+            Ok(DictationModelDeletion {
+                deleted_model_id: model_spec.id.to_string(),
+                selected_model_id,
+                selected_model_path,
+            })
+        });
+
+    delete_task
+        .await
+        .map_err(|e| format!("Model delete task failed: {e}"))?
 }
 
 #[tauri::command]
@@ -1501,88 +1613,9 @@ fn cancel_native_dictation(dictation: State<'_, DictationState>) -> Result<(), S
     Ok(())
 }
 
-#[tauri::command]
-async fn refine_dictation(
-    model: String,
-    transcript: String,
-    instruction: Option<String>,
-    state: State<'_, AppConfig>,
-) -> Result<String, String> {
-    let trimmed_model = model.trim().to_string();
-    let trimmed_transcript = transcript.trim().to_string();
-
-    if trimmed_model.is_empty() {
-        return Err("Missing model".to_string());
-    }
-    if trimmed_transcript.is_empty() {
-        return Err("Missing transcript".to_string());
-    }
-
-    let prompt_instruction = instruction
-    .as_deref()
-    .map(str::trim)
-    .filter(|v| !v.is_empty())
-    .unwrap_or(
-      "Clean up this raw speech-to-text transcript into readable text while preserving the speaker's intent.",
-    );
-
-    let payload = GenerateRequest {
-        model: trimmed_model,
-        prompt: make_prompt(&trimmed_transcript, prompt_instruction),
-        stream: false,
-        options: GenerateOptions { temperature: 0.2 },
-    };
-
-    let client = Client::new();
-    let url = format!("{}/api/generate", normalize_host(&state.ollama_host));
-    let response = client
-        .post(url)
-        .json(&payload)
-        .send()
-        .await
-        .map_err(|e| format!("Failed to reach Ollama: {e}"))?;
-
-    if !response.status().is_success() {
-        let status = response.status();
-        let body = response
-            .text()
-            .await
-            .unwrap_or_else(|_| "<no body>".to_string());
-        return Err(format!("Ollama /api/generate failed ({status}): {body}"));
-    }
-
-    let generated = response
-        .json::<GenerateResponse>()
-        .await
-        .map_err(|e| format!("Invalid Ollama response: {e}"))?;
-
-    Ok(generated.response.unwrap_or_default())
-}
-
 #[cfg(test)]
 mod tests {
-    use super::{make_prompt, normalize_host, resample_linear};
-
-    #[test]
-    fn make_prompt_includes_instruction_and_transcript() {
-        let prompt = make_prompt("raw words here", "Clean this please");
-        assert!(prompt.contains("Clean this please"));
-        assert!(prompt.contains("Raw transcript:"));
-        assert!(prompt.contains("raw words here"));
-        assert!(prompt.contains("Output only the cleaned dictation text."));
-    }
-
-    #[test]
-    fn normalize_host_trims_only_trailing_slash() {
-        assert_eq!(
-            normalize_host("http://127.0.0.1:11434/"),
-            "http://127.0.0.1:11434"
-        );
-        assert_eq!(
-            normalize_host("http://127.0.0.1:11434"),
-            "http://127.0.0.1:11434"
-        );
-    }
+    use super::{resample_linear, whisper_help_text_looks_valid};
 
     #[test]
     fn resample_linear_returns_same_when_rate_matches() {
@@ -1598,14 +1631,25 @@ mod tests {
         assert!(out.len() > source.len());
         assert!(out.iter().all(|sample| sample.is_finite()));
     }
+
+    #[test]
+    fn whisper_help_text_accepts_real_help_snippet() {
+        let stdout = "usage: whisper-cli [options] file0.wav\n  -m FNAME  model path";
+        assert!(whisper_help_text_looks_valid(stdout, ""));
+    }
+
+    #[test]
+    fn whisper_help_text_rejects_placeholder_snippet() {
+        let stderr =
+            "Bundled whisper-cli placeholder. Replace with a real whisper-cli sidecar binary.";
+        assert!(!whisper_help_text_looks_valid("", stderr));
+    }
 }
 
 fn main() {
     let _ = env_logger::Builder::from_env(env_logger::Env::default().default_filter_or("warn"))
         .try_init();
 
-    let ollama_host =
-        std::env::var("OLLAMA_HOST").unwrap_or_else(|_| "http://127.0.0.1:11434".to_string());
     let whisper_model_path_override = std::env::var("WHISPER_MODEL_PATH").ok();
     let whisper_cli_path_override = std::env::var("WHISPER_CLI_PATH").ok();
 
@@ -1626,7 +1670,6 @@ fn main() {
             let initial_settings = load_local_settings(&settings_path);
 
             app.manage(AppConfig {
-                ollama_host: ollama_host.clone(),
                 whisper_model_path_override: whisper_model_path_override.clone(),
                 whisper_cli_path_override: whisper_cli_path_override.clone(),
                 bundled_whisper_cli_path,
@@ -1640,14 +1683,13 @@ fn main() {
             Ok(())
         })
         .invoke_handler(tauri::generate_handler![
-            list_models,
             get_dictation_onboarding,
             open_whisper_setup_page,
             install_dictation_model,
+            delete_dictation_model,
             start_native_dictation,
             stop_native_dictation,
-            cancel_native_dictation,
-            refine_dictation
+            cancel_native_dictation
         ])
         .run(tauri::generate_context!())
         .expect("error while running tauri application");
