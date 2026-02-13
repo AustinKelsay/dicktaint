@@ -539,6 +539,9 @@ async function installSelectedDictationModel() {
     return;
   }
 
+  const prevNativeDictationModelReady = nativeDictationModelReady;
+  let onboardingAfterInstall = null;
+
   try {
     isInstallingDictationModel = true;
     syncControls();
@@ -560,6 +563,7 @@ async function installSelectedDictationModel() {
 
     await tauriInvoke('install_dictation_model', { model: selected.id });
     const onboarding = await loadDictationOnboarding({ quietStatus: true });
+    onboardingAfterInstall = onboarding;
 
     if (!onboarding) {
       throw new Error('Model update completed, but setup refresh failed. Click Refresh Setup.');
@@ -580,7 +584,9 @@ async function installSelectedDictationModel() {
     }
   } catch (error) {
     const details = getErrorMessage(error);
-    nativeDictationModelReady = false;
+    const modelNoLongerUsable = Boolean(onboardingAfterInstall)
+      && (!onboardingAfterInstall.selected_model_exists || !onboardingAfterInstall.whisper_cli_available);
+    nativeDictationModelReady = modelNoLongerUsable ? false : prevNativeDictationModelReady;
     setUiMode('error');
     setDictationModelBusy('');
     setDictationModelStatus(`Model update failed: ${details}`, 'error');

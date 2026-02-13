@@ -30,6 +30,13 @@ function safePublicPath(urlPath, publicDir = PUBLIC_DIR) {
   return resolved;
 }
 
+function shouldServeSpaFallback(req) {
+  const accept = String(req.headers.accept || '');
+  const pathname = (req.url || '').split('?')[0] || '/';
+  const hasNoExtension = path.extname(pathname) === '';
+  return accept.includes('text/html') || hasNoExtension;
+}
+
 function createServer(options = {}) {
   const publicDir = options.publicDir || PUBLIC_DIR;
 
@@ -46,7 +53,8 @@ function createServer(options = {}) {
       return;
     }
 
-    const targetPath = req.url === '/'
+    const requestPathname = req.url.split('?')[0] || '/';
+    const targetPath = requestPathname === '/'
       ? path.join(publicDir, 'index.html')
       : safePublicPath(req.url, publicDir);
 
@@ -58,7 +66,7 @@ function createServer(options = {}) {
 
     fs.readFile(targetPath, (err, file) => {
       if (err) {
-        if (req.url !== '/') {
+        if (requestPathname !== '/' && shouldServeSpaFallback(req)) {
           fs.readFile(path.join(publicDir, 'index.html'), (fallbackErr, fallback) => {
             if (fallbackErr) {
               res.writeHead(404, { 'Content-Type': 'text/plain; charset=utf-8' });
@@ -71,8 +79,9 @@ function createServer(options = {}) {
           return;
         }
 
-        res.writeHead(404, { 'Content-Type': 'text/plain; charset=utf-8' });
-        res.end('Not Found');
+        const statusCode = (err.code === 'ENOENT' || err.code === 'ENOTDIR') ? 404 : 500;
+        res.writeHead(statusCode, { 'Content-Type': 'text/plain; charset=utf-8' });
+        res.end(statusCode === 404 ? 'Not Found' : 'Internal Server Error');
         return;
       }
 
@@ -94,5 +103,6 @@ if (require.main === module) {
 module.exports = {
   createServer,
   getContentType,
-  safePublicPath
+  safePublicPath,
+  shouldServeSpaFallback
 };

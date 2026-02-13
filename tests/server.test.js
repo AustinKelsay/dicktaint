@@ -4,7 +4,8 @@ const { describe, it, expect, beforeEach, afterEach } = require('bun:test');
 const {
   createServer,
   getContentType,
-  safePublicPath
+  safePublicPath,
+  shouldServeSpaFallback
 } = require('../server.js');
 
 async function startServer(options = {}) {
@@ -33,6 +34,23 @@ describe('server utility helpers', () => {
     expect(getContentType('a.css')).toContain('text/css');
     expect(getContentType('a.js')).toContain('application/javascript');
     expect(getContentType('a.txt')).toContain('text/plain');
+  });
+
+  it('shouldServeSpaFallback matches navigation requests', () => {
+    expect(shouldServeSpaFallback({
+      url: '/any/path',
+      headers: { accept: '*/*' }
+    })).toBe(true);
+
+    expect(shouldServeSpaFallback({
+      url: '/missing.js',
+      headers: { accept: '*/*' }
+    })).toBe(false);
+
+    expect(shouldServeSpaFallback({
+      url: '/missing.js',
+      headers: { accept: 'text/html,application/xhtml+xml' }
+    })).toBe(true);
   });
 });
 
@@ -67,5 +85,13 @@ describe('server routes', () => {
     expect(html).toContain('<!doctype html>');
     expect(html).toContain('id="dictationModelSelect"');
     expect(html).toContain('/app.js');
+  });
+
+  it('returns 404 for missing assets', async () => {
+    const response = await fetch(`${baseUrl}/missing.js`);
+    const body = await response.text();
+
+    expect(response.status).toBe(404);
+    expect(body).toBe('Not Found');
   });
 });
