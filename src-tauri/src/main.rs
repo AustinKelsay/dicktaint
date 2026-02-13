@@ -1,6 +1,7 @@
 use cpal::traits::{DeviceTrait, HostTrait, StreamTrait};
 use cpal::{SampleFormat, Stream};
 use serde::{Deserialize, Serialize};
+use std::collections::HashSet;
 use std::fs;
 use std::io::Write;
 #[cfg(unix)]
@@ -1108,15 +1109,57 @@ where
     }
 }
 
-fn create_input_stream(samples: Arc<Mutex<Vec<f32>>>) -> Result<(Stream, u32), String> {
-    let host = cpal::default_host();
-    let device = host.default_input_device().ok_or_else(|| {
-        "No microphone input device found. Check macOS input device settings.".to_string()
-    })?;
+fn sample_format_rank(sample_format: SampleFormat) -> u8 {
+    match sample_format {
+        SampleFormat::F32 => 3,
+        SampleFormat::I16 => 2,
+        SampleFormat::U16 => 1,
+        _ => 0,
+    }
+}
 
+fn choose_input_config(device: &cpal::Device) -> Result<cpal::SupportedStreamConfig, String> {
+    if let Ok(default_config) = device.default_input_config() {
+        return Ok(default_config);
+    }
+
+    let mut best: Option<(u8, u32, cpal::SupportedStreamConfig)> = None;
+    let ranges = device
+        .supported_input_configs()
+        .map_err(|e| format!("Failed to query supported input configs: {e}"))?;
+
+    for range in ranges {
+        let candidate = range.with_max_sample_rate();
+        let format_rank = sample_format_rank(candidate.sample_format());
+        if format_rank == 0 {
+            continue;
+        }
+        let candidate_rate = candidate.sample_rate().0;
+
+        let replace = match &best {
+            Some((best_rank, best_rate, _)) => {
+                format_rank > *best_rank || (format_rank == *best_rank && candidate_rate > *best_rate)
+            }
+            None => true,
+        };
+        if replace {
+            best = Some((format_rank, candidate_rate, candidate));
+        }
+    }
+
+    best.map(|(_, _, config)| config).ok_or_else(|| {
+        "No compatible microphone input config found. Try a different input device.".to_string()
+    })
+}
+
+fn create_input_stream_for_device(
+    device: &cpal::Device,
+    samples: Arc<Mutex<Vec<f32>>>,
+) -> Result<(Stream, u32), String> {
     let supported_config = device
         .default_input_config()
-        .map_err(|e| format!("Failed to read default input config: {e}"))?;
+        .or_else(|_| choose_input_config(device))
+        .map_err(|e| format!("Failed to resolve input config: {e}"))?;
     let sample_rate = supported_config.sample_rate().0;
     let channels = supported_config.channels() as usize;
     let config: cpal::StreamConfig = supported_config.clone().into();
@@ -1174,6 +1217,56 @@ fn create_input_stream(samples: Arc<Mutex<Vec<f32>>>) -> Result<(Stream, u32), S
     };
 
     Ok((stream, sample_rate))
+}
+
+fn create_input_stream(samples: Arc<Mutex<Vec<f32>>>) -> Result<(Stream, u32), String> {
+    let host = cpal::default_host();
+    let mut candidate_devices: Vec<cpal::Device> = Vec::new();
+    let mut seen_names: HashSet<String> = HashSet::new();
+
+    if let Some(default_device) = host.default_input_device() {
+        let name = default_device
+            .name()
+            .unwrap_or_else(|_| "default input".to_string());
+        seen_names.insert(name);
+        candidate_devices.push(default_device);
+    }
+
+    if let Ok(devices) = host.input_devices() {
+        for device in devices {
+            let name = device
+                .name()
+                .unwrap_or_else(|_| "unknown input".to_string());
+            if seen_names.insert(name) {
+                candidate_devices.push(device);
+            }
+        }
+    }
+
+    if candidate_devices.is_empty() {
+        return Err(
+            "No microphone input device found. In macOS Settings > Sound > Input, select a microphone and retry."
+                .to_string(),
+        );
+    }
+
+    let mut attempts: Vec<String> = Vec::new();
+    for device in candidate_devices {
+        let name = device
+            .name()
+            .unwrap_or_else(|_| "unknown input".to_string());
+
+        match create_input_stream_for_device(&device, Arc::clone(&samples)) {
+            Ok(result) => return Ok(result),
+            Err(err) => attempts.push(format!("{name}: {err}")),
+        }
+    }
+
+    Err(format!(
+        "Could not open microphone input on this machine. Tried: {}. \
+In macOS Settings > Privacy & Security > Microphone, allow this app/terminal, then pick an input device in Settings > Sound > Input and retry.",
+        attempts.join(" | ")
+    ))
 }
 
 fn spawn_recording_thread(
