@@ -8,10 +8,19 @@ use std::io::Write;
 use std::os::unix::fs::PermissionsExt;
 use std::path::{Path, PathBuf};
 use std::process::{Command, Output};
+#[cfg(target_os = "macos")]
+use std::ptr::NonNull;
 use std::sync::{mpsc, Arc, Mutex};
+#[cfg(target_os = "macos")]
+use std::sync::atomic::{AtomicBool, Ordering};
 use std::thread;
 use std::time::{Duration, SystemTime, UNIX_EPOCH};
-use tauri::{Manager, State};
+use tauri::{Emitter, Manager, State};
+
+#[cfg(target_os = "macos")]
+use block2::RcBlock;
+#[cfg(target_os = "macos")]
+use objc2_app_kit::{NSEvent, NSEventMask, NSEventModifierFlags};
 
 const WHISPER_SAMPLE_RATE: u32 = 16_000;
 const APP_SETTINGS_DIR: &str = ".dicktaint";
@@ -19,6 +28,13 @@ const APP_SETTINGS_FILE: &str = "dictation-settings.json";
 const APP_MODELS_DIR: &str = "whisper-models";
 const DEFAULT_WHISPER_CLI_PATH: &str = "whisper-cli";
 const WHISPER_CPP_SETUP_URL: &str = "https://github.com/ggml-org/whisper.cpp#quick-start";
+const START_HIDDEN_ENV: &str = "DICKTAINT_START_HIDDEN";
+const FN_HOTKEY_STATE_EVENT: &str = "dicktaint://fn-state";
+const PILL_WINDOW_LABEL_PREFIX: &str = "pill";
+const PILL_WINDOW_WIDTH: f64 = 278.0;
+const PILL_WINDOW_HEIGHT: f64 = 40.0;
+const PILL_WINDOW_BOTTOM_MARGIN: i32 = 18;
+const MAX_PILL_WINDOWS: usize = 6;
 
 #[derive(Clone)]
 struct AppConfig {
@@ -30,6 +46,11 @@ struct AppConfig {
 #[derive(Default)]
 struct DictationState {
     active_recording: Mutex<Option<ActiveRecording>>,
+}
+
+#[derive(Serialize, Clone, Copy)]
+struct FnHotkeyStatePayload {
+    pressed: bool,
 }
 
 #[derive(Clone, Copy)]
@@ -249,6 +270,135 @@ struct ActiveRecording {
     thread_handle: thread::JoinHandle<()>,
     samples: Arc<Mutex<Vec<f32>>>,
     sample_rate: u32,
+}
+
+fn parse_truthy_env(value: &str) -> bool {
+    let normalized = value.trim().to_ascii_lowercase();
+    !matches!(normalized.as_str(), "" | "0" | "false" | "no" | "off")
+}
+
+fn should_start_hidden() -> bool {
+    std::env::var(START_HIDDEN_ENV)
+        .map(|value| parse_truthy_env(&value))
+        .unwrap_or(false)
+}
+
+fn show_main_window(app: &tauri::AppHandle) {
+    if let Some(window) = app.get_webview_window("main") {
+        let _ = window.show();
+        let _ = window.unminimize();
+        let _ = window.set_focus();
+    }
+}
+
+#[cfg(target_os = "macos")]
+fn create_pill_overlay_window_for_monitor(
+    app: &tauri::AppHandle,
+    label: &str,
+    monitor: &tauri::Monitor,
+) -> Result<(), String> {
+    if app.get_webview_window(label).is_some() {
+        return Ok(());
+    }
+
+    let work_area = monitor.work_area();
+    let work_x = work_area.position.x;
+    let work_y = work_area.position.y;
+    let work_w = work_area.size.width as i32;
+    let work_h = work_area.size.height as i32;
+    let width_i = PILL_WINDOW_WIDTH as i32;
+    let height_i = PILL_WINDOW_HEIGHT as i32;
+
+    let x = work_x + (work_w - width_i).max(0) / 2;
+    let y = work_y + (work_h - height_i - PILL_WINDOW_BOTTOM_MARGIN).max(0);
+
+    let window = tauri::WebviewWindowBuilder::new(
+        app,
+        label,
+        tauri::WebviewUrl::App("pill.html".into()),
+    )
+    .title("dicktaint overlay")
+    .decorations(false)
+    .transparent(true)
+    .shadow(false)
+    .resizable(false)
+    .focusable(false)
+    .skip_taskbar(true)
+    .always_on_top(true)
+    .visible_on_all_workspaces(true)
+    .inner_size(PILL_WINDOW_WIDTH, PILL_WINDOW_HEIGHT)
+    .position(x as f64, y as f64)
+    .build()
+    .map_err(|e| format!("Failed to create overlay window '{label}': {e}"))?;
+
+    let _ = window.set_ignore_cursor_events(true);
+    let _ = window.set_always_on_top(true);
+    let _ = window.set_visible_on_all_workspaces(true);
+    Ok(())
+}
+
+#[cfg(target_os = "macos")]
+fn create_pill_overlay_windows(app: &tauri::AppHandle) -> Result<(), String> {
+    let monitors = app
+        .available_monitors()
+        .map_err(|e| format!("Failed to enumerate monitors for overlay pill: {e}"))?;
+    if monitors.is_empty() {
+        return Err("No monitors found while creating overlay pill windows.".to_string());
+    }
+
+    for (index, monitor) in monitors.iter().enumerate().take(MAX_PILL_WINDOWS) {
+        let label = format!("{PILL_WINDOW_LABEL_PREFIX}-{index}");
+        create_pill_overlay_window_for_monitor(app, &label, monitor)?;
+    }
+
+    Ok(())
+}
+
+#[cfg(not(target_os = "macos"))]
+fn create_pill_overlay_windows(_app: &tauri::AppHandle) -> Result<(), String> {
+    Ok(())
+}
+
+#[cfg(target_os = "macos")]
+fn register_fn_global_hotkey_monitor(app: &tauri::AppHandle) -> Result<(), String> {
+    let app_handle = app.clone();
+    let fn_key_down = Arc::new(AtomicBool::new(false));
+    let fn_key_down_ref = Arc::clone(&fn_key_down);
+    let handler = RcBlock::new(move |event_ptr: NonNull<NSEvent>| {
+        // SAFETY: NSEvent monitor callback provides a valid NSEvent pointer for callback lifetime.
+        let event = unsafe { event_ptr.as_ref() };
+        let function_down = event
+            .modifierFlags()
+            .contains(NSEventModifierFlags::Function);
+        // Emit only on edge transitions so frontend start/stop handling stays idempotent.
+        let previous = fn_key_down_ref.swap(function_down, Ordering::SeqCst);
+        if previous != function_down {
+            let _ = app_handle.emit(
+                FN_HOTKEY_STATE_EVENT,
+                FnHotkeyStatePayload {
+                    pressed: function_down,
+                },
+            );
+        }
+    });
+
+    let monitor =
+        NSEvent::addGlobalMonitorForEventsMatchingMask_handler(NSEventMask::FlagsChanged, &handler)
+            .ok_or_else(|| {
+                "Failed to register global fn key monitor on macOS. \
+Allow Input Monitoring/Accessibility for this app or terminal and retry."
+                    .to_string()
+            })?;
+
+    // Keep monitor and callback alive for process lifetime.
+    std::mem::forget(handler);
+    std::mem::forget(monitor);
+    Ok(())
+}
+
+#[cfg(not(target_os = "macos"))]
+fn register_fn_global_hotkey_monitor(_app: &tauri::AppHandle) -> Result<(), String> {
+    Ok(())
 }
 
 fn resolve_whisper_model_path(path: Option<&str>) -> Result<PathBuf, String> {
@@ -668,6 +818,7 @@ fn save_local_settings(settings_path: &Path, settings: &LocalSettings) -> Result
         .file_name()
         .and_then(|name| name.to_str())
         .unwrap_or("dictation-settings.json");
+    // Write-then-rename keeps settings updates atomic across crashes/interruption.
     let temp_path = parent.join(format!(
         ".{}.tmp-{}-{}",
         target_name,
@@ -816,6 +967,7 @@ fn pick_recommended_model_id(total_memory_gb: u64) -> Option<&'static str> {
         .copied()
         .filter(|spec| model_fit_level(*spec, total_memory_gb) > 0)
         .max_by(|a, b| {
+            // Prefer strongest runnable model for the machine, not merely the smallest.
             let a_key = (
                 model_fit_level(*a, total_memory_gb),
                 a.recommended_ram_gb,
@@ -1360,6 +1512,22 @@ fn write_wav(path: &PathBuf, samples: &[f32], sample_rate: u32) -> Result<(), St
     Ok(())
 }
 
+fn is_transcript_artifact_token(token: &str) -> bool {
+    let normalized = token.trim_matches(|ch: char| !ch.is_ascii_alphanumeric() && ch != '_');
+    let upper = normalized.to_ascii_uppercase();
+    matches!(
+        upper.as_str(),
+        "BLANK_AUDIO" | "NOISE" | "MUSIC" | "SILENCE"
+    )
+}
+
+fn normalize_transcript_text(raw: &str) -> String {
+    raw.split_whitespace()
+        .filter(|token| !is_transcript_artifact_token(token))
+        .collect::<Vec<_>>()
+        .join(" ")
+}
+
 fn transcribe_samples(
     model_path: PathBuf,
     whisper_cli_path: String,
@@ -1393,7 +1561,6 @@ fn transcribe_samples(
     .arg(&model_path)
     .arg("-f")
     .arg(&wav_path)
-    .arg("-ng")
     .arg("-l")
     .arg("en")
     .arg("-otxt")
@@ -1435,7 +1602,7 @@ fn transcribe_samples(
     let _ = std::fs::remove_file(&wav_path);
     let _ = std::fs::remove_file(&txt_path);
 
-    let cleaned = transcript.split_whitespace().collect::<Vec<_>>().join(" ");
+    let cleaned = normalize_transcript_text(&transcript);
     if cleaned.is_empty() {
         return Err("No speech detected in the recorded audio.".to_string());
     }
@@ -1708,7 +1875,7 @@ fn cancel_native_dictation(dictation: State<'_, DictationState>) -> Result<(), S
 
 #[cfg(test)]
 mod tests {
-    use super::{resample_linear, whisper_help_text_looks_valid};
+    use super::{normalize_transcript_text, resample_linear, whisper_help_text_looks_valid};
 
     #[test]
     fn resample_linear_returns_same_when_rate_matches() {
@@ -1737,6 +1904,12 @@ mod tests {
             "Bundled whisper-cli placeholder. Replace with a real whisper-cli sidecar binary.";
         assert!(!whisper_help_text_looks_valid("", stderr));
     }
+
+    #[test]
+    fn normalize_transcript_text_strips_blank_audio_marker() {
+        let raw = "[BLANK_AUDIO] Testing, check, check";
+        assert_eq!(normalize_transcript_text(raw), "Testing, check, check");
+    }
 }
 
 fn main() {
@@ -1746,7 +1919,7 @@ fn main() {
     let whisper_model_path_override = std::env::var("WHISPER_MODEL_PATH").ok();
     let whisper_cli_path_override = std::env::var("WHISPER_CLI_PATH").ok();
 
-    tauri::Builder::default()
+    let app = tauri::Builder::default()
         .setup(move |app| {
             let bundled_whisper_cli_path = resolve_bundled_whisper_cli_path(app.handle());
             let app_data_dir = app.path().app_data_dir().map_err(|e| {
@@ -1773,7 +1946,28 @@ fn main() {
                 settings: Arc::new(Mutex::new(initial_settings)),
             });
             app.manage(DictationState::default());
+
+            if should_start_hidden() {
+                if let Some(window) = app.get_webview_window("main") {
+                    let _ = window.hide();
+                }
+            }
+            if let Err(error) = create_pill_overlay_windows(app.handle()) {
+                log::warn!("overlay pill window unavailable: {}", error);
+            }
+            if let Err(error) = register_fn_global_hotkey_monitor(app.handle()) {
+                log::warn!("global fn hotkey monitor unavailable: {}", error);
+            }
             Ok(())
+        })
+        .on_window_event(|window, event| {
+            if window.label() != "main" {
+                return;
+            }
+            if let tauri::WindowEvent::CloseRequested { api, .. } = event {
+                api.prevent_close();
+                let _ = window.hide();
+            }
         })
         .invoke_handler(tauri::generate_handler![
             get_dictation_onboarding,
@@ -1784,6 +1978,13 @@ fn main() {
             stop_native_dictation,
             cancel_native_dictation
         ])
-        .run(tauri::generate_context!())
-        .expect("error while running tauri application");
+        .build(tauri::generate_context!())
+        .expect("error while building tauri application");
+
+    app.run(|app_handle, event| {
+        #[cfg(target_os = "macos")]
+        if let tauri::RunEvent::Reopen { .. } = event {
+            show_main_window(app_handle);
+        }
+    });
 }

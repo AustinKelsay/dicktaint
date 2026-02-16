@@ -19,6 +19,7 @@ function getContentType(filePath) {
 }
 
 function safePublicPath(urlPath, publicDir = PUBLIC_DIR) {
+  // Decode and normalize once so traversal attempts cannot bypass join checks.
   const decoded = decodeURIComponent(urlPath.split('?')[0]);
   const normalized = path.normalize(decoded).replace(/^\/+/, '');
   const resolved = path.join(publicDir, normalized);
@@ -33,6 +34,7 @@ function safePublicPath(urlPath, publicDir = PUBLIC_DIR) {
 function shouldServeSpaFallback(req) {
   const accept = String(req.headers.accept || '');
   const pathname = (req.url || '').split('?')[0] || '/';
+  // Extensionless paths are treated as client-side routes, not missing assets.
   const hasNoExtension = path.extname(pathname) === '';
   return accept.includes('text/html') || hasNoExtension;
 }
@@ -67,6 +69,7 @@ function createServer(options = {}) {
     fs.readFile(targetPath, (err, file) => {
       if (err) {
         if (requestPathname !== '/' && shouldServeSpaFallback(req)) {
+          // Keep deep links working in SPA mode while preserving 404s for real assets.
           fs.readFile(path.join(publicDir, 'index.html'), (fallbackErr, fallback) => {
             if (fallbackErr) {
               res.writeHead(404, { 'Content-Type': 'text/plain; charset=utf-8' });
