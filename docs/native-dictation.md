@@ -75,7 +75,7 @@ The built-in model catalog currently contains 12 entries:
 Recommendation logic is memory-driven:
 
 - A model is marked `likely_runnable` when machine RAM is at or above its `min_ram_gb`.
-- A model is marked `recommended` when it is the highest ranked runnable model for that machine.
+- A model is marked `recommended` when it is the highest-ranked runnable model for that machine.
 - Ranking prefers:
   - better fit level (`recommended_ram_gb` threshold first, then `min_ram_gb`)
   - higher `recommended_ram_gb`
