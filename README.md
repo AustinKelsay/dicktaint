@@ -8,6 +8,7 @@ Current MVP focus: macOS desktop + iPhone (iOS) mobile.
 - Runtime/API contract: [`docs/api-surface.md`](docs/api-surface.md)
 - Native desktop speech pipeline: [`docs/native-dictation.md`](docs/native-dictation.md)
 - Background runtime + `fn` hold-to-talk MVP: [`docs/background-hotkey-mvp.md`](docs/background-hotkey-mvp.md)
+- macOS private API release/distribution checklist: [`docs/macos-private-api-checklist.md`](docs/macos-private-api-checklist.md)
 
 ## Quick start (web mode)
 
@@ -100,6 +101,14 @@ Notes:
   ```bash
   WHISPER_CLI_PATH=/absolute/path/to/whisper-cli bun run tauri:dev
   ```
+
+### macOS private API decision (current)
+
+- `src-tauri/tauri.conf.json` currently sets `"macOSPrivateApi": true`.
+- This is intentional for the transparent native overlay pill windows used by hold-to-talk feedback.
+- Current implication: desktop releases are expected to be direct-distribution macOS apps, not Mac App Store builds.
+- If App Store distribution becomes a goal, change `"macOSPrivateApi"` to `false` and remove/replace transparency behavior that depends on private APIs.
+- Release/signing checklist: [`docs/macos-private-api-checklist.md`](docs/macos-private-api-checklist.md).
 
 ### Desktop command/events contract
 

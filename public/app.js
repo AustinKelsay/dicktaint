@@ -250,9 +250,14 @@ function refreshSelectedModelMeta() {
     return;
   }
 
+  const sizeValue = Number(selected.approx_size_gb);
+  const sizeLabel = Number.isFinite(sizeValue)
+    ? `${sizeValue.toFixed(2).replace(/\.00$/u, '')} GB`
+    : 'size unknown';
+
   const parts = [
     modelDisplayName(selected),
-    `${Number(selected.approx_size_gb).toFixed(2).replace(/\.00$/u, '')} GB`,
+    sizeLabel,
     selected.speed_note || 'speed unknown',
     selected.quality_note || 'quality unknown',
     selected.installed ? 'downloaded locally' : 'not downloaded',
