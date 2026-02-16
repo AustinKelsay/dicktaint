@@ -20,7 +20,12 @@ function getContentType(filePath) {
 
 function safePublicPath(urlPath, publicDir = PUBLIC_DIR) {
   // Decode and normalize once so traversal attempts cannot bypass join checks.
-  const decoded = decodeURIComponent(urlPath.split('?')[0]);
+  let decoded;
+  try {
+    decoded = decodeURIComponent(urlPath.split('?')[0]);
+  } catch {
+    return null;
+  }
   const normalized = path.normalize(decoded).replace(/^\/+/, '');
   const resolved = path.join(publicDir, normalized);
 
