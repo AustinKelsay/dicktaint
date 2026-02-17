@@ -5,10 +5,16 @@ Current MVP focus: macOS desktop + iPhone (iOS) mobile.
 
 ## Documentation map
 
-- Runtime/API contract: [`docs/api-surface.md`](docs/api-surface.md)
-- Native desktop speech pipeline: [`docs/native-dictation.md`](docs/native-dictation.md)
-- Background runtime + `fn` hold-to-talk MVP: [`docs/background-hotkey-mvp.md`](docs/background-hotkey-mvp.md)
-- macOS private API release/distribution checklist: [`docs/macos-private-api-checklist.md`](docs/macos-private-api-checklist.md)
+- Canonical docs system: [`llm/README.md`](llm/README.md)
+- Context and product/runtime scope: [`llm/context/`](llm/context/)
+- Implementation contracts and internals: [`llm/implementation/`](llm/implementation/)
+- Dev/release/troubleshooting workflows: [`llm/workflow/`](llm/workflow/)
+
+Legacy compatibility redirects (kept for old links):
+- [`docs/api-surface.md`](docs/api-surface.md)
+- [`docs/native-dictation.md`](docs/native-dictation.md)
+- [`docs/background-hotkey-mvp.md`](docs/background-hotkey-mvp.md)
+- [`docs/macos-private-api-checklist.md`](docs/macos-private-api-checklist.md)
 
 ## Quick start (web mode)
 
@@ -91,8 +97,8 @@ Notes:
 - Desktop bundle config uses a `whisper-cli` sidecar (`src-tauri/tauri.conf.json` `externalBin`) so packaged app users do not need a separate CLI install.
 - In setup UI, use `Refresh Setup` to re-run checks and `Delete Local Model` to remove a downloaded model file.
 - If `WHISPER_MODEL_PATH` is set, it overrides onboarding selection for desktop dictation.
-- Full setup and troubleshooting guide: [`docs/native-dictation.md`](docs/native-dictation.md).
-- Background + `fn` hotkey MVP implementation notes: [`docs/background-hotkey-mvp.md`](docs/background-hotkey-mvp.md).
+- Full setup and troubleshooting guide: [`llm/README.md`](llm/README.md), [`llm/workflow/TROUBLESHOOTING.md`](llm/workflow/TROUBLESHOOTING.md).
+- Background + `fn` hotkey MVP implementation notes: [`llm/implementation/HOTKEY_AND_OVERLAY.md`](llm/implementation/HOTKEY_AND_OVERLAY.md).
 - Optional legacy override with an explicit model path:
   ```bash
   WHISPER_MODEL_PATH=/absolute/path/to/ggml-base.en.bin bun run tauri:dev
@@ -108,7 +114,7 @@ Notes:
 - This is intentional for the transparent native overlay pill windows used by hold-to-talk feedback.
 - Current implication: desktop releases are expected to be direct-distribution macOS apps, not Mac App Store builds.
 - If App Store distribution becomes a goal, change `"macOSPrivateApi"` to `false` and remove/replace transparency behavior that depends on private APIs.
-- Release/signing checklist: [`docs/macos-private-api-checklist.md`](docs/macos-private-api-checklist.md).
+- Release/signing checklist: [`llm/workflow/MACOS_PRIVATE_API_POLICY.md`](llm/workflow/MACOS_PRIVATE_API_POLICY.md).
 
 ### Desktop command/events contract
 

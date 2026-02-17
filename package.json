@@ -7,6 +7,7 @@
     "start": "bun run server.js",
     "dev": "bun --watch server.js",
     "test": "bun test",
+    "docs:verify": "./scripts/verify-docs.sh",
     "whisper:sidecar": "./scripts/build-whisper-sidecar.sh",
     "whisper:smoke": "./scripts/smoke-whisper-sidecar.sh",
     "test:rust": "cargo test --manifest-path src-tauri/Cargo.toml",
