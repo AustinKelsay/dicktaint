@@ -34,23 +34,37 @@ Pipeline sequence:
 1. `start_native_dictation` validates model + CLI readiness and active state.
 2. backend spawns recording thread and opens microphone stream.
 3. `stop_native_dictation` stops capture and joins thread.
-4. captured samples are resampled to 16 kHz mono if required.
-5. temp WAV is written.
-6. `whisper-cli` runs with `-m`, `-f`, `-l en`, `-otxt`, `-nt`, `-of`.
-7. transcript txt output is read.
-8. artifact tokens are removed.
-9. cleaned transcript is returned.
+4. captured samples are moved out of recording state without clone.
+5. audio is sanitized before inference:
+   - resample to 16 kHz mono if required
+   - dominant-channel capture preference for multi-channel input frames
+   - DC offset removal
+   - edge silence trimming with small speech padding
+   - gain normalization for very quiet/very loud input
+6. preflight speech guards run (minimum duration, RMS, peak checks).
+7. temp WAV is written.
+8. `whisper-cli` fast pass runs with `-m`, `-f`, `-l en`, `-t`, `-bs`, `-bo`, `-otxt`, `-nt`, `-np`, `-of`.
+9. transcript txt output is read and cleaned.
+10. if transcript quality heuristics are low-confidence, an accurate decode retry runs and better result wins.
+11. cleaned transcript is returned.
 
 Capture details:
 
 - input sample formats handled: `f32`, `i16`, `u16`
-- channel input is downmixed to mono
+- channel input is collapsed to mono with dominant channel preference
 - startup timeout for stream init: 5 seconds
 
 Normalization details:
 
 - strips token markers: `BLANK_AUDIO`, `NOISE`, `MUSIC`, `SILENCE`
 - if cleaned text is empty, returns no-speech error
+- very short or very low-energy captures return no-speech/too-short guard errors
+
+Decode strategy:
+
+- thread count is auto-derived from available cores and clamped to practical bounds
+- first pass favors speed (`beam=2`, `best-of=2`)
+- retry pass favors accuracy (`beam=5`, `best-of=5`) on low-information outputs
 
 Concurrency invariants:
 

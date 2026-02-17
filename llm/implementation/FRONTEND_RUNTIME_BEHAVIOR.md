@@ -46,6 +46,9 @@ Native desktop start/stop contract:
 - start calls `start_native_dictation`
 - stop calls `stop_native_dictation`
 - clear calls `cancel_native_dictation` best-effort
+- capture start timestamp is tracked for UX messaging
+- transcribe status includes capture duration when available
+- low-information transcript heuristic shows explicit quality guidance to user
 
 Browser speech path:
 

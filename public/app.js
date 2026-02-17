@@ -47,6 +47,7 @@ let nativeHotkeyActionInFlight = false;
 let nativeHotkeyUnlisten = null;
 let nativeFnHoldActive = false;
 let nativeFnStopRequested = false;
+let nativeCaptureStartedAt = 0;
 const MAC_DESKTOP_ONLY_MESSAGE = 'Desktop MVP currently supports macOS only. Current mobile focus is iPhone (iOS).';
 const PILL_STATUS_EVENT = 'dicktaint://pill-status';
 const FN_HOTKEY_STATE_EVENT = 'dicktaint://fn-state';
@@ -291,6 +292,29 @@ function getErrorMessage(error) {
   } catch {}
   const fallback = normalize(String(error));
   return fallback || 'Unknown error';
+}
+
+function formatSeconds(value) {
+  const seconds = Number(value);
+  if (!Number.isFinite(seconds) || seconds <= 0) return '0.0s';
+  return `${seconds.toFixed(1)}s`;
+}
+
+function nativeCaptureSecondsNow() {
+  if (!nativeCaptureStartedAt) return 0;
+  return Math.max(0, (Date.now() - nativeCaptureStartedAt) / 1000);
+}
+
+function isLikelyLowInformationTranscript(transcript, captureSeconds) {
+  const text = String(transcript || '').trim().toLowerCase();
+  if (!text) return true;
+  const tokens = text.split(/\s+/u).map((token) => token.replace(/[^a-z0-9]/gu, '')).filter(Boolean);
+  if (!tokens.length) return true;
+  const uniqueCount = new Set(tokens).size;
+  if (captureSeconds >= 6 && tokens.length <= 2) return true;
+  if (tokens.length >= 2 && uniqueCount === 1) return true;
+  if (captureSeconds >= 8 && uniqueCount / tokens.length < 0.35) return true;
+  return false;
 }
 
 function getSelectedDictationModel() {
@@ -819,6 +843,7 @@ async function startNativeDesktopDictation(trigger = 'button') {
     await tauriInvoke('start_native_dictation');
     isStartingDictation = false;
     setDictationState(true);
+    nativeCaptureStartedAt = Date.now();
     setUiMode('listening');
     if (trigger === 'hotkey-hold') {
       setStatus('Listening... release fn/F19 to stop and transcribe.', 'live');
@@ -831,6 +856,7 @@ async function startNativeDesktopDictation(trigger = 'button') {
     const details = getErrorMessage(error);
     isStartingDictation = false;
     setDictationState(false);
+    nativeCaptureStartedAt = 0;
     setUiMode('error');
     setStatus(`Could not start dictation: ${details}`, 'error');
   }
@@ -841,18 +867,27 @@ async function stopNativeDesktopDictation(trigger = 'button') {
   if (!tauriInvoke || (!isDictating && !isStartingDictation)) return;
 
   try {
+    const captureSeconds = nativeCaptureSecondsNow();
     setUiMode('loading');
-    setStatus('Transcribing captured audio...', 'working');
+    if (captureSeconds > 0) {
+      setStatus(`Transcribing ${formatSeconds(captureSeconds)} capture...`, 'working');
+    } else {
+      setStatus('Transcribing captured audio...', 'working');
+    }
     const transcript = await tauriInvoke('stop_native_dictation');
-    finalTranscript = `${finalTranscript} ${String(transcript || '').trim()}`.trim();
+    const clippedTranscript = String(transcript || '').trim();
+    finalTranscript = `${finalTranscript} ${clippedTranscript}`.trim();
     transcriptInput.value = finalTranscript;
     setUiMode('idle');
-    if (trigger === 'hotkey-hold') {
-      setStatus('Dictation captured from fn hold and transcribed.', 'ok');
-    } else if (trigger === 'hotkey') {
-      setStatus('Dictation captured from fn hold and transcribed.', 'ok');
+    if (isLikelyLowInformationTranscript(clippedTranscript, captureSeconds)) {
+      setStatus(
+        `Transcript was unusually short for ${formatSeconds(captureSeconds)} of speech. Try speaking closer to the mic and reducing background noise.`,
+        'neutral'
+      );
+    } else if (trigger === 'hotkey-hold' || trigger === 'hotkey') {
+      setStatus(`Dictation captured from fn hold (${formatSeconds(captureSeconds)}) and transcribed.`, 'ok');
     } else {
-      setStatus('Dictation captured and transcribed.', 'ok');
+      setStatus(`Dictation captured (${formatSeconds(captureSeconds)}) and transcribed.`, 'ok');
     }
   } catch (error) {
     const details = getErrorMessage(error);
@@ -861,6 +896,7 @@ async function stopNativeDesktopDictation(trigger = 'button') {
   } finally {
     isStartingDictation = false;
     setDictationState(false);
+    nativeCaptureStartedAt = 0;
   }
 }
 
@@ -946,6 +982,7 @@ function initDictation() {
     isStartingDictation = false;
     clearRestartTimer();
     finalTranscript = '';
+    nativeCaptureStartedAt = 0;
     transcriptInput.value = '';
     setUiMode('idle');
     setStatus('Transcript cleared.', 'neutral');
