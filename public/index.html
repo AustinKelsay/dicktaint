@@ -13,71 +13,66 @@
     <link rel="stylesheet" href="/styles.css" />
   </head>
   <body>
-    <main class="app-shell">
-      <header class="panel masthead">
-        <div class="masthead-top">
-          <p class="eyebrow">PRIVATE LOCAL DICTATION</p>
-          <p class="badge">No cloud snitching</p>
-        </div>
+    <main class="app-shell" data-screen="onboarding">
+      <header class="app-header">
+        <p class="eyebrow">PRIVATE LOCAL DICTATION</p>
         <h1>dicktaint</h1>
-        <p class="subtitle">
-          Local-first dictation: run speech on-device with whisper.cpp, then polish text with Ollama
-        </p>
-        <div class="feature-grid">
-          <article>
-            <h2>Capture</h2>
-            <p>Start and stop live speech, then edit raw text. Desktop transcription runs locally with whisper-cli.</p>
-          </article>
-          <article>
-            <h2>Refine</h2>
-            <p>One click runs your chosen Ollama cleanup model and punctuates the chaos.</p>
-          </article>
-          <article>
-            <h2>Keep It Local</h2>
-            <p>Each device keeps its own downloaded Whisper model and local settings.</p>
-          </article>
-        </div>
       </header>
 
-      <div class="workspace">
-        <section class="panel controls-card">
-          <div class="panel-head">
-            <h2>Engine Room</h2>
-            <p>Configure local speech setup for this device, then choose your Ollama cleanup model.</p>
+      <section id="onboardingScreen" class="screen">
+        <article class="panel intro-card">
+          <div class="setup-header">
+            <p id="setupModeChip" class="chip">ONBOARDING</p>
+            <button id="backToDictation" class="ghost" type="button" hidden>Back to Dictation</button>
           </div>
-          <section id="dictationModelCard" class="model-onboarding" hidden>
-            <h3>Dictation Setup (whisper.cpp)</h3>
-            <p class="hint">Packaged desktop builds bundle <code>whisper-cli</code>. On first run, download one model sized for this machine.</p>
-            <p id="dictationDeviceProfile" class="hint"></p>
-            <div class="field-row">
-              <label for="dictationModelSelect">Local Dictation Model</label>
-              <div class="inline-actions">
-                <select id="dictationModelSelect"></select>
-                <button id="installDictationModel" class="secondary" type="button">Download + Use</button>
-              </div>
-            </div>
-            <div class="dictation-setup-actions">
-              <button id="openWhisperSetup" class="ghost" type="button">Get whisper-cli (dev)</button>
-              <button id="retryWhisperCheck" class="ghost" type="button">Retry Check</button>
-            </div>
-            <p id="dictationModelStatus" class="hint"></p>
-          </section>
-          <div class="field-row">
-            <label for="modelSelect">Ollama Model (Cleanup)</label>
-            <div class="inline-actions">
-              <select id="modelSelect"></select>
-              <button id="refreshModels" class="ghost" type="button">Refresh</button>
-            </div>
+          <h2 id="setupTitle">Set up local speech-to-text</h2>
+          <p id="setupLead" class="hint">
+            Everything runs on-device. Pick a model, download it once, and this machine is ready.
+          </p>
+          <ol id="setupSteps" class="setup-steps">
+            <li>Check whisper-cli + machine profile.</li>
+            <li>Pick a model sized for this device.</li>
+            <li>Tap Download + Use, then start dictation.</li>
+          </ol>
+          <div class="setup-health" aria-live="polite">
+            <span id="whisperCliHealth" class="health-pill" data-state="pending">whisper-cli: checking</span>
+            <span id="dictationModelHealth" class="health-pill" data-state="pending">model: checking</span>
           </div>
-          <p class="hint">
-            Tip: load more choices with <code>ollama pull &lt;model&gt;</code> and refresh.
+          <p id="dictationDeviceProfile" class="hint"></p>
+        </article>
+
+        <section id="dictationModelCard" class="panel model-onboarding" hidden>
+          <label for="dictationModelSelect">Local Speech Model</label>
+          <div class="inline-actions">
+            <select id="dictationModelSelect"></select>
+            <button id="installDictationModel" class="secondary" type="button">Download + Use</button>
+          </div>
+          <p id="dictationModelMeta" class="hint model-meta"></p>
+          <div class="dictation-setup-actions">
+            <button id="deleteDictationModel" class="ghost danger-btn" type="button">Delete Local Model</button>
+            <button id="retryWhisperCheck" class="ghost" type="button">Refresh Setup</button>
+            <button id="openWhisperSetup" class="ghost quiet" type="button" hidden>Open CLI Setup (dev)</button>
+          </div>
+          <p id="dictationModelBusy" class="hint busy-note" hidden></p>
+          <p id="dictationModelStatus" class="hint"></p>
+          <p class="hint setup-note">
+            Dev helper: <code>bun run whisper:sidecar</code> then <code>bun run whisper:smoke</code>.
           </p>
         </section>
 
-        <section class="panel transcript-card">
-          <div class="panel-head">
-            <h2>Raw Dictation</h2>
-            <p>Talk first. Desktop mode transcribes locally with whisper-cli + your local model. Then polish with Ollama.</p>
+        <div class="screen-actions">
+          <button id="onboardingContinue" class="primary" type="button">Start Dictation</button>
+        </div>
+      </section>
+
+      <section id="dictationScreen" class="screen" hidden>
+        <article class="panel dictation-card">
+          <div class="dictation-head">
+            <div>
+              <h2>Dictation</h2>
+              <p class="hint">Tap start, speak, then stop to transcribe locally.</p>
+            </div>
+            <button id="openSettings" class="ghost" type="button">Settings</button>
           </div>
           <div class="dictation-actions">
             <button id="startDictation" class="primary" type="button">Start Dictation</button>
@@ -85,27 +80,16 @@
             <button id="clearTranscript" class="ghost" type="button">Clear</button>
           </div>
           <label for="transcriptInput">Transcript</label>
-          <textarea id="transcriptInput" rows="8" placeholder="Speak or paste your raw transcript here..."></textarea>
-          <button id="runRefine" class="primary refine-btn" type="button">Polish with Ollama</button>
-        </section>
+          <textarea id="transcriptInput" rows="10" placeholder="Your dictated text appears here..."></textarea>
+        </article>
+      </section>
 
-        <section class="panel output-card">
-          <div class="panel-head">
-            <h2>Clean Output</h2>
-            <p>Readable, punctuated text appears below.</p>
-          </div>
-          <label for="output">Result</label>
-          <textarea id="output" rows="8" readonly placeholder="Your cleaned dictation appears here..."></textarea>
-        </section>
-      </div>
-
-      <footer class="panel status-bar">
+      <footer class="status-bar" role="status" aria-live="polite">
         <p class="status-label">Status</p>
         <p id="status">Loading local-first setup...</p>
       </footer>
     </main>
 
-    <script src="/dictation-logic.js" defer></script>
     <script src="/app.js" defer></script>
   </body>
 </html>

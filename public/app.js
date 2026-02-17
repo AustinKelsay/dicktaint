@@ -1,43 +1,66 @@
 const statusEl = document.getElementById('status');
-const modelSelect = document.getElementById('modelSelect');
-const refreshBtn = document.getElementById('refreshModels');
-const runBtn = document.getElementById('runRefine');
+const onboardingScreen = document.getElementById('onboardingScreen');
+const dictationScreen = document.getElementById('dictationScreen');
+const onboardingContinueBtn = document.getElementById('onboardingContinue');
+const openSettingsBtn = document.getElementById('openSettings');
+const backToDictationBtn = document.getElementById('backToDictation');
+const setupModeChipEl = document.getElementById('setupModeChip');
+const setupTitleEl = document.getElementById('setupTitle');
+const setupLeadEl = document.getElementById('setupLead');
+const setupStepsEl = document.getElementById('setupSteps');
 const startDictationBtn = document.getElementById('startDictation');
 const stopDictationBtn = document.getElementById('stopDictation');
 const clearTranscriptBtn = document.getElementById('clearTranscript');
 const transcriptInput = document.getElementById('transcriptInput');
-const output = document.getElementById('output');
 const appShell = document.querySelector('.app-shell');
 const dictationModelCard = document.getElementById('dictationModelCard');
 const dictationModelSelect = document.getElementById('dictationModelSelect');
 const installDictationModelBtn = document.getElementById('installDictationModel');
+const deleteDictationModelBtn = document.getElementById('deleteDictationModel');
 const openWhisperSetupBtn = document.getElementById('openWhisperSetup');
 const retryWhisperCheckBtn = document.getElementById('retryWhisperCheck');
+const whisperCliHealthEl = document.getElementById('whisperCliHealth');
+const dictationModelHealthEl = document.getElementById('dictationModelHealth');
 const dictationModelStatusEl = document.getElementById('dictationModelStatus');
+const dictationModelBusyEl = document.getElementById('dictationModelBusy');
 const dictationDeviceProfileEl = document.getElementById('dictationDeviceProfile');
+const dictationModelMetaEl = document.getElementById('dictationModelMeta');
 
-const {
-  DEFAULT_MODEL = 'llama3.2:3b',
-  pickDefaultModel = (models) => (Array.isArray(models) && models[0]) || '',
-  withSpeechSupportHint = (message) => message
-} = window.DictationLogic || {};
 const SpeechRecognitionApi = window.SpeechRecognition || window.webkitSpeechRecognition || null;
 
 let recognition = null;
 let finalTranscript = '';
 let isDictating = false;
 let isStartingDictation = false;
-let isBusy = false;
 let shouldKeepDictating = false;
 let restartTimer = null;
 let hasMicrophoneAccess = false;
 let isInstallingDictationModel = false;
-let nativeDictationModelReady = !isNativeDesktopMode();
+let isDeletingDictationModel = false;
+let nativeDictationModelReady = !isFocusedMacDesktopMode();
 let whisperCliAvailable = true;
-const runBtnLabel = runBtn.textContent;
+let dictationModels = [];
+let currentOnboarding = null;
+let setupScreenMode = 'onboarding';
+const NATIVE_HOLD_HOTKEYS = new Set(['Fn', 'F19']);
+let nativeHotkeyActionInFlight = false;
+let nativeHotkeyUnlisten = null;
+let nativeFnHoldActive = false;
+let nativeFnStopRequested = false;
+const MAC_DESKTOP_ONLY_MESSAGE = 'Desktop MVP currently supports macOS only. Current mobile focus is iPhone (iOS).';
+const PILL_STATUS_EVENT = 'dicktaint://pill-status';
+const FN_HOTKEY_STATE_EVENT = 'dicktaint://fn-state';
+
+function modelDisplayName(model) {
+  return String(model?.display_name || '').replace(/\s+\(Selected\)$/u, '').trim();
+}
 
 function getTauriInvoke() {
   return window.__TAURI__?.core?.invoke || null;
+}
+
+function getTauriEventApi() {
+  return window.__TAURI__?.event || null;
 }
 
 function isMobileUserAgent() {
@@ -49,41 +72,17 @@ function isNativeDesktopMode() {
   return Boolean(getTauriInvoke()) && !isMobileUserAgent();
 }
 
+function isMacDesktopUserAgent() {
+  const ua = navigator.userAgent || '';
+  return /Macintosh|Mac OS X/i.test(ua);
+}
+
+function isFocusedMacDesktopMode() {
+  return isNativeDesktopMode() && isMacDesktopUserAgent();
+}
+
 function shouldUseTauriCommands() {
-  return isNativeDesktopMode();
-}
-
-async function listModelsViaHttp() {
-  const response = await fetch('/api/models');
-  const data = await response.json();
-
-  if (!response.ok || !data.ok) {
-    throw new Error(data.error || 'Failed to load models');
-  }
-
-  return data.models || [];
-}
-
-async function refineViaHttp(model, transcript, instruction) {
-  const response = await fetch('/api/refine', {
-    method: 'POST',
-    headers: {
-      'Content-Type': 'application/json'
-    },
-    body: JSON.stringify({
-      model,
-      transcript,
-      instruction
-    })
-  });
-
-  const data = await response.json();
-
-  if (!response.ok || !data.ok) {
-    throw new Error(data.error || 'Refine request failed');
-  }
-
-  return data.text || '';
+  return isFocusedMacDesktopMode();
 }
 
 function setUiMode(mode) {
@@ -93,12 +92,178 @@ function setUiMode(mode) {
 function setStatus(message, tone = 'neutral') {
   statusEl.textContent = message;
   statusEl.dataset.tone = tone;
+  syncHotkeyPillForStatus(message, tone);
+}
+
+function setHotkeyPill(message, state = 'idle', visible = true) {
+  emitHotkeyPillOverlay(message, state, visible);
+}
+
+function emitHotkeyPillOverlay(message, state = 'idle', visible = true) {
+  const tauriEvent = getTauriEventApi();
+  if (typeof tauriEvent?.emit !== 'function') return;
+
+  tauriEvent.emit(PILL_STATUS_EVENT, {
+    message: String(message || '').trim() || 'Hold fn to dictate',
+    state: String(state || 'idle'),
+    visible: Boolean(visible)
+  }).catch(() => {});
+}
+
+function summarizeHotkeyPillStatus(message, tone = 'neutral') {
+  if (!isFocusedMacDesktopMode()) {
+    return 'Desktop MVP: macOS only';
+  }
+  const normalized = String(message || '').toLowerCase();
+
+  if (tone === 'live') {
+    return 'Listening - release fn to stop';
+  }
+  if (tone === 'working') {
+    if (normalized.includes('transcrib')) return 'Transcribing...';
+    if (normalized.includes('microphone') || normalized.includes('starting') || normalized.includes('opening')) {
+      return 'Starting dictation...';
+    }
+    return 'Working...';
+  }
+  if (tone === 'ok') {
+    if (normalized.includes('transcrib') || normalized.includes('captured') || normalized.includes('transcript')) {
+      return 'Transcript ready';
+    }
+    return 'Ready - hold fn to start';
+  }
+  if (tone === 'error') {
+    return 'Dictation error - check status';
+  }
+  return 'Hold fn to dictate';
+}
+
+function syncHotkeyPillForStatus(message, tone = 'neutral') {
+  if (!isNativeDesktopMode()) {
+    setHotkeyPill('', 'idle', false);
+    return;
+  }
+  // Overlay window expects a tight state enum; map richer UI tones into it.
+  const state = tone === 'live'
+    ? 'live'
+    : (tone === 'working' ? 'working' : (tone === 'ok' ? 'ok' : (tone === 'error' ? 'error' : 'idle')));
+  setHotkeyPill(summarizeHotkeyPillStatus(message, tone), state, true);
+}
+
+function setAppScreen(screen) {
+  const next = screen === 'dictation' ? 'dictation' : 'onboarding';
+  if (onboardingScreen) onboardingScreen.hidden = next !== 'onboarding';
+  if (dictationScreen) dictationScreen.hidden = next !== 'dictation';
+  if (appShell) appShell.dataset.screen = next;
+  document.body.dataset.screen = next;
+}
+
+function setSetupScreenMode(mode) {
+  setupScreenMode = mode === 'settings' ? 'settings' : 'onboarding';
+
+  const settingsMode = setupScreenMode === 'settings';
+  if (setupModeChipEl) setupModeChipEl.textContent = settingsMode ? 'SETTINGS' : 'ONBOARDING';
+  if (setupTitleEl) setupTitleEl.textContent = settingsMode ? 'Manage local speech setup' : 'Set up local speech-to-text';
+  if (setupLeadEl) {
+    setupLeadEl.textContent = settingsMode
+      ? 'Switch models, delete downloads, or re-check whisper-cli. Changes apply to this device only.'
+      : 'Everything runs on-device. Pick a model, download it once, and this machine is ready.';
+  }
+  if (setupStepsEl) setupStepsEl.hidden = settingsMode;
+  if (backToDictationBtn) backToDictationBtn.hidden = !settingsMode;
+  if (onboardingContinueBtn) onboardingContinueBtn.hidden = settingsMode;
+}
+
+function syncFlowForSetupReadiness() {
+  const setupReady = !isFocusedMacDesktopMode() || nativeDictationModelReady;
+  if (!setupReady) {
+    setSetupScreenMode('onboarding');
+    setAppScreen('onboarding');
+    return;
+  }
+  if (setupScreenMode === 'onboarding') {
+    setAppScreen('dictation');
+  }
 }
 
 function setDictationModelStatus(message, tone = 'neutral') {
   if (!dictationModelStatusEl) return;
   dictationModelStatusEl.textContent = message;
   dictationModelStatusEl.dataset.tone = tone;
+}
+
+function setDictationModelBusy(message = '') {
+  if (!dictationModelBusyEl) return;
+  const trimmed = String(message || '').trim();
+  dictationModelBusyEl.hidden = !trimmed;
+  dictationModelBusyEl.textContent = trimmed;
+}
+
+function setHealthPill(el, state, message) {
+  if (!el) return;
+  el.dataset.state = state;
+  el.textContent = message;
+}
+
+function syncSetupHealthPills() {
+  const modelExists = Boolean(currentOnboarding?.selected_model_exists);
+
+  if (!isNativeDesktopMode()) {
+    setHealthPill(whisperCliHealthEl, 'ok', 'whisper-cli: n/a (web)');
+    setHealthPill(dictationModelHealthEl, 'ok', 'model: n/a (web)');
+    return;
+  }
+  if (!isFocusedMacDesktopMode()) {
+    setHealthPill(whisperCliHealthEl, 'error', 'whisper-cli: unsupported on this desktop OS');
+    setHealthPill(dictationModelHealthEl, 'error', 'model: unsupported on this desktop OS');
+    return;
+  }
+
+  if (!currentOnboarding) {
+    setHealthPill(whisperCliHealthEl, 'pending', 'whisper-cli: checking');
+    setHealthPill(dictationModelHealthEl, 'pending', 'model: checking');
+    return;
+  }
+
+  if (whisperCliAvailable) {
+    setHealthPill(whisperCliHealthEl, 'ok', 'whisper-cli: ready');
+  } else {
+    setHealthPill(whisperCliHealthEl, 'error', 'whisper-cli: unavailable');
+  }
+
+  if (isInstallingDictationModel) {
+    setHealthPill(dictationModelHealthEl, 'working', 'model: downloading');
+  } else if (isDeletingDictationModel) {
+    setHealthPill(dictationModelHealthEl, 'working', 'model: deleting');
+  } else if (modelExists) {
+    setHealthPill(dictationModelHealthEl, 'ok', 'model: ready');
+  } else {
+    setHealthPill(dictationModelHealthEl, 'pending', 'model: required');
+  }
+}
+
+function refreshSelectedModelMeta() {
+  if (!dictationModelMetaEl) return;
+  const selected = getSelectedDictationModel();
+  if (!selected) {
+    dictationModelMetaEl.textContent = 'Pick a model to view speed, quality, and local install state.';
+    return;
+  }
+
+  const sizeValue = Number(selected.approx_size_gb);
+  const sizeLabel = Number.isFinite(sizeValue)
+    ? `${sizeValue.toFixed(2).replace(/\.00$/u, '')} GB`
+    : 'size unknown';
+
+  const parts = [
+    modelDisplayName(selected),
+    sizeLabel,
+    selected.speed_note || 'speed unknown',
+    selected.quality_note || 'quality unknown',
+    selected.installed ? 'downloaded locally' : 'not downloaded',
+    selected.recommended ? 'recommended for this machine' : (selected.likely_runnable ? 'fits this machine' : 'likely heavy on this machine')
+  ];
+  dictationModelMetaEl.textContent = parts.join(' • ');
 }
 
 function getErrorMessage(error) {
@@ -128,17 +293,56 @@ function getErrorMessage(error) {
   return fallback || 'Unknown error';
 }
 
+function getSelectedDictationModel() {
+  const selectedId = (dictationModelSelect?.value || '').trim();
+  if (!selectedId) return null;
+  return dictationModels.find((model) => model.id === selectedId) || null;
+}
+
+function updateModelActionLabels() {
+  if (!installDictationModelBtn) return;
+
+  const selected = getSelectedDictationModel();
+  if (!selected) {
+    installDictationModelBtn.textContent = 'Download + Use';
+    return;
+  }
+
+  const isCurrent = Boolean(currentOnboarding?.selected_model_exists)
+    && currentOnboarding?.selected_model_id === selected.id;
+
+  if (!selected.installed) {
+    installDictationModelBtn.textContent = 'Download + Use';
+    return;
+  }
+
+  installDictationModelBtn.textContent = isCurrent ? 'Using Now' : 'Use Installed';
+}
+
 function syncControls() {
-  const hasCaptureSupport = isNativeDesktopMode() || Boolean(SpeechRecognitionApi);
-  const dictationModelMissing = isNativeDesktopMode() && !nativeDictationModelReady;
-  const lockControls = isBusy || isInstallingDictationModel;
-  runBtn.disabled = lockControls;
-  refreshBtn.disabled = lockControls;
+  const hasCaptureSupport = isFocusedMacDesktopMode() || (!isNativeDesktopMode() && Boolean(SpeechRecognitionApi));
+  const dictationModelMissing = isFocusedMacDesktopMode() && !nativeDictationModelReady;
+  const lockControls = isInstallingDictationModel || isDeletingDictationModel;
+  const selected = getSelectedDictationModel();
+  const setupReady = !isFocusedMacDesktopMode() || nativeDictationModelReady;
+  const selectedAlreadyActive = Boolean(selected?.installed)
+    && Boolean(currentOnboarding?.selected_model_exists)
+    && currentOnboarding?.selected_model_id === selected.id;
+
   startDictationBtn.disabled = lockControls || !hasCaptureSupport || isDictating || isStartingDictation || dictationModelMissing;
   stopDictationBtn.disabled = lockControls || !hasCaptureSupport || (!isDictating && !isStartingDictation);
   clearTranscriptBtn.disabled = lockControls;
+
   if (installDictationModelBtn) {
-    installDictationModelBtn.disabled = lockControls || !dictationModelSelect?.value || !whisperCliAvailable;
+    installDictationModelBtn.disabled = (
+      lockControls
+      || !dictationModelSelect?.value
+      || !whisperCliAvailable
+      || selectedAlreadyActive
+    );
+  }
+  if (deleteDictationModelBtn) {
+    deleteDictationModelBtn.disabled = lockControls || !selected?.installed;
   }
   if (openWhisperSetupBtn) {
     openWhisperSetupBtn.disabled = lockControls;
@@ -149,17 +353,22 @@ function syncControls() {
   if (dictationModelSelect) {
     dictationModelSelect.disabled = lockControls;
   }
-
-  runBtn.dataset.busy = isBusy ? 'true' : 'false';
-  runBtn.textContent = isBusy ? 'Polishing...' : runBtnLabel;
-  if (appShell) {
-    appShell.setAttribute('aria-busy', isBusy ? 'true' : 'false');
+  if (onboardingContinueBtn) {
+    onboardingContinueBtn.disabled = lockControls || !setupReady;
+    onboardingContinueBtn.textContent = setupReady ? 'Start Dictation' : 'Complete Setup to Continue';
   }
-}
+  if (openSettingsBtn) {
+    openSettingsBtn.disabled = lockControls || !isFocusedMacDesktopMode();
+  }
+  if (backToDictationBtn) {
+    backToDictationBtn.disabled = lockControls;
+  }
 
-function setBusy(busy) {
-  isBusy = Boolean(busy);
-  syncControls();
+  if (appShell) {
+    appShell.setAttribute('aria-busy', lockControls ? 'true' : 'false');
+  }
+  updateModelActionLabels();
+  syncSetupHealthPills();
 }
 
 function setDictationState(dictating) {
@@ -176,12 +385,12 @@ function clearRestartTimer() {
 function describeSpeechError(errorCode) {
   if (errorCode === 'not-allowed' || errorCode === 'service-not-allowed') {
     if (hasMicrophoneAccess) {
-      return isNativeDesktopMode()
+      return isFocusedMacDesktopMode()
         ? 'Speech recognition permission denied. In macOS Settings > Privacy & Security > Speech Recognition, allow this app/terminal and relaunch.'
         : 'Speech recognition permission denied by browser/runtime. Allow speech recognition and retry.';
     }
 
-    return isNativeDesktopMode()
+    return isFocusedMacDesktopMode()
       ? 'Microphone permission denied. In macOS Settings > Privacy & Security > Microphone, allow this app (or Terminal during tauri:dev), then relaunch.'
       : 'Microphone permission denied in your browser. Allow mic access for this site and try again.';
   }
@@ -226,6 +435,7 @@ async function ensureMicrophoneAccess() {
 function scheduleRecognitionRestart() {
   clearRestartTimer();
 
+  // Browser speech engines can end between utterances; auto-restart keeps hands-free flow.
   restartTimer = setTimeout(() => {
     if (!recognition || !shouldKeepDictating || isStartingDictation || isDictating) return;
 
@@ -250,16 +460,17 @@ function describeDeviceProfile(device) {
 }
 
 function buildDictationModelLabel(model) {
-  const performance = model.recommended
-    ? 'Recommended for this device'
-    : (model.likely_runnable ? `Runs on >= ${model.min_ram_gb} GB RAM` : `Likely too heavy (< ${model.min_ram_gb} GB RAM)`);
-  const installed = model.installed ? 'Installed' : 'Not installed';
-  return `${model.display_name} • ${model.approx_size_gb} GB • ${performance} • ${installed}`;
+  const fit = model.recommended
+    ? 'Recommended'
+    : (model.likely_runnable ? 'Likely runnable' : 'Heavy for this machine');
+  const local = model.installed ? 'Installed' : `${model.approx_size_gb} GB`;
+  return `${modelDisplayName(model)} • ${local} • ${fit}`;
 }
 
 function renderDictationModelOptions(models, selectedModelId) {
   if (!dictationModelSelect) return;
   const safeModels = Array.isArray(models) ? models : [];
+  dictationModels = safeModels;
 
   dictationModelSelect.innerHTML = '';
   for (const model of safeModels) {
@@ -271,25 +482,59 @@ function renderDictationModelOptions(models, selectedModelId) {
 
   if (!dictationModelSelect.options.length) {
     dictationModelSelect.value = '';
+    updateModelActionLabels();
+    refreshSelectedModelMeta();
     return;
   }
 
   const hasSelectedModel = Boolean(selectedModelId) && safeModels.some((model) => model.id === selectedModelId);
   if (hasSelectedModel) {
     dictationModelSelect.value = selectedModelId;
+    updateModelActionLabels();
+    refreshSelectedModelMeta();
     return;
   }
 
+  const installed = safeModels.find((model) => model.installed);
   const best = safeModels.find((model) => model.recommended || model.likely_runnable) || safeModels[0];
-  dictationModelSelect.value = best?.id || '';
+  dictationModelSelect.value = installed?.id || best?.id || '';
+  updateModelActionLabels();
+  refreshSelectedModelMeta();
 }
 
 async function loadDictationOnboarding({ quietStatus = false } = {}) {
+  // Web/mobile bypass desktop onboarding gates and run with browser/manual input paths.
   if (!isNativeDesktopMode()) {
     nativeDictationModelReady = true;
     whisperCliAvailable = true;
+    currentOnboarding = null;
+    setSetupScreenMode('onboarding');
     if (dictationModelCard) {
       dictationModelCard.hidden = true;
+    }
+    if (openSettingsBtn) {
+      openSettingsBtn.hidden = true;
+    }
+    setAppScreen('dictation');
+    syncControls();
+    return null;
+  }
+  if (!isFocusedMacDesktopMode()) {
+    nativeDictationModelReady = false;
+    whisperCliAvailable = false;
+    currentOnboarding = null;
+    setSetupScreenMode('onboarding');
+    if (dictationModelCard) {
+      dictationModelCard.hidden = true;
+    }
+    if (openSettingsBtn) {
+      openSettingsBtn.hidden = true;
+    }
+    setAppScreen('onboarding');
+    setDictationModelBusy('');
+    setDictationModelStatus(MAC_DESKTOP_ONLY_MESSAGE, 'error');
+    if (!quietStatus) {
+      setStatus(MAC_DESKTOP_ONLY_MESSAGE, 'error');
     }
     syncControls();
     return null;
@@ -299,65 +544,90 @@ async function loadDictationOnboarding({ quietStatus = false } = {}) {
   if (!tauriInvoke) {
     nativeDictationModelReady = false;
     whisperCliAvailable = false;
+    currentOnboarding = null;
+    setSetupScreenMode('onboarding');
+    if (openSettingsBtn) {
+      openSettingsBtn.hidden = true;
+    }
+    setAppScreen('onboarding');
     syncControls();
     return null;
   }
 
   try {
     if (!quietStatus) {
-      setStatus('Checking local dictation model setup...', 'working');
+      setStatus('Checking local speech-to-text setup...', 'working');
     }
+    setDictationModelBusy('');
+
     const onboarding = await tauriInvoke('get_dictation_onboarding');
+    currentOnboarding = onboarding;
     whisperCliAvailable = Boolean(onboarding.whisper_cli_available);
     nativeDictationModelReady = Boolean(onboarding.selected_model_exists && whisperCliAvailable);
 
     if (dictationModelCard) {
       dictationModelCard.hidden = false;
     }
+    if (openSettingsBtn) {
+      openSettingsBtn.hidden = false;
+    }
     if (dictationDeviceProfileEl) {
       dictationDeviceProfileEl.textContent = describeDeviceProfile(onboarding.device);
     }
+
     renderDictationModelOptions(onboarding.models, onboarding.selected_model_id);
+
+    if (openWhisperSetupBtn) {
+      openWhisperSetupBtn.hidden = Boolean(onboarding.whisper_cli_available);
+    }
 
     if (!onboarding.whisper_cli_available && !onboarding.selected_model_exists) {
       setDictationModelStatus(
-        `whisper-cli is not available at "${onboarding.whisper_cli_path}". Packaged builds should include it; in tauri:dev click "Get whisper-cli (dev)", then "Retry Check".`,
+        `whisper-cli is unavailable. Packaged builds should include it. In tauri:dev, click "Open CLI Setup (dev)", then "Refresh Setup". Checked: ${onboarding.whisper_cli_path}`,
         'error'
       );
       nativeDictationModelReady = false;
     } else if (!onboarding.whisper_cli_available && onboarding.selected_model_exists) {
       setDictationModelStatus(
-        `Model is downloaded, but whisper-cli is unavailable at "${onboarding.whisper_cli_path}". In tauri:dev install whisper-cpp, then Retry Check.`,
+        `Model is ready, but whisper-cli is unavailable. In tauri:dev, click "Open CLI Setup (dev)", then "Refresh Setup". Checked: ${onboarding.whisper_cli_path}`,
         'neutral'
       );
     } else if (onboarding.selected_model_exists) {
       const selected = (onboarding.models || []).find((item) => item.id === onboarding.selected_model_id);
       setDictationModelStatus(
-        `Ready on this device: ${selected?.display_name || onboarding.selected_model_id}.`,
+        `Speech-to-text ready: ${modelDisplayName(selected) || onboarding.selected_model_id}.`,
         'ok'
       );
       if (!quietStatus) {
-        setStatus('Local dictation setup is ready on this device.', 'ok');
+        setStatus('Local speech-to-text is ready on this device.', 'ok');
       }
     } else {
       setDictationModelStatus(
-        'Step 1: confirm whisper-cli is available. Step 2: choose a recommended model and download it locally.',
+        'Choose a model and click "Download + Use" to enable local speech-to-text.',
         'neutral'
       );
       if (!quietStatus) {
-        setStatus('Onboarding required: verify whisper-cli, then download a local model for this device.', 'neutral');
+        setStatus('Setup required: download a local speech model for this device.', 'neutral');
       }
     }
 
+    syncFlowForSetupReadiness();
     syncControls();
     return onboarding;
   } catch (error) {
     nativeDictationModelReady = false;
     whisperCliAvailable = false;
+    currentOnboarding = null;
+    setSetupScreenMode('onboarding');
+    if (openSettingsBtn) {
+      openSettingsBtn.hidden = true;
+    }
+    setAppScreen('onboarding');
     const details = getErrorMessage(error);
-    setDictationModelStatus(`Could not read onboarding state: ${details}`, 'error');
+    setDictationModelStatus(`Could not read setup state: ${details}`, 'error');
+    setDictationModelBusy('');
     if (!quietStatus) {
-      setStatus(`Could not load dictation onboarding: ${details}`, 'error');
+      setStatus(`Could not load setup state: ${details}`, 'error');
     }
     syncControls();
     return null;
@@ -366,44 +636,158 @@ async function loadDictationOnboarding({ quietStatus = false } = {}) {
 
 async function installSelectedDictationModel() {
   const tauriInvoke = getTauriInvoke();
-  if (!tauriInvoke || !isNativeDesktopMode()) return;
-  const model = (dictationModelSelect?.value || '').trim();
-  if (!model) {
-    setStatus('Pick a dictation model first.', 'error');
+  if (!tauriInvoke || !isFocusedMacDesktopMode()) return;
+
+  const selected = getSelectedDictationModel();
+  if (!selected) {
+    setStatus('Pick a speech model first.', 'error');
     return;
   }
   if (!whisperCliAvailable) {
-    setStatus('whisper-cli is not ready yet. In tauri:dev install it, then click Retry Check.', 'error');
+    setStatus('whisper-cli is unavailable. In tauri:dev, click "Open CLI Setup (dev)", then "Refresh Setup".', 'error');
     return;
   }
+
+  const prevNativeDictationModelReady = nativeDictationModelReady;
+  let onboardingAfterInstall = null;
 
   try {
     isInstallingDictationModel = true;
     syncControls();
     setUiMode('loading');
-    setDictationModelStatus('Downloading model to local device storage...', 'neutral');
-    setStatus('Downloading selected Whisper model...', 'working');
-    await tauriInvoke('install_dictation_model', { model });
+
+    const isAlreadyInstalled = Boolean(selected.installed);
+    if (isAlreadyInstalled) {
+      setDictationModelBusy(`Switching active model to ${modelDisplayName(selected)}...`);
+      setDictationModelStatus(`Switching to ${modelDisplayName(selected)}...`, 'neutral');
+      setStatus(`Switching active model to ${modelDisplayName(selected)}...`, 'working');
+    } else {
+      setDictationModelBusy(`Downloading ${modelDisplayName(selected)} (~${selected.approx_size_gb} GB). Keep this window open...`);
+      setDictationModelStatus(
+        `Downloading ${modelDisplayName(selected)} (~${selected.approx_size_gb} GB). Keep this window open while it downloads...`,
+        'neutral'
+      );
+      setStatus(`Downloading ${modelDisplayName(selected)} model...`, 'working');
+    }
+
+    await tauriInvoke('install_dictation_model', { model: selected.id });
     const onboarding = await loadDictationOnboarding({ quietStatus: true });
+    onboardingAfterInstall = onboarding;
+
     if (!onboarding) {
-      throw new Error('Model downloaded, but onboarding refresh failed. Click Retry Check.');
+      throw new Error('Model update completed, but setup refresh failed. Click Refresh Setup.');
     }
     if (!onboarding.selected_model_exists) {
-      throw new Error('Model download finished, but selected model is not ready yet. Click Retry Check.');
+      throw new Error('Model update finished, but selected model is not ready yet. Click Refresh Setup.');
     }
     if (!onboarding.whisper_cli_available) {
-      throw new Error('Model downloaded, but whisper-cli is unavailable. Click Retry Check.');
+      throw new Error('Model is ready, but whisper-cli is unavailable. Click Refresh Setup.');
     }
+
+    const selectedAfter = (onboarding.models || []).find((item) => item.id === onboarding.selected_model_id);
+    setDictationModelBusy('');
     setUiMode('idle');
-    setStatus('Local Whisper model downloaded and selected for this device.', 'ok');
+    setStatus(`Ready: ${modelDisplayName(selectedAfter) || modelDisplayName(selected)} is active for local dictation.`, 'ok');
+    if (setupScreenMode === 'onboarding') {
+      setAppScreen('dictation');
+    }
   } catch (error) {
     const details = getErrorMessage(error);
-    nativeDictationModelReady = false;
+    const modelNoLongerUsable = Boolean(onboardingAfterInstall)
+      && (!onboardingAfterInstall.selected_model_exists || !onboardingAfterInstall.whisper_cli_available);
+    nativeDictationModelReady = modelNoLongerUsable ? false : prevNativeDictationModelReady;
     setUiMode('error');
-    setDictationModelStatus(`Install failed: ${details}`, 'error');
-    setStatus(`Could not install dictation model: ${details}`, 'error');
+    setDictationModelBusy('');
+    setDictationModelStatus(`Model update failed: ${details}`, 'error');
+    setStatus(`Could not update model: ${details}`, 'error');
   } finally {
     isInstallingDictationModel = false;
+    syncControls();
+  }
+}
+
+async function deleteSelectedDictationModel() {
+  const tauriInvoke = getTauriInvoke();
+  if (!isFocusedMacDesktopMode()) {
+    setStatus('Model deletion is only available in macOS desktop mode.', 'error');
+    return;
+  }
+  if (!tauriInvoke) {
+    setStatus('Desktop bridge is not ready yet. Retry in a moment.', 'error');
+    return;
+  }
+
+  const selected = getSelectedDictationModel();
+  if (!selected) {
+    setStatus('Pick a speech model first.', 'error');
+    setDictationModelStatus('Pick a downloaded model before deleting.', 'error');
+    return;
+  }
+  if (!selected.installed) {
+    setStatus('Selected model is not downloaded.', 'error');
+    setDictationModelStatus(`${modelDisplayName(selected)} is not downloaded, so there is nothing to delete.`, 'neutral');
+    return;
+  }
+
+  if (typeof window.confirm !== 'function') {
+    setStatus('Delete confirmation is unavailable in this runtime.', 'error');
+    setDictationModelStatus('Delete confirmation is unavailable. Restart the app and try again.', 'error');
+    return;
+  }
+
+  let confirmed = false;
+  try {
+    confirmed = window.confirm(`Delete ${modelDisplayName(selected)} from local storage?`);
+  } catch (error) {
+    const details = getErrorMessage(error);
+    setStatus(`Could not open delete confirmation: ${details}`, 'error');
+    setDictationModelStatus(`Could not open delete confirmation: ${details}`, 'error');
+    return;
+  }
+  if (!confirmed) {
+    setStatus(`Delete canceled for ${modelDisplayName(selected)}.`, 'neutral');
+    return;
+  }
+
+  try {
+    isDeletingDictationModel = true;
+    syncControls();
+    setUiMode('loading');
+    setDictationModelBusy(`Deleting ${modelDisplayName(selected)} from local storage...`);
+    setDictationModelStatus(`Deleting ${modelDisplayName(selected)} from local storage...`, 'neutral');
+    setStatus(`Deleting ${modelDisplayName(selected)}...`, 'working');
+
+    await tauriInvoke('delete_dictation_model', { model: selected.id });
+    const onboarding = await loadDictationOnboarding({ quietStatus: true });
+
+    if (!onboarding) {
+      throw new Error('Delete completed, but setup refresh failed. Click Refresh Setup.');
+    }
+
+    if (onboarding.selected_model_exists) {
+      const selectedAfter = (onboarding.models || []).find((item) => item.id === onboarding.selected_model_id);
+      setStatus(
+        `Deleted ${modelDisplayName(selected)}. Active model: ${modelDisplayName(selectedAfter) || onboarding.selected_model_id}.`,
+        'ok'
+      );
+      if (setupScreenMode === 'onboarding') {
+        setAppScreen('dictation');
+      }
+    } else {
+      setStatus(`Deleted ${modelDisplayName(selected)}. Download another model to continue local dictation.`, 'neutral');
+      setSetupScreenMode('onboarding');
+      setAppScreen('onboarding');
+    }
+    setDictationModelBusy('');
+    setUiMode('idle');
+  } catch (error) {
+    const details = getErrorMessage(error);
+    setUiMode('error');
+    setDictationModelBusy('');
+    setDictationModelStatus(`Delete failed: ${details}`, 'error');
+    setStatus(`Could not delete model: ${details}`, 'error');
+  } finally {
+    isDeletingDictationModel = false;
     syncControls();
   }
 }
@@ -416,13 +800,140 @@ async function openWhisperSetupPage() {
     } else {
       window.open('https://github.com/ggml-org/whisper.cpp#quick-start', '_blank', 'noopener,noreferrer');
     }
-    setStatus('Opened whisper.cpp setup guide (for tauri:dev setup).', 'ok');
+    setStatus('Opened whisper.cpp setup guide for tauri:dev troubleshooting.', 'ok');
   } catch (error) {
     const details = getErrorMessage(error);
-    setStatus(`Could not open download page: ${details}`, 'error');
+    setStatus(`Could not open setup page: ${details}`, 'error');
   }
 }
 
+async function startNativeDesktopDictation(trigger = 'button') {
+  const tauriInvoke = getTauriInvoke();
+  if (!tauriInvoke || isDictating || isStartingDictation) return;
+
+  try {
+    isStartingDictation = true;
+    syncControls();
+    setUiMode('loading');
+    setStatus('Opening microphone...', 'working');
+    await tauriInvoke('start_native_dictation');
+    isStartingDictation = false;
+    setDictationState(true);
+    setUiMode('listening');
+    if (trigger === 'hotkey-hold') {
+      setStatus('Listening... release fn/F19 to stop and transcribe.', 'live');
+    } else if (trigger === 'hotkey') {
+      setStatus('Listening... release fn/F19 to stop and transcribe.', 'live');
+    } else {
+      setStatus('Listening... click Stop to transcribe.', 'live');
+    }
+  } catch (error) {
+    const details = getErrorMessage(error);
+    isStartingDictation = false;
+    setDictationState(false);
+    setUiMode('error');
+    setStatus(`Could not start dictation: ${details}`, 'error');
+  }
+}
+
+async function stopNativeDesktopDictation(trigger = 'button') {
+  const tauriInvoke = getTauriInvoke();
+  if (!tauriInvoke || (!isDictating && !isStartingDictation)) return;
+
+  try {
+    setUiMode('loading');
+    setStatus('Transcribing captured audio...', 'working');
+    const transcript = await tauriInvoke('stop_native_dictation');
+    finalTranscript = `${finalTranscript} ${String(transcript || '').trim()}`.trim();
+    transcriptInput.value = finalTranscript;
+    setUiMode('idle');
+    if (trigger === 'hotkey-hold') {
+      setStatus('Dictation captured from fn hold and transcribed.', 'ok');
+    } else if (trigger === 'hotkey') {
+      setStatus('Dictation captured from fn hold and transcribed.', 'ok');
+    } else {
+      setStatus('Dictation captured and transcribed.', 'ok');
+    }
+  } catch (error) {
+    const details = getErrorMessage(error);
+    setUiMode('error');
+    setStatus(`Could not stop dictation: ${details}`, 'error');
+  } finally {
+    isStartingDictation = false;
+    setDictationState(false);
+  }
+}
+
+function isNativeHoldHotkeyKey(value) {
+  const key = String(value || '').trim();
+  return NATIVE_HOLD_HOTKEYS.has(key);
+}
+
+function handleNativeHoldKeydown(event) {
+  if (!isFocusedMacDesktopMode()) return;
+  if (event.repeat) return;
+  if (event.metaKey || event.ctrlKey || event.altKey || event.shiftKey) return;
+  if (!isNativeHoldHotkeyKey(event.key)) return;
+
+  event.preventDefault();
+  event.stopPropagation();
+  applyNativeFnHoldState(true);
+}
+
+function handleNativeHoldKeyup(event) {
+  if (!isFocusedMacDesktopMode()) return;
+  if (!isNativeHoldHotkeyKey(event.key)) return;
+
+  event.preventDefault();
+  event.stopPropagation();
+  applyNativeFnHoldState(false);
+}
+
+function applyNativeFnHoldState(pressed) {
+  if (!isFocusedMacDesktopMode()) return;
+  const nextPressed = Boolean(pressed);
+
+  if (nextPressed) {
+    nativeFnHoldActive = true;
+    nativeFnStopRequested = false;
+
+    if (isDictating || isStartingDictation || nativeHotkeyActionInFlight) return;
+    nativeHotkeyActionInFlight = true;
+    setHotkeyPill('fn down - starting dictation...', 'working', true);
+    Promise.resolve(startNativeDesktopDictation('hotkey-hold'))
+      .catch(() => {})
+      .finally(() => {
+        nativeHotkeyActionInFlight = false;
+        if (nativeFnStopRequested || !nativeFnHoldActive) {
+          nativeFnStopRequested = false;
+          applyNativeFnHoldState(false);
+        }
+      });
+    return;
+  }
+
+  nativeFnHoldActive = false;
+  if (isStartingDictation && !isDictating) {
+    // If release arrives during startup, defer stop until start settles to avoid race drops.
+    nativeFnStopRequested = true;
+    setHotkeyPill('fn released - waiting for microphone...', 'working', true);
+    return;
+  }
+
+  if (!isDictating || nativeHotkeyActionInFlight) return;
+  nativeHotkeyActionInFlight = true;
+  setHotkeyPill('fn released - transcribing...', 'working', true);
+  Promise.resolve(stopNativeDesktopDictation('hotkey-hold'))
+    .catch(() => {})
+    .finally(() => {
+      nativeHotkeyActionInFlight = false;
+    });
+}
+
+function handleNativeFnStateEvent(payload) {
+  if (!isFocusedMacDesktopMode()) return;
+  applyNativeFnHoldState(Boolean(payload?.pressed));
+}
 
 function initDictation() {
   clearTranscriptBtn.addEventListener('click', () => {
@@ -436,7 +947,6 @@ function initDictation() {
     clearRestartTimer();
     finalTranscript = '';
     transcriptInput.value = '';
-    output.value = '';
     setUiMode('idle');
     setStatus('Transcript cleared.', 'neutral');
   });
@@ -445,9 +955,38 @@ function initDictation() {
     finalTranscript = transcriptInput.value.trim();
   });
 
-  if (isNativeDesktopMode()) {
+  if (onboardingContinueBtn) {
+    onboardingContinueBtn.addEventListener('click', () => {
+      if (isFocusedMacDesktopMode() && !nativeDictationModelReady) {
+        setStatus('Complete setup first, then start dictation.', 'neutral');
+        return;
+      }
+      setAppScreen('dictation');
+      setStatus('Dictation ready.', 'ok');
+    });
+  }
+
+  if (openSettingsBtn) {
+    openSettingsBtn.addEventListener('click', () => {
+      setSetupScreenMode('settings');
+      setAppScreen('onboarding');
+      setStatus('Settings opened. Manage local model setup here.', 'neutral');
+    });
+  }
+
+  if (backToDictationBtn) {
+    backToDictationBtn.addEventListener('click', () => {
+      setAppScreen('dictation');
+      setStatus('Back to dictation.', 'neutral');
+    });
+  }
+
+  if (isFocusedMacDesktopMode()) {
     if (installDictationModelBtn) {
       installDictationModelBtn.addEventListener('click', installSelectedDictationModel);
+    }
+    if (deleteDictationModelBtn) {
+      deleteDictationModelBtn.addEventListener('click', deleteSelectedDictationModel);
     }
     if (openWhisperSetupBtn) {
       openWhisperSetupBtn.addEventListener('click', openWhisperSetupPage);
@@ -459,57 +998,54 @@ function initDictation() {
     }
     if (dictationModelSelect) {
       dictationModelSelect.addEventListener('change', () => {
-        const selectedLabel = dictationModelSelect.selectedOptions[0]?.textContent || 'Selected model';
-        setDictationModelStatus(`${selectedLabel}`, 'neutral');
+        const selected = getSelectedDictationModel();
+        if (!selected) {
+          setDictationModelStatus('Pick a model to manage download/use state.', 'neutral');
+        } else if (selected.installed) {
+          const isCurrent = Boolean(currentOnboarding?.selected_model_exists)
+            && currentOnboarding?.selected_model_id === selected.id;
+          setDictationModelStatus(
+            isCurrent
+              ? `${modelDisplayName(selected)} is active for dictation.`
+              : `${modelDisplayName(selected)} is installed. Click "Use Installed" to switch.`,
+            'neutral'
+          );
+        } else {
+          setDictationModelStatus(
+            `${modelDisplayName(selected)} is not downloaded yet. Click "Download + Use" to install it.`,
+            'neutral'
+          );
+        }
+        refreshSelectedModelMeta();
+        updateModelActionLabels();
         syncControls();
       });
     }
 
-    startDictationBtn.addEventListener('click', async () => {
-      const tauriInvoke = getTauriInvoke();
-      if (!tauriInvoke || isDictating || isStartingDictation) return;
-
-      try {
-        isStartingDictation = true;
-        syncControls();
-        setUiMode('loading');
-        setStatus('Opening microphone...', 'working');
-        await tauriInvoke('start_native_dictation');
-        isStartingDictation = false;
-        setDictationState(true);
-        setUiMode('listening');
-        setStatus('Listening... click Stop to transcribe.', 'live');
-      } catch (error) {
-        const details = getErrorMessage(error);
-        isStartingDictation = false;
-        setDictationState(false);
-        setUiMode('error');
-        setStatus(`Could not start dictation: ${details}`, 'error');
-      }
+    startDictationBtn.addEventListener('click', () => {
+      startNativeDesktopDictation('button');
     });
 
-    stopDictationBtn.addEventListener('click', async () => {
-      const tauriInvoke = getTauriInvoke();
-      if (!tauriInvoke || (!isDictating && !isStartingDictation)) return;
-
-      try {
-        setUiMode('loading');
-        setStatus('Transcribing captured audio...', 'working');
-        const transcript = await tauriInvoke('stop_native_dictation');
-        finalTranscript = `${finalTranscript} ${String(transcript || '').trim()}`.trim();
-        transcriptInput.value = finalTranscript;
-        setUiMode('idle');
-        setStatus('Dictation captured and transcribed.', 'ok');
-      } catch (error) {
-        const details = getErrorMessage(error);
-        setUiMode('error');
-        setStatus(`Could not stop dictation: ${details}`, 'error');
-      } finally {
-        isStartingDictation = false;
-        setDictationState(false);
-      }
+    stopDictationBtn.addEventListener('click', () => {
+      stopNativeDesktopDictation('button');
     });
 
+    window.addEventListener('keydown', handleNativeHoldKeydown, true);
+    window.addEventListener('keyup', handleNativeHoldKeyup, true);
+    const tauriEvent = getTauriEventApi();
+    if (typeof tauriEvent?.listen === 'function' && !nativeHotkeyUnlisten) {
+      tauriEvent.listen(FN_HOTKEY_STATE_EVENT, (event) => handleNativeFnStateEvent(event?.payload))
+        .then((unlisten) => {
+          nativeHotkeyUnlisten = unlisten;
+        })
+        .catch(() => {});
+    }
+
+    syncControls();
+    return;
+  }
+
+  if (isNativeDesktopMode() && !isFocusedMacDesktopMode()) {
     syncControls();
     return;
   }
@@ -613,113 +1149,14 @@ function initDictation() {
   });
 }
 
-async function loadModels() {
-  const useTauri = shouldUseTauriCommands();
-  const tauriInvoke = useTauri ? getTauriInvoke() : null;
-  const hasLiveCapture = useTauri || Boolean(SpeechRecognitionApi);
-  const modeLabel = useTauri
-    ? 'desktop mode'
-    : (getTauriInvoke() ? 'mobile mode' : 'web mode');
-  setUiMode('loading');
-  setStatus('Loading models from Ollama...', 'working');
-
-  try {
-    const models = tauriInvoke
-      ? await tauriInvoke('list_models')
-      : await listModelsViaHttp();
-
-    modelSelect.innerHTML = '';
-
-    if (!models.length) {
-      const option = document.createElement('option');
-      option.value = '';
-      option.textContent = 'No models found (run ollama pull <model>)';
-      modelSelect.appendChild(option);
-      modelSelect.disabled = true;
-      setUiMode('idle');
-      setStatus(withSpeechSupportHint('Connected. No local models found yet.', hasLiveCapture), 'ok');
-      return;
-    }
-
-    for (const modelName of models) {
-      const option = document.createElement('option');
-      option.value = modelName;
-      option.textContent = modelName;
-      modelSelect.appendChild(option);
-    }
-
-    modelSelect.value = pickDefaultModel(models);
-    modelSelect.disabled = false;
-    if (modelSelect.value === DEFAULT_MODEL) {
-      setUiMode('idle');
-      setStatus(withSpeechSupportHint(`Connected (${modeLabel}). Default model selected: ${DEFAULT_MODEL}`, hasLiveCapture), 'ok');
-    } else {
-      setUiMode('idle');
-      setStatus(withSpeechSupportHint(`Connected (${modeLabel}). ${DEFAULT_MODEL} not found, using ${modelSelect.value}.`, hasLiveCapture), 'ok');
-    }
-  } catch (error) {
-    const details = getErrorMessage(error);
-    modelSelect.innerHTML = '';
-    const option = document.createElement('option');
-    option.value = '';
-    option.textContent = 'Unable to connect to Ollama';
-    modelSelect.appendChild(option);
-    modelSelect.disabled = true;
-    setUiMode('error');
-    setStatus(withSpeechSupportHint(`Connection error: ${details}`, hasLiveCapture), 'error');
-  }
-}
-
-async function refineDictation() {
-  const useTauri = shouldUseTauriCommands();
-  const tauriInvoke = useTauri ? getTauriInvoke() : null;
-  const model = modelSelect.value;
-  const transcript = transcriptInput.value.trim();
-  const instruction = 'Clean this raw dictation transcript into readable text with punctuation. Keep intent and wording natural.';
-
-  if (!model) {
-    setUiMode('error');
-    setStatus('Pick a model first.', 'error');
-    return;
-  }
-
-  if (!transcript) {
-    setUiMode('error');
-    setStatus('Paste a transcript before running.', 'error');
-    return;
-  }
-
-  setBusy(true);
-  setUiMode('refining');
-  setStatus('Cleaning transcript...', 'working');
-  output.value = '';
-
-  try {
-    const text = tauriInvoke
-      ? await tauriInvoke('refine_dictation', { model, transcript, instruction })
-      : await refineViaHttp(model, transcript, instruction);
-
-    output.value = text;
-    setUiMode('success');
-    setStatus('Done. Clean dictation output generated.', 'ok');
-  } catch (error) {
-    const details = getErrorMessage(error);
-    setUiMode('error');
-    setStatus(`Run failed: ${details}`, 'error');
-  } finally {
-    setBusy(false);
-  }
-}
-
-refreshBtn.addEventListener('click', loadModels);
-runBtn.addEventListener('click', refineDictation);
-
 async function initApp() {
-  await loadModels();
   await loadDictationOnboarding();
 }
 
 setUiMode('loading');
+setSetupScreenMode('onboarding');
+setAppScreen('onboarding');
 syncControls();
+syncHotkeyPillForStatus(statusEl.textContent || '', 'neutral');
 initDictation();
 initApp();
