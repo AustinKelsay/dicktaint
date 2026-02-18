@@ -1064,7 +1064,7 @@ fn pick_best_installed_model(
     whisper_model_catalog()
         .iter()
         .copied()
-        .filter(|spec| exclude_model_id.is_none_or(|exclude| exclude != spec.id))
+        .filter(|spec| exclude_model_id.map_or(true, |exclude| exclude != spec.id))
         .filter_map(|spec| {
             let path = model_path_for_spec(models_dir, spec);
             if path.exists() {
