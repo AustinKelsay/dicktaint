@@ -53,6 +53,7 @@ C) Desktop dictation smoke (button path):
 2. speak 3-5 seconds
 3. stop dictation
 4. verify transcript append
+5. verify transcribe status includes non-zero capture duration
 
 D) Background hold-to-talk smoke:
 
@@ -61,19 +62,26 @@ D) Background hold-to-talk smoke:
 3. reopen app
 4. verify transcript append and no stuck recording state
 
-E) Sidecar smoke:
+E) Long-utterance quality smoke (desktop):
+
+1. hold dictation for ~10 seconds with a full sentence
+2. stop and verify transcript is not collapsed into repeated short tokens
+3. if quality warning appears, retry closer to mic in lower-noise environment and compare
+4. if repeated collapse persists, log model id + runtime mode + sample phrase
+
+F) Sidecar smoke:
 
 1. run `bun run whisper:smoke`
 2. verify transcript file generated and content check passes
 
-F) Automated baseline:
+G) Automated baseline:
 
 1. run `bun run test:all`
 2. run `bun run docs:verify`
 
 ## Verification
 
-This checklist is complete only when sections A-F all pass in the target runtime under test.
+This checklist is complete only when sections A-G all pass in the target runtime under test.
 
 ## Related Docs
 

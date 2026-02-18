@@ -10,9 +10,9 @@ use std::path::{Path, PathBuf};
 use std::process::{Command, Output};
 #[cfg(target_os = "macos")]
 use std::ptr::NonNull;
-use std::sync::{mpsc, Arc, Mutex};
 #[cfg(target_os = "macos")]
 use std::sync::atomic::{AtomicBool, Ordering};
+use std::sync::{mpsc, Arc, Mutex};
 use std::thread;
 use std::time::{Duration, SystemTime, UNIX_EPOCH};
 use tauri::{Emitter, Manager, State};
@@ -35,6 +35,13 @@ const PILL_WINDOW_WIDTH: f64 = 278.0;
 const PILL_WINDOW_HEIGHT: f64 = 40.0;
 const PILL_WINDOW_BOTTOM_MARGIN: i32 = 18;
 const MAX_PILL_WINDOWS: usize = 6;
+const MIN_TRANSCRIBE_SECONDS: f32 = 0.30;
+const MIN_SPEECH_RMS: f32 = 0.003;
+const MIN_SPEECH_PEAK: f32 = 0.020;
+const SILENCE_WINDOW_MS: u32 = 20;
+const SILENCE_GATE_ABS_MEAN: f32 = 0.008;
+const SILENCE_TRIM_PAD_MS: u32 = 160;
+const LOW_CONFIDENCE_RETRY_SECONDS: f32 = 6.0;
 
 #[derive(Clone)]
 struct AppConfig {
@@ -272,6 +279,22 @@ struct ActiveRecording {
     sample_rate: u32,
 }
 
+#[derive(Clone, Copy)]
+struct WhisperDecodeProfile {
+    beam_size: u8,
+    best_of: u8,
+}
+
+const FAST_DECODE_PROFILE: WhisperDecodeProfile = WhisperDecodeProfile {
+    beam_size: 2,
+    best_of: 2,
+};
+
+const ACCURATE_DECODE_PROFILE: WhisperDecodeProfile = WhisperDecodeProfile {
+    beam_size: 5,
+    best_of: 5,
+};
+
 fn parse_truthy_env(value: &str) -> bool {
     let normalized = value.trim().to_ascii_lowercase();
     !matches!(normalized.as_str(), "" | "0" | "false" | "no" | "off")
@@ -312,24 +335,21 @@ fn create_pill_overlay_window_for_monitor(
     let x = work_x + (work_w - width_i).max(0) / 2;
     let y = work_y + (work_h - height_i - PILL_WINDOW_BOTTOM_MARGIN).max(0);
 
-    let window = tauri::WebviewWindowBuilder::new(
-        app,
-        label,
-        tauri::WebviewUrl::App("pill.html".into()),
-    )
-    .title("dicktaint overlay")
-    .decorations(false)
-    .transparent(true)
-    .shadow(false)
-    .resizable(false)
-    .focusable(false)
-    .skip_taskbar(true)
-    .always_on_top(true)
-    .visible_on_all_workspaces(true)
-    .inner_size(PILL_WINDOW_WIDTH, PILL_WINDOW_HEIGHT)
-    .position(x as f64, y as f64)
-    .build()
-    .map_err(|e| format!("Failed to create overlay window '{label}': {e}"))?;
+    let window =
+        tauri::WebviewWindowBuilder::new(app, label, tauri::WebviewUrl::App("pill.html".into()))
+            .title("dicktaint overlay")
+            .decorations(false)
+            .transparent(true)
+            .shadow(false)
+            .resizable(false)
+            .focusable(false)
+            .skip_taskbar(true)
+            .always_on_top(true)
+            .visible_on_all_workspaces(true)
+            .inner_size(PILL_WINDOW_WIDTH, PILL_WINDOW_HEIGHT)
+            .position(x as f64, y as f64)
+            .build()
+            .map_err(|e| format!("Failed to create overlay window '{label}': {e}"))?;
 
     let _ = window.set_ignore_cursor_events(true);
     let _ = window.set_always_on_top(true);
@@ -962,12 +982,26 @@ fn model_fit_level(spec: WhisperModelSpec, total_memory_gb: u64) -> u8 {
 }
 
 fn pick_recommended_model_id(total_memory_gb: u64) -> Option<&'static str> {
+    // For MVP dictation responsiveness, prefer practical quality/speed picks over largest runnable.
+    // Runtime is currently English-first (`-l en`), so `.en` models are prioritized before multilingual.
+    const PRACTICAL_ORDER: [&str; 7] = [
+        "turbo", "base-en", "small-en", "tiny-en", "base", "small", "tiny",
+    ];
+
+    for id in PRACTICAL_ORDER {
+        if let Some(spec) = find_whisper_model_spec(id) {
+            if total_memory_gb >= spec.min_ram_gb {
+                return Some(spec.id);
+            }
+        }
+    }
+
     whisper_model_catalog()
         .iter()
         .copied()
         .filter(|spec| model_fit_level(*spec, total_memory_gb) > 0)
         .max_by(|a, b| {
-            // Prefer strongest runnable model for the machine, not merely the smallest.
+            // Fallback only if practical presets are unavailable.
             let a_key = (
                 model_fit_level(*a, total_memory_gb),
                 a.recommended_ram_gb,
@@ -1030,7 +1064,7 @@ fn pick_best_installed_model(
     whisper_model_catalog()
         .iter()
         .copied()
-        .filter(|spec| !exclude_model_id.is_some_and(|exclude| exclude == spec.id))
+        .filter(|spec| exclude_model_id.map_or(true, |exclude| exclude != spec.id))
         .filter_map(|spec| {
             let path = model_path_for_spec(models_dir, spec);
             if path.exists() {
@@ -1241,6 +1275,30 @@ fn open_whisper_setup_page() -> Result<(), String> {
     Ok(())
 }
 
+fn dominant_input_channel<T, F>(data: &[T], channels: usize, to_f32: &F) -> usize
+where
+    T: Copy,
+    F: Fn(T) -> f32,
+{
+    if channels <= 1 {
+        return 0;
+    }
+
+    let mut energy = vec![0.0_f32; channels];
+    for frame in data.chunks(channels) {
+        for (index, sample) in frame.iter().enumerate() {
+            energy[index] += to_f32(*sample).abs();
+        }
+    }
+
+    energy
+        .iter()
+        .enumerate()
+        .max_by(|a, b| a.1.total_cmp(b.1))
+        .map(|(index, _)| index)
+        .unwrap_or(0)
+}
+
 fn push_downmixed<T, F>(data: &[T], channels: usize, target: &Arc<Mutex<Vec<f32>>>, to_f32: F)
 where
     T: Copy,
@@ -1250,10 +1308,21 @@ where
         return;
     }
 
-    let mut mono = Vec::with_capacity(data.len() / channels.max(1));
+    let dominant = dominant_input_channel(data, channels, &to_f32);
+    let mut mono = Vec::with_capacity((data.len() / channels.max(1)).max(1));
     for frame in data.chunks(channels) {
-        let sum: f32 = frame.iter().map(|sample| to_f32(*sample)).sum();
-        mono.push(sum / frame.len() as f32);
+        if frame.is_empty() {
+            continue;
+        }
+        let picked = frame
+            .get(dominant)
+            .copied()
+            .map(&to_f32)
+            .unwrap_or_else(|| {
+                let sum: f32 = frame.iter().copied().map(&to_f32).sum();
+                sum / frame.len() as f32
+            });
+        mono.push(picked);
     }
 
     if let Ok(mut guard) = target.lock() {
@@ -1290,7 +1359,8 @@ fn choose_input_config(device: &cpal::Device) -> Result<cpal::SupportedStreamCon
 
         let replace = match &best {
             Some((best_rank, best_rate, _)) => {
-                format_rank > *best_rank || (format_rank == *best_rank && candidate_rate > *best_rate)
+                format_rank > *best_rank
+                    || (format_rank == *best_rank && candidate_rate > *best_rate)
             }
             None => true,
         };
@@ -1488,6 +1558,112 @@ fn resample_linear(samples: &[f32], source_rate: u32, target_rate: u32) -> Vec<f
     out
 }
 
+fn audio_duration_seconds(samples: &[f32], sample_rate: u32) -> f32 {
+    if sample_rate == 0 {
+        return 0.0;
+    }
+    samples.len() as f32 / sample_rate as f32
+}
+
+fn audio_peak_and_rms(samples: &[f32]) -> (f32, f32) {
+    if samples.is_empty() {
+        return (0.0, 0.0);
+    }
+
+    let mut peak = 0.0_f32;
+    let mut energy_sum = 0.0_f32;
+    for sample in samples {
+        let value = sample.abs();
+        peak = peak.max(value);
+        energy_sum += sample * sample;
+    }
+    let rms = (energy_sum / samples.len() as f32).sqrt();
+    (peak, rms)
+}
+
+fn remove_dc_offset(samples: &mut [f32]) {
+    if samples.is_empty() {
+        return;
+    }
+    let mean = samples.iter().copied().sum::<f32>() / samples.len() as f32;
+    if mean.abs() < 1e-6 {
+        return;
+    }
+    for sample in samples {
+        *sample -= mean;
+    }
+}
+
+fn trim_silence_edges(samples: &[f32], sample_rate: u32) -> Vec<f32> {
+    if samples.is_empty() || sample_rate == 0 {
+        return Vec::new();
+    }
+
+    let window = (((sample_rate as u64) * SILENCE_WINDOW_MS as u64) / 1000).max(1) as usize;
+    let mut first_speech: Option<usize> = None;
+    let mut last_speech_end: Option<usize> = None;
+
+    for (window_index, chunk) in samples.chunks(window).enumerate() {
+        if chunk.is_empty() {
+            continue;
+        }
+        let mean_abs = chunk.iter().map(|sample| sample.abs()).sum::<f32>() / chunk.len() as f32;
+        if mean_abs >= SILENCE_GATE_ABS_MEAN {
+            let start = window_index * window;
+            let end = (start + chunk.len()).min(samples.len());
+            if first_speech.is_none() {
+                first_speech = Some(start);
+            }
+            last_speech_end = Some(end);
+        }
+    }
+
+    let (start, end) = match (first_speech, last_speech_end) {
+        (Some(start), Some(end)) if end > start => (start, end),
+        _ => return samples.to_vec(),
+    };
+
+    let pad = (((sample_rate as u64) * SILENCE_TRIM_PAD_MS as u64) / 1000) as usize;
+    let bounded_start = start.saturating_sub(pad);
+    let bounded_end = (end + pad).min(samples.len());
+    samples[bounded_start..bounded_end].to_vec()
+}
+
+fn normalize_audio_gain(samples: &mut [f32]) {
+    let (peak, rms) = audio_peak_and_rms(samples);
+    if peak <= 0.0 || rms < MIN_SPEECH_RMS {
+        return;
+    }
+
+    let mut gain = 1.0_f32;
+    if peak < 0.35 {
+        gain = (0.85 / peak).clamp(1.0, 8.0);
+    } else if peak > 0.98 {
+        gain = (0.98 / peak).clamp(0.1, 1.0);
+    }
+
+    if (gain - 1.0).abs() < 0.05 {
+        return;
+    }
+
+    for sample in samples {
+        *sample = (*sample * gain).clamp(-1.0, 1.0);
+    }
+}
+
+fn sanitize_audio_for_transcription(samples: Vec<f32>, sample_rate: u32) -> Vec<f32> {
+    let mut prepared = if sample_rate == WHISPER_SAMPLE_RATE {
+        samples
+    } else {
+        resample_linear(&samples, sample_rate, WHISPER_SAMPLE_RATE)
+    };
+
+    remove_dc_offset(&mut prepared);
+    prepared = trim_silence_edges(&prepared, WHISPER_SAMPLE_RATE);
+    normalize_audio_gain(&mut prepared);
+    prepared
+}
+
 fn write_wav(path: &PathBuf, samples: &[f32], sample_rate: u32) -> Result<(), String> {
     let spec = hound::WavSpec {
         channels: 1,
@@ -1528,20 +1704,144 @@ fn normalize_transcript_text(raw: &str) -> String {
         .join(" ")
 }
 
+fn recommended_whisper_threads() -> usize {
+    std::thread::available_parallelism()
+        .map(|count| count.get())
+        .unwrap_or(4)
+        .clamp(2, 8)
+}
+
+fn run_whisper_cli(
+    whisper_cli_path: &str,
+    model_path: &Path,
+    wav_path: &Path,
+    out_prefix: &Path,
+    decode_profile: WhisperDecodeProfile,
+) -> Result<(), String> {
+    let threads = recommended_whisper_threads().to_string();
+    let beam = decode_profile.beam_size.to_string();
+    let best_of = decode_profile.best_of.to_string();
+    let output = Command::new(whisper_cli_path)
+        .arg("-m")
+        .arg(model_path)
+        .arg("-f")
+        .arg(wav_path)
+        .arg("-l")
+        .arg("en")
+        .arg("-t")
+        .arg(&threads)
+        .arg("-bs")
+        .arg(&beam)
+        .arg("-bo")
+        .arg(&best_of)
+        .arg("-otxt")
+        .arg("-nt")
+        .arg("-np")
+        .arg("-of")
+        .arg(out_prefix)
+        .output()
+        .map_err(|e| {
+            format!(
+                "Failed to execute whisper cli '{whisper_cli_path}': {e}. Install whisper.cpp (whisper-cli) or set WHISPER_CLI_PATH."
+            )
+        })?;
+
+    if output.status.success() {
+        return Ok(());
+    }
+
+    let stderr = String::from_utf8_lossy(&output.stderr).trim().to_string();
+    let stdout = String::from_utf8_lossy(&output.stdout).trim().to_string();
+    let detail = if !stderr.is_empty() {
+        stderr
+    } else if !stdout.is_empty() {
+        stdout
+    } else {
+        "no error output".to_string()
+    };
+    Err(format!("whisper-cli transcription failed: {detail}"))
+}
+
+fn read_clean_transcript(path: &Path) -> Result<String, String> {
+    let transcript = std::fs::read_to_string(path).map_err(|e| {
+        format!(
+            "whisper-cli ran but transcript file is missing at {}: {e}",
+            path.display()
+        )
+    })?;
+    Ok(normalize_transcript_text(&transcript))
+}
+
+fn normalized_token_for_quality(token: &str) -> String {
+    token
+        .chars()
+        .filter(|ch| ch.is_ascii_alphanumeric())
+        .collect::<String>()
+        .to_ascii_lowercase()
+}
+
+fn transcript_looks_low_confidence(cleaned: &str, audio_seconds: f32) -> bool {
+    let tokens = cleaned
+        .split_whitespace()
+        .map(normalized_token_for_quality)
+        .filter(|token| !token.is_empty())
+        .collect::<Vec<_>>();
+
+    if tokens.is_empty() {
+        return true;
+    }
+
+    let unique = tokens.iter().collect::<HashSet<_>>();
+    if audio_seconds >= LOW_CONFIDENCE_RETRY_SECONDS && tokens.len() <= 2 {
+        return true;
+    }
+    if tokens.len() >= 2 && unique.len() == 1 {
+        return true;
+    }
+    if audio_seconds >= 8.0 {
+        let unique_ratio = unique.len() as f32 / tokens.len() as f32;
+        if unique_ratio < 0.35 {
+            return true;
+        }
+        if cleaned.chars().count() < 16 {
+            return true;
+        }
+    }
+
+    false
+}
+
+fn transcript_information_score(cleaned: &str) -> usize {
+    let tokens = cleaned
+        .split_whitespace()
+        .map(normalized_token_for_quality)
+        .filter(|token| !token.is_empty())
+        .collect::<Vec<_>>();
+    let unique = tokens.iter().collect::<HashSet<_>>();
+    let char_count = cleaned.chars().count();
+    (unique.len() * 6) + (tokens.len() * 3) + char_count.min(160)
+}
+
 fn transcribe_samples(
     model_path: PathBuf,
     whisper_cli_path: String,
     samples: Vec<f32>,
     sample_rate: u32,
 ) -> Result<String, String> {
-    let prepared = if sample_rate == WHISPER_SAMPLE_RATE {
-        samples
-    } else {
-        resample_linear(&samples, sample_rate, WHISPER_SAMPLE_RATE)
-    };
+    let prepared = sanitize_audio_for_transcription(samples, sample_rate);
 
     if prepared.is_empty() {
         return Err("No audio captured. Check microphone input and try again.".to_string());
+    }
+    let (peak, rms) = audio_peak_and_rms(&prepared);
+    if peak < MIN_SPEECH_PEAK || rms < MIN_SPEECH_RMS {
+        return Err("No speech detected in the recorded audio.".to_string());
+    }
+    let audio_seconds = audio_duration_seconds(&prepared, WHISPER_SAMPLE_RATE);
+    if audio_seconds < MIN_TRANSCRIBE_SECONDS {
+        return Err(
+            "Captured audio was too short. Hold fn (or record) a bit longer and retry.".to_string(),
+        );
     }
 
     let tick = SystemTime::now()
@@ -1556,53 +1856,44 @@ fn transcribe_samples(
 
     write_wav(&wav_path, &prepared, WHISPER_SAMPLE_RATE)?;
 
-    let output = Command::new(&whisper_cli_path)
-    .arg("-m")
-    .arg(&model_path)
-    .arg("-f")
-    .arg(&wav_path)
-    .arg("-l")
-    .arg("en")
-    .arg("-otxt")
-    .arg("-nt")
-    .arg("-of")
-    .arg(&out_prefix)
-    .output()
-    .map_err(|e| {
-      format!(
-        "Failed to execute whisper cli '{whisper_cli_path}': {e}. Install whisper.cpp (whisper-cli) or set WHISPER_CLI_PATH."
-      )
-    })?;
-
-    if !output.status.success() {
-        let stderr = String::from_utf8_lossy(&output.stderr).trim().to_string();
-        let stdout = String::from_utf8_lossy(&output.stdout).trim().to_string();
-        let mut detail = String::new();
-        if !stderr.is_empty() {
-            detail.push_str(&stderr);
-        }
-        if detail.is_empty() && !stdout.is_empty() {
-            detail.push_str(&stdout);
-        }
-        if detail.is_empty() {
-            detail.push_str("no error output");
-        }
+    if let Err(error) = run_whisper_cli(
+        &whisper_cli_path,
+        &model_path,
+        &wav_path,
+        &out_prefix,
+        FAST_DECODE_PROFILE,
+    ) {
         let _ = std::fs::remove_file(&wav_path);
         let _ = std::fs::remove_file(&txt_path);
-        return Err(format!("whisper-cli transcription failed: {detail}"));
+        return Err(error);
     }
 
-    let transcript = std::fs::read_to_string(&txt_path).map_err(|e| {
-        format!(
-            "whisper-cli ran but transcript file is missing at {}: {e}",
-            txt_path.display()
+    let mut cleaned = match read_clean_transcript(&txt_path) {
+        Ok(value) => value,
+        Err(error) => {
+            let _ = std::fs::remove_file(&wav_path);
+            let _ = std::fs::remove_file(&txt_path);
+            return Err(error);
+        }
+    };
+    if transcript_looks_low_confidence(&cleaned, audio_seconds) {
+        let retry = run_whisper_cli(
+            &whisper_cli_path,
+            &model_path,
+            &wav_path,
+            &out_prefix,
+            ACCURATE_DECODE_PROFILE,
         )
-    })?;
+        .and_then(|_| read_clean_transcript(&txt_path))
+        .unwrap_or_default();
+        if transcript_information_score(&retry) > transcript_information_score(&cleaned) {
+            cleaned = retry;
+        }
+    }
 
     let _ = std::fs::remove_file(&wav_path);
     let _ = std::fs::remove_file(&txt_path);
 
-    let cleaned = normalize_transcript_text(&transcript);
     if cleaned.is_empty() {
         return Err("No speech detected in the recorded audio.".to_string());
     }
@@ -1829,11 +2120,13 @@ async fn stop_native_dictation(
         return Err("Audio capture thread crashed.".to_string());
     }
 
-    let captured_samples = recording
-        .samples
-        .lock()
-        .map_err(|_| "Failed to read captured audio".to_string())?
-        .clone();
+    let captured_samples = {
+        let mut guard = recording
+            .samples
+            .lock()
+            .map_err(|_| "Failed to read captured audio".to_string())?;
+        std::mem::take(&mut *guard)
+    };
     let model_path = resolve_active_model_path(config.inner(), model_state.inner())?;
     let configured_whisper_cli_path = resolve_whisper_cli_path(
         config.whisper_cli_path_override.as_deref(),
@@ -1875,7 +2168,11 @@ fn cancel_native_dictation(dictation: State<'_, DictationState>) -> Result<(), S
 
 #[cfg(test)]
 mod tests {
-    use super::{normalize_transcript_text, resample_linear, whisper_help_text_looks_valid};
+    use super::{
+        normalize_transcript_text, pick_recommended_model_id, push_downmixed, resample_linear,
+        transcript_looks_low_confidence, whisper_help_text_looks_valid,
+    };
+    use std::sync::{Arc, Mutex};
 
     #[test]
     fn resample_linear_returns_same_when_rate_matches() {
@@ -1909,6 +2206,36 @@ mod tests {
     fn normalize_transcript_text_strips_blank_audio_marker() {
         let raw = "[BLANK_AUDIO] Testing, check, check";
         assert_eq!(normalize_transcript_text(raw), "Testing, check, check");
+    }
+
+    #[test]
+    fn push_downmixed_prefers_dominant_channel_signal() {
+        let input = vec![
+            0.95_f32, 0.01, 0.01, 0.01, //
+            -0.90_f32, 0.01, 0.01, 0.01,
+        ];
+        let out = Arc::new(Mutex::new(Vec::<f32>::new()));
+        push_downmixed(&input, 4, &out, |value| value);
+        let captured = out.lock().expect("lock poisoned").clone();
+        assert_eq!(captured.len(), 2);
+        assert!(captured[0].abs() > 0.8);
+        assert!(captured[1].abs() > 0.8);
+    }
+
+    #[test]
+    fn pick_recommended_model_prefers_practical_speed_quality() {
+        assert_eq!(pick_recommended_model_id(32), Some("turbo"));
+        assert_eq!(pick_recommended_model_id(12), Some("base-en"));
+        assert_eq!(pick_recommended_model_id(8), Some("base-en"));
+    }
+
+    #[test]
+    fn transcript_low_confidence_detects_you_you_pattern() {
+        assert!(transcript_looks_low_confidence("you you", 10.0));
+        assert!(!transcript_looks_low_confidence(
+            "testing one two this dictation flow is working",
+            4.0
+        ));
     }
 }
 

@@ -35,10 +35,19 @@ Model catalog currently includes 12 ids:
 
 Recommendation ranking:
 
-1. compute fit level by RAM threshold
-2. prefer higher fit level
-3. then prefer higher `recommended_ram_gb`
-4. then prefer larger model size tie-break
+1. use practical ordered presets for local MVP responsiveness
+2. pick first preset whose `min_ram_gb` fits the machine
+3. fallback to legacy fit-level ranking only if preset resolution fails
+
+Current practical preset order:
+
+- `turbo`
+- `base-en`
+- `small-en`
+- `tiny-en`
+- `base`
+- `small`
+- `tiny`
 
 Install flow (`install_dictation_model`):
 

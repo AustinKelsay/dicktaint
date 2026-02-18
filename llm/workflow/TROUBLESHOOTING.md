@@ -62,13 +62,20 @@ Out of scope:
 2. retry longer utterance
 3. run `bun run whisper:smoke`
 
-6) web speech controls fail:
+6) long utterance yields very short/repeated text (example: `you you`):
+
+1. keep mouth-to-mic distance short and reduce room noise
+2. verify selected model is not too heavy for device (`base-en`/`turbo` recommended)
+3. run 10-second dictation smoke and confirm transcribe status duration matches expectation
+4. if issue persists, capture exact transcript + runtime mode + model id for escalation
+
+7) web speech controls fail:
 
 1. confirm browser speech API support
 2. confirm mic permissions
 3. use manual text fallback
 
-7) iOS dev connectivity issues:
+8) iOS dev connectivity issues:
 
 1. run with valid `APPLE_DEVELOPMENT_TEAM`
 2. set `TAURI_DEV_HOST` to LAN IP
