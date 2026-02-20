@@ -39,6 +39,9 @@ const DEFAULT_DICTATION_HOTKEY = isMacPlatform() ? 'Fn' : 'CmdOrCtrl+Shift+D';
 const HOTKEY_MODIFIER_ORDER = ['CmdOrCtrl', 'Cmd', 'Ctrl', 'Alt', 'Shift', 'Super'];
 const DICTATION_HOTKEY_EVENT = 'dictation:hotkey-triggered';
 const DICTATION_STATE_EVENT = 'dictation:state-changed';
+const NATIVE_HOLD_HOTKEYS = new Set(['Fn', 'F19']);
+const MAC_DESKTOP_ONLY_MESSAGE = 'Desktop MVP currently supports macOS only. Current mobile focus is iPhone (iOS).';
+const PILL_STATUS_EVENT = 'dicktaint://pill-status';
 
 let recognition = null;
 let finalTranscript = '';
@@ -60,6 +63,9 @@ let activeHotkeySpec = null;
 let pendingDictationHotkey = '';
 let isCapturingDictationHotkey = false;
 let lastHotkeyToggleAtMs = 0;
+let nativeHotkeyActionInFlight = false;
+let nativeFnHoldActive = false;
+let nativeFnStopRequested = false;
 
 function modelDisplayName(model) {
   return String(model?.display_name || '').replace(/\s+\(Selected\)$/u, '').trim();
@@ -273,7 +279,9 @@ function syncDictationHotkeyUi() {
 }
 
 function getTauriInvoke() {
-  return window.__TAURI__?.core?.invoke || null;
+  return window.__TAURI__?.core?.invoke
+    || window.__TAURI__?.tauri?.invoke
+    || null;
 }
 
 function getTauriEventApi() {
@@ -1185,6 +1193,141 @@ async function openWhisperSetupPage() {
   }
 }
 
+async function startNativeDesktopDictation(trigger = 'button') {
+  const tauriInvoke = getTauriInvoke();
+  if (!tauriInvoke || !isFocusedMacDesktopMode()) return;
+  if (isDictating || isStartingDictation) return;
+
+  if (!nativeDictationModelReady) {
+    setStatus('Complete setup first, then start dictation.', 'neutral');
+    return;
+  }
+
+  try {
+    isStartingDictation = true;
+    syncControls();
+    setUiMode('loading');
+    setStatus('Opening microphone...', 'working');
+    await tauriInvoke('start_native_dictation');
+    isStartingDictation = false;
+    setDictationState(true);
+    setUiMode('listening');
+    if (trigger === 'hotkey-hold' || trigger === 'hotkey') {
+      setStatus('Listening... release fn/F19 to stop and transcribe.', 'live');
+    } else {
+      setStatus('Listening... click Stop to transcribe.', 'live');
+    }
+  } catch (error) {
+    const details = getErrorMessage(error);
+    isStartingDictation = false;
+    setDictationState(false);
+    setUiMode('error');
+    setStatus(`Could not start dictation: ${details}`, 'error');
+  }
+}
+
+async function stopNativeDesktopDictation(trigger = 'button') {
+  const tauriInvoke = getTauriInvoke();
+  if (!tauriInvoke || (!isDictating && !isStartingDictation)) return;
+
+  try {
+    setUiMode('loading');
+    setStatus('Transcribing captured audio...', 'working');
+    const transcriptBeforeStop = finalTranscript;
+    const transcript = await tauriInvoke('stop_native_dictation');
+    if (finalTranscript === transcriptBeforeStop) {
+      const didAppendTranscript = appendTranscriptChunk(transcript);
+      if (didAppendTranscript) {
+        setUiMode('idle');
+      }
+    }
+    if (trigger === 'hotkey-hold' || trigger === 'hotkey') {
+      setStatus('Dictation captured from fn hold and transcribed.', 'ok');
+    } else {
+      setStatus('Dictation captured and transcribed.', 'ok');
+    }
+  } catch (error) {
+    const details = getErrorMessage(error);
+    setUiMode('error');
+    setStatus(`Could not stop dictation: ${details}`, 'error');
+  } finally {
+    isStartingDictation = false;
+    setDictationState(false);
+  }
+}
+
+function isNativeHoldHotkeyEvent(event) {
+  const key = eventKeyToken(event);
+  if (key && NATIVE_HOLD_HOTKEYS.has(key)) return true;
+
+  const keyName = String(event?.key || '').trim().toLowerCase();
+  if (keyName === 'fn' || keyName === 'f19') return true;
+  return keyName === 'unidentified' && Boolean(event.getModifierState?.('Fn'));
+}
+
+function applyNativeFnHoldState(pressed) {
+  if (!isFocusedMacDesktopMode()) return;
+  const nextPressed = Boolean(pressed);
+
+  if (nextPressed) {
+    nativeFnHoldActive = true;
+    nativeFnStopRequested = false;
+
+    if (isDictating || isStartingDictation || nativeHotkeyActionInFlight) return;
+    nativeHotkeyActionInFlight = true;
+    setHotkeyPill('fn down - starting dictation...', 'working', true);
+    Promise.resolve(startNativeDesktopDictation('hotkey-hold'))
+      .catch(() => {})
+      .finally(() => {
+        nativeHotkeyActionInFlight = false;
+        if (nativeFnStopRequested || !nativeFnHoldActive) {
+          nativeFnStopRequested = false;
+          applyNativeFnHoldState(false);
+        }
+      });
+    return;
+  }
+
+  nativeFnHoldActive = false;
+  if (isStartingDictation && !isDictating) {
+    // Release can arrive while startup is in-flight; defer stop until capture is live.
+    nativeFnStopRequested = true;
+    setHotkeyPill('fn released - waiting for microphone...', 'working', true);
+    return;
+  }
+
+  if (!isDictating || nativeHotkeyActionInFlight) return;
+  nativeHotkeyActionInFlight = true;
+  setHotkeyPill('fn released - transcribing...', 'working', true);
+  Promise.resolve(stopNativeDesktopDictation('hotkey-hold'))
+    .catch(() => {})
+    .finally(() => {
+      nativeHotkeyActionInFlight = false;
+    });
+}
+
+function handleNativeHoldKeydown(event) {
+  if (!isFocusedMacDesktopMode()) return;
+  if (event.repeat) return;
+  if (event.metaKey || event.ctrlKey || event.altKey || event.shiftKey) return;
+  if (!isNativeHoldHotkeyEvent(event)) return;
+  if (activeHotkeySpec?.ok && activeHotkeySpec.key !== 'Fn') return;
+
+  event.preventDefault();
+  event.stopPropagation();
+  applyNativeFnHoldState(true);
+}
+
+function handleNativeHoldKeyup(event) {
+  if (!isFocusedMacDesktopMode()) return;
+  if (!isNativeHoldHotkeyEvent(event)) return;
+  if (activeHotkeySpec?.ok && activeHotkeySpec.key !== 'Fn') return;
+
+  event.preventDefault();
+  event.stopPropagation();
+  applyNativeFnHoldState(false);
+}
+
 function triggerDictationToggleFromHotkey() {
   const now = Date.now();
   if (now - lastHotkeyToggleAtMs < 180) return;
@@ -1558,5 +1701,15 @@ setSetupScreenMode('onboarding');
 setAppScreen('onboarding');
 syncControls();
 syncHotkeyPillForStatus(statusEl.textContent || '', 'neutral');
-initDictation();
-initApp();
+try {
+  initDictation();
+} catch (error) {
+  const details = getErrorMessage(error);
+  setUiMode('error');
+  setStatus(`UI initialization failed: ${details}`, 'error');
+}
+initApp().catch((error) => {
+  const details = getErrorMessage(error);
+  setUiMode('error');
+  setStatus(`Could not initialize setup: ${details}`, 'error');
+});

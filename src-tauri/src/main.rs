@@ -35,7 +35,8 @@ const DICTATION_STATE_EVENT: &str = "dictation:state-changed";
 const WHISPER_CPP_SETUP_URL: &str = "https://github.com/ggml-org/whisper.cpp#quick-start";
 const START_HIDDEN_ENV: &str = "DICKTAINT_START_HIDDEN";
 const PILL_WINDOW_LABEL_PREFIX: &str = "pill";
-const PILL_WINDOW_WIDTH: f64 = 278.0;
+const PILL_WINDOW_BASE_WIDTH: f64 = 278.0;
+const PILL_WINDOW_MIN_WIDTH: f64 = 220.0;
 const PILL_WINDOW_HEIGHT: f64 = 40.0;
 const PILL_WINDOW_BOTTOM_MARGIN: i32 = 18;
 const MAX_PILL_WINDOWS: usize = 6;
@@ -510,6 +511,12 @@ fn show_main_window(app: &tauri::AppHandle) {
 }
 
 #[cfg(target_os = "macos")]
+fn pill_window_width_for_monitor(monitor: &tauri::Monitor) -> f64 {
+    let clamped_scale = monitor.scale_factor().clamp(1.0, 2.0);
+    PILL_WINDOW_MIN_WIDTH + (clamped_scale - 1.0) * (PILL_WINDOW_BASE_WIDTH - PILL_WINDOW_MIN_WIDTH)
+}
+
+#[cfg(target_os = "macos")]
 fn create_pill_overlay_window_for_monitor(
     app: &tauri::AppHandle,
     label: &str,
@@ -524,7 +531,8 @@ fn create_pill_overlay_window_for_monitor(
     let work_y = work_area.position.y;
     let work_w = work_area.size.width as i32;
     let work_h = work_area.size.height as i32;
-    let width_i = PILL_WINDOW_WIDTH as i32;
+    let width = pill_window_width_for_monitor(monitor);
+    let width_i = width as i32;
     let height_i = PILL_WINDOW_HEIGHT as i32;
 
     let x = work_x + (work_w - width_i).max(0) / 2;
@@ -544,7 +552,7 @@ fn create_pill_overlay_window_for_monitor(
     .skip_taskbar(true)
     .always_on_top(true)
     .visible_on_all_workspaces(true)
-    .inner_size(PILL_WINDOW_WIDTH, PILL_WINDOW_HEIGHT)
+    .inner_size(width, PILL_WINDOW_HEIGHT)
     .position(x as f64, y as f64)
     .build()
     .map_err(|e| format!("Failed to create overlay window '{label}': {e}"))?;
@@ -2152,6 +2160,8 @@ fn set_dictation_trigger(
         .map_err(|_| "Failed to lock local model settings".to_string())?;
     settings.dictation_trigger = Some(normalized.clone());
     if let Err(error) = save_local_settings(&settings_path, &settings) {
+        settings.dictation_trigger = previous_trigger.clone();
+        drop(settings);
         if let Err(restore_error) =
             apply_registered_hotkey(&app, hotkey_state.inner(), rollback_trigger.as_deref())
         {
@@ -2188,6 +2198,8 @@ fn clear_dictation_trigger(
         .map_err(|_| "Failed to lock local model settings".to_string())?;
     settings.dictation_trigger = None;
     if let Err(error) = save_local_settings(&settings_path, &settings) {
+        settings.dictation_trigger = previous_trigger.clone();
+        drop(settings);
         if let Err(restore_error) =
             apply_registered_hotkey(&app, hotkey_state.inner(), rollback_trigger.as_deref())
         {
