@@ -118,6 +118,14 @@
           </div>
           <label for="transcriptInput">Transcript</label>
           <textarea id="transcriptInput" rows="10" placeholder="Your dictated text appears here..."></textarea>
+          <section id="dictationHistorySection" class="dictation-history" aria-label="Recent Dictations">
+            <div class="dictation-history-head">
+              <h3>Recent Dictations</h3>
+              <button id="clearDictationHistory" class="ghost quiet" type="button">Clear History</button>
+            </div>
+            <p id="dictationHistoryEmpty" class="hint">No saved dictations yet.</p>
+            <ul id="dictationHistoryList" class="dictation-history-list"></ul>
+          </section>
         </article>
       </section>
 

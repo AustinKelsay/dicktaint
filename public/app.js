@@ -12,6 +12,10 @@ const startDictationBtn = document.getElementById('startDictation');
 const stopDictationBtn = document.getElementById('stopDictation');
 const clearTranscriptBtn = document.getElementById('clearTranscript');
 const transcriptInput = document.getElementById('transcriptInput');
+const dictationHistorySection = document.getElementById('dictationHistorySection');
+const dictationHistoryListEl = document.getElementById('dictationHistoryList');
+const dictationHistoryEmptyEl = document.getElementById('dictationHistoryEmpty');
+const clearDictationHistoryBtn = document.getElementById('clearDictationHistory');
 const appShell = document.querySelector('.app-shell');
 const dictationModelCard = document.getElementById('dictationModelCard');
 const dictationModelSelect = document.getElementById('dictationModelSelect');
@@ -683,6 +687,7 @@ function pushDictationHistory(chunk, source = 'native') {
     },
     ...dictationHistory
   ].slice(0, DICTATION_HISTORY_LIMIT);
+  renderDictationHistory();
 }
 
 function nextNativeSessionId() {
@@ -716,12 +721,115 @@ async function maybeStartQueuedNativeDictation() {
   await startNativeDesktopDictation(trigger);
 }
 
+function setDraftTranscriptText(text) {
+  currentDraftText = String(text || '').trim();
+  transcriptInput.value = currentDraftText;
+}
+
+function appendToDraftTranscript(text) {
+  const trimmed = String(text || '').trim();
+  if (!trimmed) return false;
+  currentDraftText = `${currentDraftText} ${trimmed}`.trim();
+  transcriptInput.value = currentDraftText;
+  return true;
+}
+
+function findDictationHistoryEntry(historyId) {
+  const id = String(historyId || '').trim();
+  if (!id) return null;
+  return dictationHistory.find((entry) => entry.id === id) || null;
+}
+
+function formatHistoryTimestamp(value) {
+  const date = new Date(value);
+  if (Number.isNaN(date.getTime())) return '';
+  return date.toLocaleTimeString([], { hour: 'numeric', minute: '2-digit' });
+}
+
+function historySourceLabel(source) {
+  const value = String(source || '').trim().toLowerCase();
+  if (value === 'web') return 'WEB';
+  if (value === 'native' || value === 'native-event') return 'DESKTOP';
+  return 'DICTATION';
+}
+
+async function copyTextToClipboard(text) {
+  const trimmed = String(text || '').trim();
+  if (!trimmed) return false;
+  if (navigator.clipboard?.writeText) {
+    await navigator.clipboard.writeText(trimmed);
+    return true;
+  }
+
+  const helper = document.createElement('textarea');
+  helper.value = trimmed;
+  helper.setAttribute('readonly', '');
+  helper.style.position = 'fixed';
+  helper.style.opacity = '0';
+  helper.style.pointerEvents = 'none';
+  document.body.appendChild(helper);
+  helper.focus();
+  helper.select();
+  const copied = document.execCommand('copy');
+  helper.remove();
+  return copied;
+}
+
+function renderDictationHistory() {
+  if (!dictationHistorySection || !dictationHistoryListEl || !dictationHistoryEmptyEl) return;
+  dictationHistorySection.hidden = false;
+  const hasHistory = dictationHistory.length > 0;
+  dictationHistoryEmptyEl.hidden = hasHistory;
+  if (clearDictationHistoryBtn) clearDictationHistoryBtn.disabled = !hasHistory;
+
+  dictationHistoryListEl.innerHTML = '';
+  if (!hasHistory) return;
+
+  for (const entry of dictationHistory) {
+    const item = document.createElement('li');
+    item.className = 'dictation-history-item';
+
+    const text = document.createElement('p');
+    text.className = 'dictation-history-text';
+    text.textContent = entry.text;
+
+    const meta = document.createElement('p');
+    meta.className = 'dictation-history-meta';
+    const stamp = formatHistoryTimestamp(entry.createdAt);
+    const source = historySourceLabel(entry.source);
+    meta.textContent = stamp ? `${stamp} • ${source}` : source;
+
+    const actions = document.createElement('div');
+    actions.className = 'dictation-history-actions';
+
+    const reuseBtn = document.createElement('button');
+    reuseBtn.type = 'button';
+    reuseBtn.className = 'ghost quiet';
+    reuseBtn.textContent = 'Reinsert';
+    reuseBtn.dataset.historyAction = 'reinsert';
+    reuseBtn.dataset.historyId = entry.id;
+
+    const copyBtn = document.createElement('button');
+    copyBtn.type = 'button';
+    copyBtn.className = 'ghost quiet';
+    copyBtn.textContent = 'Copy';
+    copyBtn.dataset.historyAction = 'copy';
+    copyBtn.dataset.historyId = entry.id;
+
+    actions.appendChild(reuseBtn);
+    actions.appendChild(copyBtn);
+    item.appendChild(text);
+    item.appendChild(meta);
+    item.appendChild(actions);
+    dictationHistoryListEl.appendChild(item);
+  }
+}
+
 function appendTranscriptChunk(chunk, { source = 'native', nativeSessionId = null } = {}) {
   const trimmed = String(chunk || '').trim();
   if (!trimmed) return false;
   if (!markNativeSessionCommitted(nativeSessionId)) return false;
-  currentDraftText = `${currentDraftText} ${trimmed}`.trim();
-  transcriptInput.value = currentDraftText;
+  appendToDraftTranscript(trimmed);
   pushDictationHistory(trimmed, source);
   void maybeInsertTranscriptIntoFocusedField(trimmed);
   return true;
@@ -1665,11 +1773,58 @@ function initDictation() {
     pendingNativeStartTrigger = null;
     activeNativeSessionId = null;
     clearRestartTimer();
-    currentDraftText = '';
-    transcriptInput.value = '';
+    setDraftTranscriptText('');
     setUiMode('idle');
     setStatus('Transcript cleared. Recent dictation history is still available in app state.', 'neutral');
   });
+
+  if (clearDictationHistoryBtn) {
+    clearDictationHistoryBtn.addEventListener('click', () => {
+      dictationHistory = [];
+      renderDictationHistory();
+      setStatus('Recent dictation history cleared.', 'neutral');
+    });
+  }
+
+  if (dictationHistoryListEl) {
+    dictationHistoryListEl.addEventListener('click', (event) => {
+      const target = event.target instanceof Element
+        ? event.target.closest('button[data-history-action][data-history-id]')
+        : null;
+      if (!target) return;
+
+      const historyAction = String(target.dataset.historyAction || '').trim();
+      const historyId = String(target.dataset.historyId || '').trim();
+      const entry = findDictationHistoryEntry(historyId);
+      if (!entry) {
+        setStatus('That history entry is no longer available.', 'error');
+        return;
+      }
+
+      if (historyAction === 'reinsert') {
+        if (appendToDraftTranscript(entry.text)) {
+          transcriptInput.focus();
+          setStatus('Reinserted previous dictation into transcript.', 'ok');
+        }
+        return;
+      }
+
+      if (historyAction === 'copy') {
+        void copyTextToClipboard(entry.text)
+          .then((copied) => {
+            if (copied) {
+              setStatus('Copied dictation entry to clipboard.', 'ok');
+            } else {
+              setStatus('Could not copy dictation entry to clipboard.', 'error');
+            }
+          })
+          .catch((error) => {
+            const details = getErrorMessage(error);
+            setStatus(`Could not copy dictation entry: ${details}`, 'error');
+          });
+      }
+    });
+  }
 
   if (quickDictationFab) {
     quickDictationFab.addEventListener('click', () => {
@@ -1684,6 +1839,8 @@ function initDictation() {
   transcriptInput.addEventListener('input', () => {
     currentDraftText = transcriptInput.value.trim();
   });
+
+  renderDictationHistory();
 
   if (onboardingContinueBtn) {
     onboardingContinueBtn.addEventListener('click', () => {
