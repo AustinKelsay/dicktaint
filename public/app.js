@@ -84,6 +84,7 @@ let pendingNativeStartTrigger = null;
 let activeNativeSessionId = null;
 let nativeSessionSeq = 0;
 let committedNativeSessionIds = new Set();
+let startNativeDesktopDictationOverride = null;
 
 function modelDisplayName(model) {
   return String(model?.display_name || '').replace(/\s+\(Selected\)$/u, '').trim();
@@ -718,7 +719,8 @@ async function maybeStartQueuedNativeDictation() {
   const trigger = pendingNativeStartTrigger || 'hotkey';
   pendingNativeStartAfterStop = false;
   pendingNativeStartTrigger = null;
-  await startNativeDesktopDictation(trigger);
+  const startFn = startNativeDesktopDictationOverride || startNativeDesktopDictation;
+  await startFn(trigger);
 }
 
 function setDraftTranscriptText(text) {
@@ -773,6 +775,43 @@ async function copyTextToClipboard(text) {
   const copied = document.execCommand('copy');
   helper.remove();
   return copied;
+}
+
+async function runDictationHistoryAction(historyAction, historyId) {
+  const action = String(historyAction || '').trim();
+  const id = String(historyId || '').trim();
+  const entry = findDictationHistoryEntry(id);
+  if (!entry) {
+    setStatus('That history entry is no longer available.', 'error');
+    return false;
+  }
+
+  if (action === 'reinsert') {
+    if (appendToDraftTranscript(entry.text)) {
+      transcriptInput.focus();
+      setStatus('Reinserted previous dictation into transcript.', 'ok');
+      return true;
+    }
+    return false;
+  }
+
+  if (action === 'copy') {
+    try {
+      const copied = await copyTextToClipboard(entry.text);
+      if (copied) {
+        setStatus('Copied dictation entry to clipboard.', 'ok');
+      } else {
+        setStatus('Could not copy dictation entry to clipboard.', 'error');
+      }
+      return copied;
+    } catch (error) {
+      const details = getErrorMessage(error);
+      setStatus(`Could not copy dictation entry: ${details}`, 'error');
+      return false;
+    }
+  }
+
+  return false;
 }
 
 function renderDictationHistory() {
@@ -1795,34 +1834,7 @@ function initDictation() {
 
       const historyAction = String(target.dataset.historyAction || '').trim();
       const historyId = String(target.dataset.historyId || '').trim();
-      const entry = findDictationHistoryEntry(historyId);
-      if (!entry) {
-        setStatus('That history entry is no longer available.', 'error');
-        return;
-      }
-
-      if (historyAction === 'reinsert') {
-        if (appendToDraftTranscript(entry.text)) {
-          transcriptInput.focus();
-          setStatus('Reinserted previous dictation into transcript.', 'ok');
-        }
-        return;
-      }
-
-      if (historyAction === 'copy') {
-        void copyTextToClipboard(entry.text)
-          .then((copied) => {
-            if (copied) {
-              setStatus('Copied dictation entry to clipboard.', 'ok');
-            } else {
-              setStatus('Could not copy dictation entry to clipboard.', 'error');
-            }
-          })
-          .catch((error) => {
-            const details = getErrorMessage(error);
-            setStatus(`Could not copy dictation entry: ${details}`, 'error');
-          });
-      }
+      void runDictationHistoryAction(historyAction, historyId);
     });
   }
 
@@ -2053,6 +2065,66 @@ function initDictation() {
 
 async function initApp() {
   await loadDictationOnboarding();
+}
+
+function getDictationTestState() {
+  return {
+    currentDraftText,
+    dictationHistory: dictationHistory.map((entry) => ({ ...entry })),
+    pendingNativeStartAfterStop,
+    pendingNativeStartTrigger,
+    nativeStopRequestInFlight,
+    isDictating,
+    isStartingDictation
+  };
+}
+
+function resetDictationStateForTests() {
+  currentDraftText = '';
+  dictationHistory = [];
+  dictationHistorySeq = 0;
+  isDictating = false;
+  isStartingDictation = false;
+  shouldKeepDictating = false;
+  nativeStopRequestInFlight = false;
+  pendingNativeStartAfterStop = false;
+  pendingNativeStartTrigger = null;
+  activeNativeSessionId = null;
+  nativeSessionSeq = 0;
+  committedNativeSessionIds = new Set();
+  startNativeDesktopDictationOverride = null;
+  transcriptInput.value = '';
+  renderDictationHistory();
+  syncControls();
+}
+
+if (typeof globalThis !== 'undefined' && globalThis.__DICKTAINT_EXPOSE_TEST_API__) {
+  globalThis.__DICKTAINT_TEST_API__ = {
+    appendTranscriptChunk,
+    runDictationHistoryAction,
+    queueNativeStartAfterCurrentStop,
+    maybeStartQueuedNativeDictation,
+    setDraftTranscriptText,
+    getState: getDictationTestState,
+    resetState: resetDictationStateForTests,
+    setNativeFlags(next = {}) {
+      if (typeof next.nativeStopRequestInFlight === 'boolean') {
+        nativeStopRequestInFlight = next.nativeStopRequestInFlight;
+      }
+      if (typeof next.isDictating === 'boolean') isDictating = next.isDictating;
+      if (typeof next.isStartingDictation === 'boolean') isStartingDictation = next.isStartingDictation;
+      if (typeof next.pendingNativeStartAfterStop === 'boolean') {
+        pendingNativeStartAfterStop = next.pendingNativeStartAfterStop;
+      }
+      if (typeof next.pendingNativeStartTrigger === 'string' || next.pendingNativeStartTrigger === null) {
+        pendingNativeStartTrigger = next.pendingNativeStartTrigger;
+      }
+      syncControls();
+    },
+    setStartNativeDesktopDictationOverride(fn) {
+      startNativeDesktopDictationOverride = typeof fn === 'function' ? fn : null;
+    }
+  };
 }
 
 setUiMode('loading');
