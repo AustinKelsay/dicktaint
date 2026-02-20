@@ -1441,15 +1441,6 @@ function initDictation() {
 
     window.addEventListener('keydown', handleNativeHoldKeydown, true);
     window.addEventListener('keyup', handleNativeHoldKeyup, true);
-    const tauriEvent = getTauriEventApi();
-    if (typeof tauriEvent?.listen === 'function' && !nativeHotkeyUnlisten) {
-      tauriEvent.listen(FN_HOTKEY_STATE_EVENT, (event) => handleNativeFnStateEvent(event?.payload))
-        .then((unlisten) => {
-          nativeHotkeyUnlisten = unlisten;
-        })
-        .catch(() => {});
-    }
-
     syncControls();
     return;
   }

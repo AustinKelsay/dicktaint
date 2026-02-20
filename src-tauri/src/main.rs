@@ -1,14 +1,8 @@
 use cpal::traits::{DeviceTrait, HostTrait, StreamTrait};
 use cpal::{SampleFormat, Stream};
-#[cfg(target_os = "macos")]
-use block2::RcBlock;
-#[cfg(target_os = "macos")]
-use objc2_app_kit::{NSEvent, NSEventMask, NSEventModifierFlags};
 use serde::{Deserialize, Serialize};
 #[cfg(target_os = "macos")]
 use std::ffi::c_void;
-#[cfg(target_os = "macos")]
-use std::ptr::NonNull;
 use std::collections::HashSet;
 use std::fs;
 use std::io::Write;
@@ -40,7 +34,6 @@ const DICTATION_HOTKEY_EVENT: &str = "dictation:hotkey-triggered";
 const DICTATION_STATE_EVENT: &str = "dictation:state-changed";
 const WHISPER_CPP_SETUP_URL: &str = "https://github.com/ggml-org/whisper.cpp#quick-start";
 const START_HIDDEN_ENV: &str = "DICKTAINT_START_HIDDEN";
-const FN_HOTKEY_STATE_EVENT: &str = "dicktaint://fn-state";
 const PILL_WINDOW_LABEL_PREFIX: &str = "pill";
 const PILL_WINDOW_WIDTH: f64 = 278.0;
 const PILL_WINDOW_HEIGHT: f64 = 40.0;
@@ -64,11 +57,6 @@ struct AppConfig {
 #[derive(Default)]
 struct DictationState {
     active_recording: Mutex<Option<ActiveRecording>>,
-}
-
-#[derive(Serialize, Clone, Copy)]
-struct FnHotkeyStatePayload {
-    pressed: bool,
 }
 
 #[derive(Clone, Copy)]
@@ -586,48 +574,6 @@ fn create_pill_overlay_windows(app: &tauri::AppHandle) -> Result<(), String> {
 
 #[cfg(not(target_os = "macos"))]
 fn create_pill_overlay_windows(_app: &tauri::AppHandle) -> Result<(), String> {
-    Ok(())
-}
-
-#[cfg(target_os = "macos")]
-fn register_fn_global_hotkey_monitor(app: &tauri::AppHandle) -> Result<(), String> {
-    let app_handle = app.clone();
-    let fn_key_down = Arc::new(AtomicBool::new(false));
-    let fn_key_down_ref = Arc::clone(&fn_key_down);
-    let handler = RcBlock::new(move |event_ptr: NonNull<NSEvent>| {
-        // SAFETY: NSEvent monitor callback provides a valid NSEvent pointer for callback lifetime.
-        let event = unsafe { event_ptr.as_ref() };
-        let function_down = event
-            .modifierFlags()
-            .contains(NSEventModifierFlags::Function);
-        // Emit only on edge transitions so frontend start/stop handling stays idempotent.
-        let previous = fn_key_down_ref.swap(function_down, Ordering::SeqCst);
-        if previous != function_down {
-            let _ = app_handle.emit(
-                FN_HOTKEY_STATE_EVENT,
-                FnHotkeyStatePayload {
-                    pressed: function_down,
-                },
-            );
-        }
-    });
-
-    let monitor =
-        NSEvent::addGlobalMonitorForEventsMatchingMask_handler(NSEventMask::FlagsChanged, &handler)
-            .ok_or_else(|| {
-                "Failed to register global fn key monitor on macOS. \
-Allow Input Monitoring/Accessibility for this app or terminal and retry."
-                    .to_string()
-            })?;
-
-    // Keep monitor and callback alive for process lifetime.
-    std::mem::forget(handler);
-    std::mem::forget(monitor);
-    Ok(())
-}
-
-#[cfg(not(target_os = "macos"))]
-fn register_fn_global_hotkey_monitor(_app: &tauri::AppHandle) -> Result<(), String> {
     Ok(())
 }
 
@@ -2710,38 +2656,14 @@ fn main() {
                 log::warn!("Failed to apply initial global hotkey: {error}");
             }
 
-            // Create the always-on-top floating pill window
-            {
-                use tauri::WebviewWindowBuilder;
-                let pill_w = 110.0_f64;
-                let pill_h = 34.0_f64;
-                let (px, py) = app.primary_monitor().ok().flatten()
-                    .map(|m| {
-                        let s = m.scale_factor();
-                        let sz = m.size();
-                        let pos = m.position();
-                        let x = pos.x as f64 + (sz.width as f64 / s - pill_w) / 2.0;
-                        let y = pos.y as f64 + sz.height as f64 / s - pill_h - 40.0;
-                        (x as i32, y as i32)
-                    })
-                    .unwrap_or((800, 960));
-
-                if let Err(e) = WebviewWindowBuilder::new(app, "pill", tauri::WebviewUrl::App("pill.html".into()))
-                    .title("")
-                    .inner_size(pill_w, pill_h)
-                    .position(px as f64, py as f64)
-                    .decorations(false)
-                    .transparent(true)
-                    .background_color(tauri::webview::Color(0, 0, 0, 0))
-                    .always_on_top(true)
-                    .skip_taskbar(true)
-                    .resizable(false)
-                    .focused(false)
-                    .shadow(false)
-                    .build()
-                {
-                    log::warn!("Failed to create pill window: {e}. App will continue without it.");
+            if should_start_hidden() {
+                if let Some(window) = app.get_webview_window("main") {
+                    let _ = window.hide();
                 }
+            }
+
+            if let Err(error) = create_pill_overlay_windows(app.handle()) {
+                log::warn!("Failed to create pill overlay windows: {error}");
             }
 
             Ok(())
