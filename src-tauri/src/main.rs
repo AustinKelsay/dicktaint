@@ -1,8 +1,14 @@
 use cpal::traits::{DeviceTrait, HostTrait, StreamTrait};
 use cpal::{SampleFormat, Stream};
+#[cfg(target_os = "macos")]
+use block2::RcBlock;
+#[cfg(target_os = "macos")]
+use objc2_app_kit::{NSEvent, NSEventMask, NSEventModifierFlags};
 use serde::{Deserialize, Serialize};
 #[cfg(target_os = "macos")]
 use std::ffi::c_void;
+#[cfg(target_os = "macos")]
+use std::ptr::NonNull;
 use std::collections::HashSet;
 use std::fs;
 use std::io::Write;
@@ -14,11 +20,10 @@ use std::str::FromStr;
 #[cfg(target_os = "macos")]
 use std::sync::atomic::{AtomicBool, Ordering};
 use std::sync::{mpsc, Arc, Mutex};
-#[cfg(target_os = "macos")]
-use std::sync::atomic::{AtomicBool, Ordering};
 use std::thread;
 use std::time::{Duration, SystemTime, UNIX_EPOCH};
 use tauri::{Emitter, Manager, State};
+#[cfg(not(any(target_os = "android", target_os = "ios")))]
 use tauri_plugin_global_shortcut::{GlobalShortcutExt, Shortcut, ShortcutState};
 
 const WHISPER_SAMPLE_RATE: u32 = 16_000;
@@ -782,6 +787,7 @@ fn dictation_trigger_payload(settings: &LocalSettings) -> DictationTriggerPayloa
     }
 }
 
+#[cfg(not(any(target_os = "android", target_os = "ios")))]
 fn shortcut_from_dictation_trigger(trigger: &str) -> Result<Shortcut, String> {
     let normalized = normalize_dictation_trigger(trigger)?;
     let accelerator = normalized
@@ -845,6 +851,7 @@ fn set_macos_fn_listener_enabled(
     Ok(())
 }
 
+#[cfg(not(any(target_os = "android", target_os = "ios")))]
 fn apply_registered_hotkey(
     app: &tauri::AppHandle,
     hotkey_state: &GlobalHotkeyState,
@@ -923,6 +930,19 @@ fn apply_registered_hotkey(
         }
     }
 
+    set_registered_hotkey_state(hotkey_state, next)
+}
+
+#[cfg(any(target_os = "android", target_os = "ios"))]
+fn apply_registered_hotkey(
+    _app: &tauri::AppHandle,
+    hotkey_state: &GlobalHotkeyState,
+    trigger: Option<&str>,
+) -> Result<(), String> {
+    let next = match trigger.map(str::trim).filter(|value| !value.is_empty()) {
+        Some(value) => Some(normalize_dictation_trigger(value)?),
+        None => None,
+    };
     set_registered_hotkey_state(hotkey_state, next)
 }
 
@@ -2638,18 +2658,21 @@ fn main() {
     let whisper_model_path_override = std::env::var("WHISPER_MODEL_PATH").ok();
     let whisper_cli_path_override = std::env::var("WHISPER_CLI_PATH").ok();
 
-    tauri::Builder::default()
-        .plugin(
-            tauri_plugin_global_shortcut::Builder::new()
-                .with_handler(|app, _shortcut, event| {
-                    if event.state() == ShortcutState::Pressed {
-                        if let Err(error) = app.emit(DICTATION_HOTKEY_EVENT, ()) {
-                            log::warn!("Failed to emit dictation hotkey event: {error}");
-                        }
+    let builder = tauri::Builder::default();
+    #[cfg(not(any(target_os = "android", target_os = "ios")))]
+    let builder = builder.plugin(
+        tauri_plugin_global_shortcut::Builder::new()
+            .with_handler(|app, _shortcut, event| {
+                if event.state() == ShortcutState::Pressed {
+                    if let Err(error) = app.emit(DICTATION_HOTKEY_EVENT, ()) {
+                        log::warn!("Failed to emit dictation hotkey event: {error}");
                     }
-                })
-                .build(),
-        )
+                }
+            })
+            .build(),
+    );
+
+    let app = builder
         .setup(move |app| {
             let bundled_whisper_cli_path = resolve_bundled_whisper_cli_path(app.handle());
             let app_data_dir = app.path().app_data_dir().map_err(|e| {

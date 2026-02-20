@@ -212,7 +212,7 @@ body[data-screen="dictation"] .app-shell {
   width: 0.54rem;
   height: 0.54rem;
   border-radius: 999px;
-  background: currentColor;
+  background: currentcolor;
   opacity: 0.55;
   flex-shrink: 0;
 }

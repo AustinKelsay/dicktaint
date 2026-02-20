@@ -38,6 +38,7 @@ bun run dev
 ## Desktop quick start (local-first)
 
 Desktop MVP currently targets macOS.
+Rust toolchain requirement for desktop (`src-tauri`): `rustc >= 1.77.2`.
 
 1. Build/update the local sidecar binary (dev helper):
    ```bash
