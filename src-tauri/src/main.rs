@@ -213,6 +213,7 @@ struct LocalSettings {
     selected_model_id: Option<String>,
     selected_model_path: Option<String>,
     dictation_trigger: Option<String>,
+    dictation_trigger_enabled: Option<bool>,
 }
 
 struct LocalModelState {
@@ -729,15 +730,39 @@ fn normalize_dictation_trigger(trigger: &str) -> Result<String, String> {
     Ok(parts.join("+"))
 }
 
-fn dictation_trigger_payload(settings: &LocalSettings) -> DictationTriggerPayload {
-    let trigger = settings
+fn default_dictation_trigger() -> String {
+    normalize_dictation_trigger(DEFAULT_DICTATION_TRIGGER)
+        .unwrap_or_else(|_| DEFAULT_DICTATION_TRIGGER.to_string())
+}
+
+fn resolve_effective_dictation_trigger(settings: &LocalSettings) -> Option<String> {
+    if let Some(configured) = settings
         .dictation_trigger
         .as_deref()
-        .and_then(|value| normalize_dictation_trigger(value).ok());
+        .map(str::trim)
+        .filter(|value| !value.is_empty())
+    {
+        match normalize_dictation_trigger(configured) {
+            Ok(normalized) => return Some(normalized),
+            Err(error) => {
+                log::warn!(
+                    "Ignoring invalid persisted dictation trigger '{configured}': {error}"
+                );
+            }
+        }
+    }
 
+    if matches!(settings.dictation_trigger_enabled, Some(false)) {
+        return None;
+    }
+
+    Some(default_dictation_trigger())
+}
+
+fn dictation_trigger_payload(settings: &LocalSettings) -> DictationTriggerPayload {
     DictationTriggerPayload {
-        trigger,
-        default_trigger: DEFAULT_DICTATION_TRIGGER.to_string(),
+        trigger: resolve_effective_dictation_trigger(settings),
+        default_trigger: default_dictation_trigger(),
     }
 }
 
@@ -868,11 +893,31 @@ fn apply_registered_hotkey(
                                 hotkey_state,
                                 Some(previous_trigger.to_string()),
                             )?;
+                            #[cfg(target_os = "macos")]
+                            if previous_trigger == "Fn" {
+                                if let Err(listener_error) =
+                                    set_macos_fn_listener_enabled(app, hotkey_state, true)
+                                {
+                                    log::warn!(
+                                        "Failed to re-enable global Fn listener after hotkey restore: {listener_error}"
+                                    );
+                                }
+                            }
                         } else {
                             set_registered_hotkey_state(hotkey_state, None)?;
                         }
                     } else {
                         set_registered_hotkey_state(hotkey_state, Some(previous_trigger.to_string()))?;
+                        #[cfg(target_os = "macos")]
+                        if previous_trigger == "Fn" {
+                            if let Err(listener_error) =
+                                set_macos_fn_listener_enabled(app, hotkey_state, true)
+                            {
+                                log::warn!(
+                                    "Failed to re-enable global Fn listener after hotkey restore: {listener_error}"
+                                );
+                            }
+                        }
                     }
                 } else {
                     set_registered_hotkey_state(hotkey_state, None)?;
@@ -1655,15 +1700,7 @@ fn build_onboarding_payload(
     } else {
         settings.selected_model_id.clone()
     };
-    let dictation_trigger = settings.dictation_trigger.as_deref().and_then(|value| {
-        match normalize_dictation_trigger(value) {
-            Ok(normalized) => Some(normalized),
-            Err(error) => {
-                log::warn!("Ignoring invalid persisted dictation trigger '{value}': {error}");
-                None
-            }
-        }
-    });
+    let dictation_trigger = resolve_effective_dictation_trigger(&settings);
     let list_selected_model_id = if override_model_path.is_some() {
         None
     } else {
@@ -1688,7 +1725,7 @@ fn build_onboarding_payload(
         selected_model_path,
         selected_model_exists,
         dictation_trigger,
-        default_dictation_trigger: DEFAULT_DICTATION_TRIGGER.to_string(),
+        default_dictation_trigger: default_dictation_trigger(),
         whisper_cli_available,
         whisper_cli_path: detected_whisper_cli_path.unwrap_or(configured_whisper_cli_path),
         models_dir: model_state.models_dir.to_string_lossy().to_string(),
@@ -2140,30 +2177,33 @@ fn set_dictation_trigger(
     hotkey_state: State<'_, GlobalHotkeyState>,
 ) -> Result<DictationTriggerPayload, String> {
     let normalized = normalize_dictation_trigger(&trigger)?;
-    let previous_trigger = {
+    let (previous_trigger, previous_trigger_raw, previous_trigger_enabled) = {
         let settings = model_state
             .settings
             .lock()
             .map_err(|_| "Failed to lock local model settings".to_string())?;
-        settings.dictation_trigger.clone()
+        (
+            resolve_effective_dictation_trigger(&settings),
+            settings.dictation_trigger.clone(),
+            settings.dictation_trigger_enabled,
+        )
     };
 
     apply_registered_hotkey(&app, hotkey_state.inner(), Some(&normalized))?;
 
     let settings_path = model_state.settings_path.clone();
-    let rollback_trigger = previous_trigger
-        .as_deref()
-        .and_then(|value| normalize_dictation_trigger(value).ok());
     let mut settings = model_state
         .settings
         .lock()
         .map_err(|_| "Failed to lock local model settings".to_string())?;
     settings.dictation_trigger = Some(normalized.clone());
+    settings.dictation_trigger_enabled = Some(true);
     if let Err(error) = save_local_settings(&settings_path, &settings) {
-        settings.dictation_trigger = previous_trigger.clone();
+        settings.dictation_trigger = previous_trigger_raw;
+        settings.dictation_trigger_enabled = previous_trigger_enabled;
         drop(settings);
         if let Err(restore_error) =
-            apply_registered_hotkey(&app, hotkey_state.inner(), rollback_trigger.as_deref())
+            apply_registered_hotkey(&app, hotkey_state.inner(), previous_trigger.as_deref())
         {
             log::warn!("set_dictation_trigger: failed to restore previous hotkey after save error: {restore_error}");
         }
@@ -2178,30 +2218,33 @@ fn clear_dictation_trigger(
     model_state: State<'_, LocalModelState>,
     hotkey_state: State<'_, GlobalHotkeyState>,
 ) -> Result<DictationTriggerPayload, String> {
-    let previous_trigger = {
+    let (previous_trigger, previous_trigger_raw, previous_trigger_enabled) = {
         let settings = model_state
             .settings
             .lock()
             .map_err(|_| "Failed to lock local model settings".to_string())?;
-        settings.dictation_trigger.clone()
+        (
+            resolve_effective_dictation_trigger(&settings),
+            settings.dictation_trigger.clone(),
+            settings.dictation_trigger_enabled,
+        )
     };
 
     apply_registered_hotkey(&app, hotkey_state.inner(), None)?;
 
     let settings_path = model_state.settings_path.clone();
-    let rollback_trigger = previous_trigger
-        .as_deref()
-        .and_then(|value| normalize_dictation_trigger(value).ok());
     let mut settings = model_state
         .settings
         .lock()
         .map_err(|_| "Failed to lock local model settings".to_string())?;
     settings.dictation_trigger = None;
+    settings.dictation_trigger_enabled = Some(false);
     if let Err(error) = save_local_settings(&settings_path, &settings) {
-        settings.dictation_trigger = previous_trigger.clone();
+        settings.dictation_trigger = previous_trigger_raw;
+        settings.dictation_trigger_enabled = previous_trigger_enabled;
         drop(settings);
         if let Err(restore_error) =
-            apply_registered_hotkey(&app, hotkey_state.inner(), rollback_trigger.as_deref())
+            apply_registered_hotkey(&app, hotkey_state.inner(), previous_trigger.as_deref())
         {
             log::warn!(
                 "clear_dictation_trigger: failed to restore previous hotkey after save error: {restore_error}"
@@ -2549,7 +2592,10 @@ fn cancel_native_dictation(
 
 #[cfg(test)]
 mod tests {
-    use super::{normalize_dictation_trigger, resample_linear, whisper_help_text_looks_valid};
+    use super::{
+        default_dictation_trigger, normalize_dictation_trigger, resolve_effective_dictation_trigger,
+        resample_linear, whisper_help_text_looks_valid, LocalSettings,
+    };
 
     #[test]
     fn resample_linear_returns_same_when_rate_matches() {
@@ -2607,6 +2653,37 @@ mod tests {
     fn normalize_dictation_trigger_rejects_multiple_main_keys() {
         assert!(normalize_dictation_trigger("Ctrl+K+J").is_err());
     }
+
+    #[test]
+    fn resolve_effective_trigger_defaults_when_unset() {
+        let settings = LocalSettings::default();
+        assert_eq!(
+            resolve_effective_dictation_trigger(&settings),
+            Some(default_dictation_trigger())
+        );
+    }
+
+    #[test]
+    fn resolve_effective_trigger_honors_explicit_disable() {
+        let settings = LocalSettings {
+            dictation_trigger_enabled: Some(false),
+            ..LocalSettings::default()
+        };
+        assert_eq!(resolve_effective_dictation_trigger(&settings), None);
+    }
+
+    #[test]
+    fn resolve_effective_trigger_uses_saved_value() {
+        let settings = LocalSettings {
+            dictation_trigger: Some("CmdOrCtrl+Shift+K".to_string()),
+            dictation_trigger_enabled: Some(true),
+            ..LocalSettings::default()
+        };
+        assert_eq!(
+            resolve_effective_dictation_trigger(&settings),
+            Some("CmdOrCtrl+Shift+K".to_string())
+        );
+    }
 }
 
 fn main() {
@@ -2645,7 +2722,7 @@ fn main() {
                 )
             })?;
             let initial_settings = load_local_settings(&settings_path);
-            let initial_dictation_trigger = initial_settings.dictation_trigger.clone();
+            let initial_dictation_trigger = resolve_effective_dictation_trigger(&initial_settings);
 
             app.manage(AppConfig {
                 whisper_model_path_override: whisper_model_path_override.clone(),
