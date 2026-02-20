@@ -2,7 +2,7 @@
 
 ## Status Snapshot
 
-- Date: 2026-02-17
+- Date: 2026-02-20
 - hold-to-talk and overlay behavior are macOS-focused MVP features
 
 ## Purpose
@@ -35,23 +35,25 @@ Out of scope:
 Backend behavior:
 
 - registers global monitor for macOS `flagsChanged`
-- emits `dicktaint://fn-state` only on edge transitions
+- emits `dictation:hotkey-triggered` only on edge transitions
 - creates native transparent overlay windows per monitor (up to 6)
 - close request on main window hides app instead of quitting
 - macOS reopen event re-shows and focuses main window
 
 Frontend behavior:
 
-- listens for `dicktaint://fn-state`
+- listens for `dictation:hotkey-triggered`
 - fallback focused listeners for `Fn` / `F19`
 - on press: start native dictation
 - on release: stop native dictation and transcribe
 - release-during-start race handled by deferred stop flag
 - status emits `dicktaint://pill-status` updates for overlay UI
+- finalized transcript appends locally and can optionally paste into the focused field when setting is enabled and another app is focused
 
 Permission expectations:
 
 - Input Monitoring and Accessibility may be required for global key monitoring
+- Accessibility/Automation may be required for focused-field paste (`System Events` keystroke path)
 
 Dependency constraint:
 
@@ -65,7 +67,8 @@ Manual verification after hotkey/overlay edits:
 2. close main window
 3. hold/release `fn` and speak
 4. reopen app and verify transcript append
-5. verify overlay status transitions across lifecycle
+5. enable focused-field insertion, focus another app text field, repeat hold/release flow, verify paste
+6. verify overlay status transitions across lifecycle
 
 ## Related Docs
 

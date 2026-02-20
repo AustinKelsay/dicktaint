@@ -2,7 +2,7 @@
 
 ## Status Snapshot
 
-- Date: 2026-02-17
+- Date: 2026-02-20
 - Runtime interfaces: HTTP server contract and Tauri invoke/event contract
 
 ## Purpose
@@ -38,6 +38,11 @@ HTTP interface:
 Tauri commands:
 
 - `get_dictation_onboarding() -> DictationOnboardingPayload`
+- `get_dictation_trigger() -> DictationTriggerPayload`
+- `set_dictation_trigger(trigger: String) -> DictationTriggerPayload`
+- `clear_dictation_trigger() -> DictationTriggerPayload`
+- `set_focused_field_insert_enabled(enabled: bool) -> FocusedFieldInsertPayload`
+- `insert_text_into_focused_field(text: String) -> Result<(), String>`
 - `open_whisper_setup_page() -> Result<(), String>`
 - `install_dictation_model(model: String) -> DictationModelSelection`
 - `delete_dictation_model(model: String) -> DictationModelDeletion`
@@ -45,9 +50,16 @@ Tauri commands:
 - `stop_native_dictation() -> Result<String, String>`
 - `cancel_native_dictation() -> Result<(), String>`
 
+Command payload notes:
+
+- `DictationOnboardingPayload` includes `focused_field_insert_enabled: bool`
+- `DictationTriggerPayload` includes `trigger` and `default_trigger`
+- `FocusedFieldInsertPayload` includes `enabled`
+
 Event channels:
 
-- backend to frontend: `dicktaint://fn-state` payload `{ pressed: boolean }`
+- backend to frontend: `dictation:hotkey-triggered` payload `()`
+- backend to frontend: `dictation:state-changed` payload `{ state, error?, transcript? }`
 - frontend to overlay: `dicktaint://pill-status` payload `{ message, state, visible }`
 - allowed `state`: `idle`, `working`, `live`, `ok`, `error`
 

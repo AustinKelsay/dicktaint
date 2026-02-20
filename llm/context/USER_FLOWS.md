@@ -2,7 +2,7 @@
 
 ## Status Snapshot
 
-- Date: 2026-02-17
+- Date: 2026-02-20
 - Flow descriptions match current app behavior in web and desktop paths
 
 ## Purpose
@@ -44,6 +44,7 @@ Desktop dictation (button):
 2. speak
 3. click stop
 4. transcript returns and appends
+5. if focused-field insertion is enabled and another app is focused, transcript is also pasted into that field
 
 Desktop dictation (hold-to-talk):
 
@@ -52,6 +53,7 @@ Desktop dictation (hold-to-talk):
 3. release `fn`
 4. app stops/transcribes
 5. transcript appends
+6. if focused-field insertion is enabled and another app is focused, transcript is also pasted into that field
 
 Race control detail:
 
@@ -60,6 +62,10 @@ Race control detail:
 Desktop model maintenance:
 
 - user can download/use installed model or delete model with confirmation.
+
+Desktop settings maintenance:
+
+- user can enable or disable focused-field insertion in settings; setting persists per device.
 
 Web flow:
 

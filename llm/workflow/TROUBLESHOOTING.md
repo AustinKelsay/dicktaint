@@ -2,7 +2,7 @@
 
 ## Status Snapshot
 
-- Date: 2026-02-17
+- Date: 2026-02-20
 - issue patterns mapped to current runtime behavior and scripts
 
 ## Purpose
@@ -73,6 +73,13 @@ Out of scope:
 1. run with valid `APPLE_DEVELOPMENT_TEAM`
 2. set `TAURI_DEV_HOST` to LAN IP
 3. confirm dev host reachability from device
+
+8) focused-field insertion does not paste:
+
+1. enable `Dictate Into Focused Field` in app settings
+2. ensure target app text field is focused when dictation completes
+3. grant Accessibility and Automation permission for app/Terminal (`System Events`)
+4. retry with a plain text field to rule out app-specific input restrictions
 
 Escalation payload to capture:
 

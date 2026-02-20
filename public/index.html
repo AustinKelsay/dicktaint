@@ -67,6 +67,15 @@
             </div>
             <p id="dictationHotkeyStatus" class="hint">No hotkey configured yet.</p>
           </section>
+          <section id="focusedFieldInsertCard" class="hotkey-card" hidden>
+            <label for="focusedFieldInsertToggle">Dictate Into Focused Field</label>
+            <p class="hint">When enabled, finished transcripts are pasted into the currently focused field.</p>
+            <label class="toggle-row" for="focusedFieldInsertToggle">
+              <input id="focusedFieldInsertToggle" type="checkbox" />
+              <span>Enable focused-field insertion</span>
+            </label>
+            <p id="focusedFieldInsertStatus" class="hint">Focused-field insertion is disabled.</p>
+          </section>
           <p id="dictationModelBusy" class="hint busy-note" hidden></p>
           <p id="dictationModelStatus" class="hint"></p>
           <p class="hint setup-note">

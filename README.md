@@ -113,6 +113,9 @@ Notes:
 Hotkey setup (desktop):
 - Open `Settings` in the dictation screen.
 - In `Dictation Hotkey`, click `Record`, press a key combo, then click `Save Hotkey`.
+- Optional: enable `Dictate Into Focused Field` to paste completed transcripts into the currently focused field in the frontmost app (macOS desktop).
+- Focused-field insertion runs when dictation finalizes while another app is focused; the transcript box inside dicktaint is still updated.
+- If paste fails, allow Accessibility/Automation permissions for the app (or Terminal during `tauri:dev`) and retry.
 - The saved combo is registered as a global hotkey while the desktop app is running. On macOS, `Fn` is global when Input Monitoring permissions allow it, and otherwise falls back to in-app behavior.
 - `Reset Default` sets `Fn` on macOS and `CmdOrCtrl+Shift+D` on other desktop platforms.
 - `Disable Hotkey` removes the shortcut.

@@ -2,7 +2,7 @@
 
 ## Status Snapshot
 
-- Date: 2026-02-17
+- Date: 2026-02-20
 - Product focus: private local-first dictation
 - MVP platform priority: macOS desktop, then iPhone iOS, then web fallback
 
@@ -39,6 +39,7 @@ Implemented now:
 - local model onboarding with recommendation/install/delete/switch behavior
 - background desktop behavior with hide-on-close and `fn` hold-to-talk (macOS)
 - native overlay pill windows for dictation feedback on macOS
+- optional macOS setting to paste finalized transcript into the currently focused external text field
 
 Explicitly out of scope now:
 

@@ -487,6 +487,27 @@ code {
   gap: 0.45rem;
 }
 
+.toggle-row {
+  display: flex;
+  align-items: center;
+  gap: 0.55rem;
+  border: 1px solid var(--stroke);
+  border-radius: var(--radius-md);
+  padding: 0.62rem 0.74rem;
+  background: var(--field);
+  text-transform: none;
+  letter-spacing: 0;
+  font-size: 0.9rem;
+}
+
+.toggle-row input[type="checkbox"] {
+  width: 1rem;
+  height: 1rem;
+  accent-color: var(--secondary);
+  margin: 0;
+  flex-shrink: 0;
+}
+
 #dictationHotkeyInput {
   letter-spacing: 0.02em;
 }
@@ -501,6 +522,19 @@ code {
 }
 
 #dictationHotkeyStatus[data-tone="ok"] {
+  color: #91e1d0;
+}
+
+#focusedFieldInsertStatus {
+  margin: 0;
+  min-height: 1.25em;
+}
+
+#focusedFieldInsertStatus[data-tone="error"] {
+  color: #f4a18f;
+}
+
+#focusedFieldInsertStatus[data-tone="ok"] {
   color: #91e1d0;
 }
 
