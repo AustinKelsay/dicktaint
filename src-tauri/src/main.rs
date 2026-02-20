@@ -1,6 +1,8 @@
 use cpal::traits::{DeviceTrait, HostTrait, StreamTrait};
 use cpal::{SampleFormat, Stream};
 use serde::{Deserialize, Serialize};
+#[cfg(target_os = "macos")]
+use std::ffi::c_void;
 use std::collections::HashSet;
 use std::fs;
 use std::io::Write;
@@ -8,33 +10,43 @@ use std::io::Write;
 use std::os::unix::fs::PermissionsExt;
 use std::path::{Path, PathBuf};
 use std::process::{Command, Output};
-#[cfg(target_os = "macos")]
-use std::ptr::NonNull;
-use std::sync::{mpsc, Arc, Mutex};
+use std::str::FromStr;
 #[cfg(target_os = "macos")]
 use std::sync::atomic::{AtomicBool, Ordering};
+use std::sync::{mpsc, Arc, Mutex};
 use std::thread;
 use std::time::{Duration, SystemTime, UNIX_EPOCH};
 use tauri::{Emitter, Manager, State};
-
-#[cfg(target_os = "macos")]
-use block2::RcBlock;
-#[cfg(target_os = "macos")]
-use objc2_app_kit::{NSEvent, NSEventMask, NSEventModifierFlags};
+#[cfg(not(any(target_os = "android", target_os = "ios")))]
+use tauri_plugin_global_shortcut::{GlobalShortcutExt, Shortcut, ShortcutState};
 
 const WHISPER_SAMPLE_RATE: u32 = 16_000;
 const APP_SETTINGS_DIR: &str = ".dicktaint";
 const APP_SETTINGS_FILE: &str = "dictation-settings.json";
 const APP_MODELS_DIR: &str = "whisper-models";
 const DEFAULT_WHISPER_CLI_PATH: &str = "whisper-cli";
+#[cfg(target_os = "macos")]
+const DEFAULT_DICTATION_TRIGGER: &str = "Fn";
+#[cfg(not(target_os = "macos"))]
+const DEFAULT_DICTATION_TRIGGER: &str = "CmdOrCtrl+Shift+D";
+const MAX_DICTATION_TRIGGER_LENGTH: usize = 64;
+const DICTATION_HOTKEY_EVENT: &str = "dictation:hotkey-triggered";
+const DICTATION_STATE_EVENT: &str = "dictation:state-changed";
 const WHISPER_CPP_SETUP_URL: &str = "https://github.com/ggml-org/whisper.cpp#quick-start";
 const START_HIDDEN_ENV: &str = "DICKTAINT_START_HIDDEN";
-const FN_HOTKEY_STATE_EVENT: &str = "dicktaint://fn-state";
 const PILL_WINDOW_LABEL_PREFIX: &str = "pill";
-const PILL_WINDOW_WIDTH: f64 = 278.0;
+const PILL_WINDOW_BASE_WIDTH: f64 = 278.0;
+const PILL_WINDOW_MIN_WIDTH: f64 = 220.0;
 const PILL_WINDOW_HEIGHT: f64 = 40.0;
 const PILL_WINDOW_BOTTOM_MARGIN: i32 = 18;
 const MAX_PILL_WINDOWS: usize = 6;
+
+#[derive(Clone, Serialize)]
+struct DictationStatePayload {
+    state: String,
+    error: Option<String>,
+    transcript: Option<String>,
+}
 
 #[derive(Clone)]
 struct AppConfig {
@@ -46,11 +58,6 @@ struct AppConfig {
 #[derive(Default)]
 struct DictationState {
     active_recording: Mutex<Option<ActiveRecording>>,
-}
-
-#[derive(Serialize, Clone, Copy)]
-struct FnHotkeyStatePayload {
-    pressed: bool,
 }
 
 #[derive(Clone, Copy)]
@@ -205,12 +212,217 @@ const WHISPER_MODEL_CATALOG: [WhisperModelSpec; 12] = [
 struct LocalSettings {
     selected_model_id: Option<String>,
     selected_model_path: Option<String>,
+    dictation_trigger: Option<String>,
+    dictation_trigger_enabled: Option<bool>,
 }
 
 struct LocalModelState {
     settings_path: PathBuf,
     models_dir: PathBuf,
     settings: Arc<Mutex<LocalSettings>>,
+}
+
+#[derive(Default)]
+struct GlobalHotkeyState {
+    registered_trigger: Mutex<Option<String>>,
+    #[cfg(target_os = "macos")]
+    macos_fn_listener: Mutex<Option<MacFnGlobalListener>>,
+}
+
+#[cfg(target_os = "macos")]
+type CFAllocatorRef = *mut c_void;
+#[cfg(target_os = "macos")]
+type CFMachPortRef = *mut c_void;
+#[cfg(target_os = "macos")]
+type CFRunLoopRef = *mut c_void;
+#[cfg(target_os = "macos")]
+type CFRunLoopSourceRef = *mut c_void;
+#[cfg(target_os = "macos")]
+type CFStringRef = *const c_void;
+#[cfg(target_os = "macos")]
+type CGEventRef = *const c_void;
+#[cfg(target_os = "macos")]
+type CGEventTapProxy = *const c_void;
+#[cfg(target_os = "macos")]
+type CGEventMask = u64;
+#[cfg(target_os = "macos")]
+type CGEventFlags = u64;
+
+#[cfg(target_os = "macos")]
+const CG_EVENT_TAP_LOCATION_SESSION: u32 = 1;
+#[cfg(target_os = "macos")]
+const CG_EVENT_TAP_PLACEMENT_HEAD_INSERT: u32 = 0;
+#[cfg(target_os = "macos")]
+const CG_EVENT_TAP_OPTION_LISTEN_ONLY: u32 = 1;
+#[cfg(target_os = "macos")]
+const CG_EVENT_TYPE_FLAGS_CHANGED: u32 = 12;
+
+#[cfg(target_os = "macos")]
+const MACOS_FN_FLAG_MASK: CGEventFlags = 1 << 23;
+#[cfg(target_os = "macos")]
+const MACOS_NON_FN_MODIFIER_MASK: CGEventFlags = (1 << 17) | (1 << 18) | (1 << 19) | (1 << 20);
+
+#[cfg(target_os = "macos")]
+type MacFnEventTapCallback =
+    unsafe extern "C" fn(CGEventTapProxy, u32, CGEventRef, *mut c_void) -> CGEventRef;
+
+#[cfg(target_os = "macos")]
+#[link(name = "CoreGraphics", kind = "framework")]
+extern "C" {
+    fn CGEventTapCreate(
+        tap: u32,
+        place: u32,
+        options: u32,
+        events_of_interest: CGEventMask,
+        callback: MacFnEventTapCallback,
+        user_info: *mut c_void,
+    ) -> CFMachPortRef;
+    fn CGEventTapEnable(tap: CFMachPortRef, enable: bool);
+    fn CGEventGetFlags(event: CGEventRef) -> CGEventFlags;
+}
+
+#[cfg(target_os = "macos")]
+#[link(name = "CoreFoundation", kind = "framework")]
+extern "C" {
+    static kCFAllocatorDefault: CFAllocatorRef;
+    static kCFRunLoopCommonModes: CFStringRef;
+
+    fn CFMachPortCreateRunLoopSource(
+        allocator: CFAllocatorRef,
+        port: CFMachPortRef,
+        order: isize,
+    ) -> CFRunLoopSourceRef;
+    fn CFMachPortInvalidate(port: CFMachPortRef);
+    fn CFRunLoopGetMain() -> CFRunLoopRef;
+    fn CFRunLoopAddSource(rl: CFRunLoopRef, source: CFRunLoopSourceRef, mode: CFStringRef);
+    fn CFRunLoopRemoveSource(rl: CFRunLoopRef, source: CFRunLoopSourceRef, mode: CFStringRef);
+    fn CFRelease(cf: *const c_void);
+}
+
+#[cfg(target_os = "macos")]
+struct MacFnCallbackContext {
+    app: tauri::AppHandle,
+    enabled: AtomicBool,
+    fn_down: AtomicBool,
+}
+
+#[cfg(target_os = "macos")]
+struct MacFnGlobalListener {
+    tap: CFMachPortRef,
+    source: CFRunLoopSourceRef,
+    callback_ctx: Arc<MacFnCallbackContext>,
+    callback_ctx_raw: *const MacFnCallbackContext,
+}
+
+#[cfg(target_os = "macos")]
+unsafe impl Send for MacFnGlobalListener {}
+#[cfg(target_os = "macos")]
+unsafe impl Sync for MacFnGlobalListener {}
+
+#[cfg(target_os = "macos")]
+impl MacFnGlobalListener {
+    fn new(app: &tauri::AppHandle) -> Result<Self, String> {
+        let callback_ctx = Arc::new(MacFnCallbackContext {
+            app: app.clone(),
+            enabled: AtomicBool::new(false),
+            fn_down: AtomicBool::new(false),
+        });
+        let callback_ctx_raw = Arc::into_raw(Arc::clone(&callback_ctx));
+
+        let event_mask = 1_u64 << CG_EVENT_TYPE_FLAGS_CHANGED;
+        let tap = unsafe {
+            CGEventTapCreate(
+                CG_EVENT_TAP_LOCATION_SESSION,
+                CG_EVENT_TAP_PLACEMENT_HEAD_INSERT,
+                CG_EVENT_TAP_OPTION_LISTEN_ONLY,
+                event_mask,
+                macos_fn_event_tap_callback,
+                callback_ctx_raw as *mut c_void,
+            )
+        };
+        if tap.is_null() {
+            unsafe {
+                drop(Arc::from_raw(callback_ctx_raw));
+            }
+            return Err("Global Fn listener unavailable. macOS may be blocking event taps. Allow Input Monitoring for this app/terminal in System Settings > Privacy & Security > Input Monitoring.".to_string());
+        }
+
+        let source = unsafe { CFMachPortCreateRunLoopSource(kCFAllocatorDefault, tap, 0) };
+        if source.is_null() {
+            unsafe {
+                CFMachPortInvalidate(tap);
+                CFRelease(tap as *const c_void);
+                drop(Arc::from_raw(callback_ctx_raw));
+            }
+            return Err("Failed to create macOS run loop source for global Fn listener.".to_string());
+        }
+
+        unsafe {
+            let run_loop = CFRunLoopGetMain();
+            CFRunLoopAddSource(run_loop, source, kCFRunLoopCommonModes);
+            CGEventTapEnable(tap, true);
+        }
+
+        Ok(Self {
+            tap,
+            source,
+            callback_ctx,
+            callback_ctx_raw,
+        })
+    }
+
+    fn set_enabled(&self, enabled: bool) {
+        self.callback_ctx.enabled.store(enabled, Ordering::SeqCst);
+        if !enabled {
+            self.callback_ctx.fn_down.store(false, Ordering::SeqCst);
+        }
+    }
+}
+
+#[cfg(target_os = "macos")]
+impl Drop for MacFnGlobalListener {
+    fn drop(&mut self) {
+        unsafe {
+            let run_loop = CFRunLoopGetMain();
+            CFRunLoopRemoveSource(run_loop, self.source, kCFRunLoopCommonModes);
+            CFRelease(self.source as *const c_void);
+
+            CFMachPortInvalidate(self.tap);
+            CFRelease(self.tap as *const c_void);
+
+            drop(Arc::from_raw(self.callback_ctx_raw));
+        }
+    }
+}
+
+#[cfg(target_os = "macos")]
+unsafe extern "C" fn macos_fn_event_tap_callback(
+    _proxy: CGEventTapProxy,
+    event_type: u32,
+    event: CGEventRef,
+    user_info: *mut c_void,
+) -> CGEventRef {
+    if event.is_null() || user_info.is_null() || event_type != CG_EVENT_TYPE_FLAGS_CHANGED {
+        return event;
+    }
+
+    let callback_ctx = &*(user_info as *const MacFnCallbackContext);
+    if !callback_ctx.enabled.load(Ordering::Relaxed) {
+        return event;
+    }
+
+    let flags = CGEventGetFlags(event);
+    let fn_down = (flags & MACOS_FN_FLAG_MASK) != 0;
+    let was_fn_down = callback_ctx.fn_down.swap(fn_down, Ordering::Relaxed);
+
+    let has_non_fn_modifiers = (flags & MACOS_NON_FN_MODIFIER_MASK) != 0;
+    if fn_down && !was_fn_down && !has_non_fn_modifiers {
+        if let Err(error) = callback_ctx.app.emit(DICTATION_HOTKEY_EVENT, ()) {
+            log::warn!("Failed to emit global Fn hotkey event: {error}");
+        }
+    }
+
+    event
 }
 
 #[derive(Serialize)]
@@ -244,11 +456,19 @@ struct DictationOnboardingPayload {
     selected_model_id: Option<String>,
     selected_model_path: Option<String>,
     selected_model_exists: bool,
+    dictation_trigger: Option<String>,
+    default_dictation_trigger: String,
     whisper_cli_available: bool,
     whisper_cli_path: String,
     models_dir: String,
     device: DeviceProfile,
     models: Vec<DictationModelOption>,
+}
+
+#[derive(Serialize)]
+struct DictationTriggerPayload {
+    trigger: Option<String>,
+    default_trigger: String,
 }
 
 #[derive(Serialize)]
@@ -292,6 +512,12 @@ fn show_main_window(app: &tauri::AppHandle) {
 }
 
 #[cfg(target_os = "macos")]
+fn pill_window_width_for_monitor(monitor: &tauri::Monitor) -> f64 {
+    let clamped_scale = monitor.scale_factor().clamp(1.0, 2.0);
+    PILL_WINDOW_MIN_WIDTH + (clamped_scale - 1.0) * (PILL_WINDOW_BASE_WIDTH - PILL_WINDOW_MIN_WIDTH)
+}
+
+#[cfg(target_os = "macos")]
 fn create_pill_overlay_window_for_monitor(
     app: &tauri::AppHandle,
     label: &str,
@@ -306,7 +532,8 @@ fn create_pill_overlay_window_for_monitor(
     let work_y = work_area.position.y;
     let work_w = work_area.size.width as i32;
     let work_h = work_area.size.height as i32;
-    let width_i = PILL_WINDOW_WIDTH as i32;
+    let width = pill_window_width_for_monitor(monitor);
+    let width_i = width as i32;
     let height_i = PILL_WINDOW_HEIGHT as i32;
 
     let x = work_x + (work_w - width_i).max(0) / 2;
@@ -326,7 +553,7 @@ fn create_pill_overlay_window_for_monitor(
     .skip_taskbar(true)
     .always_on_top(true)
     .visible_on_all_workspaces(true)
-    .inner_size(PILL_WINDOW_WIDTH, PILL_WINDOW_HEIGHT)
+    .inner_size(width, PILL_WINDOW_HEIGHT)
     .position(x as f64, y as f64)
     .build()
     .map_err(|e| format!("Failed to create overlay window '{label}': {e}"))?;
@@ -359,48 +586,6 @@ fn create_pill_overlay_windows(_app: &tauri::AppHandle) -> Result<(), String> {
     Ok(())
 }
 
-#[cfg(target_os = "macos")]
-fn register_fn_global_hotkey_monitor(app: &tauri::AppHandle) -> Result<(), String> {
-    let app_handle = app.clone();
-    let fn_key_down = Arc::new(AtomicBool::new(false));
-    let fn_key_down_ref = Arc::clone(&fn_key_down);
-    let handler = RcBlock::new(move |event_ptr: NonNull<NSEvent>| {
-        // SAFETY: NSEvent monitor callback provides a valid NSEvent pointer for callback lifetime.
-        let event = unsafe { event_ptr.as_ref() };
-        let function_down = event
-            .modifierFlags()
-            .contains(NSEventModifierFlags::Function);
-        // Emit only on edge transitions so frontend start/stop handling stays idempotent.
-        let previous = fn_key_down_ref.swap(function_down, Ordering::SeqCst);
-        if previous != function_down {
-            let _ = app_handle.emit(
-                FN_HOTKEY_STATE_EVENT,
-                FnHotkeyStatePayload {
-                    pressed: function_down,
-                },
-            );
-        }
-    });
-
-    let monitor =
-        NSEvent::addGlobalMonitorForEventsMatchingMask_handler(NSEventMask::FlagsChanged, &handler)
-            .ok_or_else(|| {
-                "Failed to register global fn key monitor on macOS. \
-Allow Input Monitoring/Accessibility for this app or terminal and retry."
-                    .to_string()
-            })?;
-
-    // Keep monitor and callback alive for process lifetime.
-    std::mem::forget(handler);
-    std::mem::forget(monitor);
-    Ok(())
-}
-
-#[cfg(not(target_os = "macos"))]
-fn register_fn_global_hotkey_monitor(_app: &tauri::AppHandle) -> Result<(), String> {
-    Ok(())
-}
-
 fn resolve_whisper_model_path(path: Option<&str>) -> Result<PathBuf, String> {
     let raw = path
     .map(str::trim)
@@ -418,6 +603,346 @@ fn resolve_whisper_model_path(path: Option<&str>) -> Result<PathBuf, String> {
     }
 
     Ok(model_path)
+}
+
+fn canonicalize_trigger_modifier(token: &str) -> Option<&'static str> {
+    match token.to_ascii_lowercase().as_str() {
+        "cmdorctrl" | "commandorcontrol" | "mod" | "primary" => Some("CmdOrCtrl"),
+        "cmd" | "command" => Some("Cmd"),
+        "ctrl" | "control" => Some("Ctrl"),
+        "alt" | "option" => Some("Alt"),
+        "shift" => Some("Shift"),
+        "super" | "meta" | "win" | "windows" => Some("Super"),
+        _ => None,
+    }
+}
+
+fn canonicalize_trigger_key(token: &str) -> Option<String> {
+    let trimmed = token.trim();
+    let single_char = {
+        let mut chars = trimmed.chars();
+        match (chars.next(), chars.next()) {
+            (Some(ch), None) if ch.is_ascii_alphanumeric() => Some(ch.to_ascii_uppercase()),
+            _ => None,
+        }
+    };
+    if let Some(ch) = single_char {
+        return Some(ch.to_string());
+    }
+
+    let lower = trimmed.to_ascii_lowercase();
+    let special = match lower.as_str() {
+        "fn" | "function" | "globe" => Some("Fn"),
+        "space" => Some("Space"),
+        "tab" => Some("Tab"),
+        "enter" | "return" => Some("Enter"),
+        "escape" | "esc" => Some("Escape"),
+        "backspace" => Some("Backspace"),
+        "delete" | "del" => Some("Delete"),
+        "up" | "arrowup" => Some("Up"),
+        "down" | "arrowdown" => Some("Down"),
+        "left" | "arrowleft" => Some("Left"),
+        "right" | "arrowright" => Some("Right"),
+        "home" => Some("Home"),
+        "end" => Some("End"),
+        "pageup" => Some("PageUp"),
+        "pagedown" => Some("PageDown"),
+        "insert" => Some("Insert"),
+        _ => None,
+    };
+    if let Some(name) = special {
+        return Some(name.to_string());
+    }
+
+    if lower.starts_with('f') {
+        let function_num = lower
+            .strip_prefix('f')
+            .and_then(|num| num.parse::<u8>().ok())?;
+        if (1..=24).contains(&function_num) {
+            return Some(format!("F{function_num}"));
+        }
+    }
+
+    None
+}
+
+fn normalize_dictation_trigger(trigger: &str) -> Result<String, String> {
+    let trimmed = trigger.trim();
+    if trimmed.is_empty() {
+        return Err("Dictation trigger cannot be empty.".to_string());
+    }
+    if trimmed.len() > MAX_DICTATION_TRIGGER_LENGTH {
+        return Err(format!(
+            "Dictation trigger is too long (max {MAX_DICTATION_TRIGGER_LENGTH} characters)."
+        ));
+    }
+
+    let mut modifiers = HashSet::<String>::new();
+    let mut key: Option<String> = None;
+    for token in trimmed.split('+').map(str::trim) {
+        if token.is_empty() {
+            return Err("Dictation trigger contains an empty token.".to_string());
+        }
+
+        if let Some(modifier) = canonicalize_trigger_modifier(token) {
+            if key.is_some() {
+                return Err("Modifier keys must come before the main trigger key.".to_string());
+            }
+            modifiers.insert(modifier.to_string());
+            continue;
+        }
+
+        if key.is_some() {
+            return Err("Dictation trigger can only contain one main key.".to_string());
+        }
+        key = Some(
+            canonicalize_trigger_key(token).ok_or_else(|| {
+                format!(
+                    "Unsupported trigger key '{token}'. Use Fn (macOS), letters/numbers, F1-F24, arrows, or common navigation keys."
+                )
+            })?,
+        );
+    }
+
+    let key = key.ok_or_else(|| "Dictation trigger is missing its main key.".to_string())?;
+    if key == "Fn" {
+        if !modifiers.is_empty() {
+            return Err("Fn trigger must be used by itself.".to_string());
+        }
+        return Ok("Fn".to_string());
+    }
+
+    if modifiers.is_empty() {
+        return Err("Dictation trigger must include at least one modifier key (or use Fn by itself on macOS).".to_string());
+    }
+    if modifiers.contains("CmdOrCtrl") && (modifiers.contains("Cmd") || modifiers.contains("Ctrl"))
+    {
+        return Err("Use CmdOrCtrl by itself, or use Cmd/Ctrl explicitly.".to_string());
+    }
+
+    let order = ["CmdOrCtrl", "Cmd", "Ctrl", "Alt", "Shift", "Super"];
+    let mut parts: Vec<String> = order
+        .iter()
+        .filter(|name| modifiers.contains(**name))
+        .map(|name| (*name).to_string())
+        .collect();
+    parts.push(key);
+    Ok(parts.join("+"))
+}
+
+fn default_dictation_trigger() -> String {
+    normalize_dictation_trigger(DEFAULT_DICTATION_TRIGGER)
+        .unwrap_or_else(|_| DEFAULT_DICTATION_TRIGGER.to_string())
+}
+
+fn resolve_effective_dictation_trigger(settings: &LocalSettings) -> Option<String> {
+    if let Some(configured) = settings
+        .dictation_trigger
+        .as_deref()
+        .map(str::trim)
+        .filter(|value| !value.is_empty())
+    {
+        match normalize_dictation_trigger(configured) {
+            Ok(normalized) => return Some(normalized),
+            Err(error) => {
+                log::warn!(
+                    "Ignoring invalid persisted dictation trigger '{configured}': {error}"
+                );
+            }
+        }
+    }
+
+    if matches!(settings.dictation_trigger_enabled, Some(false)) {
+        return None;
+    }
+
+    Some(default_dictation_trigger())
+}
+
+fn dictation_trigger_payload(settings: &LocalSettings) -> DictationTriggerPayload {
+    DictationTriggerPayload {
+        trigger: resolve_effective_dictation_trigger(settings),
+        default_trigger: default_dictation_trigger(),
+    }
+}
+
+#[cfg(not(any(target_os = "android", target_os = "ios")))]
+fn shortcut_from_dictation_trigger(trigger: &str) -> Result<Shortcut, String> {
+    let normalized = normalize_dictation_trigger(trigger)?;
+    let accelerator = normalized
+        .replace("CmdOrCtrl", "CommandOrControl")
+        .replace("Cmd", "Command");
+    Shortcut::from_str(&accelerator)
+        .map_err(|e| format!("Could not parse hotkey '{normalized}' for global registration: {e}"))
+}
+
+fn set_registered_hotkey_state(
+    hotkey_state: &GlobalHotkeyState,
+    next: Option<String>,
+) -> Result<(), String> {
+    let mut guard = hotkey_state
+        .registered_trigger
+        .lock()
+        .map_err(|_| "Failed to lock global hotkey state".to_string())?;
+    *guard = next;
+    Ok(())
+}
+
+fn current_registered_hotkey(hotkey_state: &GlobalHotkeyState) -> Result<Option<String>, String> {
+    hotkey_state
+        .registered_trigger
+        .lock()
+        .map_err(|_| "Failed to lock global hotkey state".to_string())
+        .map(|guard| guard.clone())
+}
+
+#[cfg(target_os = "macos")]
+fn should_register_global_hotkey(trigger: &str) -> bool {
+    trigger != "Fn"
+}
+
+#[cfg(not(target_os = "macos"))]
+fn should_register_global_hotkey(_trigger: &str) -> bool {
+    true
+}
+
+#[cfg(target_os = "macos")]
+fn set_macos_fn_listener_enabled(
+    app: &tauri::AppHandle,
+    hotkey_state: &GlobalHotkeyState,
+    enabled: bool,
+) -> Result<(), String> {
+    let mut guard = hotkey_state
+        .macos_fn_listener
+        .lock()
+        .map_err(|_| "Failed to lock macOS Fn listener state".to_string())?;
+
+    if enabled {
+        if guard.is_none() {
+            *guard = Some(MacFnGlobalListener::new(app)?);
+        }
+    }
+
+    if let Some(listener) = guard.as_ref() {
+        listener.set_enabled(enabled);
+    }
+
+    Ok(())
+}
+
+#[cfg(not(any(target_os = "android", target_os = "ios")))]
+fn apply_registered_hotkey(
+    app: &tauri::AppHandle,
+    hotkey_state: &GlobalHotkeyState,
+    trigger: Option<&str>,
+) -> Result<(), String> {
+    let next = match trigger.map(str::trim).filter(|value| !value.is_empty()) {
+        Some(value) => Some(normalize_dictation_trigger(value)?),
+        None => None,
+    };
+    let previous = current_registered_hotkey(hotkey_state)?;
+
+    if previous == next {
+        return Ok(());
+    }
+
+    #[cfg(target_os = "macos")]
+    if previous.as_deref() == Some("Fn") {
+        if let Err(error) = set_macos_fn_listener_enabled(app, hotkey_state, false) {
+            log::warn!("Failed to disable global Fn listener: {error}");
+        }
+    }
+
+    if let Some(previous_trigger) = previous.as_deref() {
+        if should_register_global_hotkey(previous_trigger) {
+            let previous_shortcut = shortcut_from_dictation_trigger(previous_trigger)?;
+            app.global_shortcut()
+                .unregister(previous_shortcut)
+                .map_err(|e| {
+                    format!("Failed to unregister previous global hotkey '{previous_trigger}': {e}")
+                })?;
+        }
+    }
+
+    if let Some(next_trigger) = next.as_deref() {
+        #[cfg(target_os = "macos")]
+        if next_trigger == "Fn" {
+            if let Err(error) = set_macos_fn_listener_enabled(app, hotkey_state, true) {
+                log::warn!(
+                    "Global Fn listener unavailable; falling back to in-app Fn hotkey handling: {error}"
+                );
+            }
+        }
+
+        if should_register_global_hotkey(next_trigger) {
+            let next_shortcut = shortcut_from_dictation_trigger(next_trigger)?;
+            if let Err(error) = app.global_shortcut().register(next_shortcut) {
+                if let Some(previous_trigger) = previous.as_deref() {
+                    if should_register_global_hotkey(previous_trigger) {
+                        if let Ok(previous_shortcut) = shortcut_from_dictation_trigger(previous_trigger)
+                        {
+                            if let Err(recovery_error) =
+                                app.global_shortcut().register(previous_shortcut)
+                            {
+                                set_registered_hotkey_state(hotkey_state, None)?;
+                                return Err(format!(
+                                    "Could not register global hotkey '{next_trigger}': {error}. Also failed to restore previous hotkey '{previous_trigger}': {recovery_error}"
+                                ));
+                            }
+                            set_registered_hotkey_state(
+                                hotkey_state,
+                                Some(previous_trigger.to_string()),
+                            )?;
+                            #[cfg(target_os = "macos")]
+                            if previous_trigger == "Fn" {
+                                if let Err(listener_error) =
+                                    set_macos_fn_listener_enabled(app, hotkey_state, true)
+                                {
+                                    log::warn!(
+                                        "Failed to re-enable global Fn listener after hotkey restore: {listener_error}"
+                                    );
+                                }
+                            }
+                        } else {
+                            set_registered_hotkey_state(hotkey_state, None)?;
+                        }
+                    } else {
+                        set_registered_hotkey_state(hotkey_state, Some(previous_trigger.to_string()))?;
+                        #[cfg(target_os = "macos")]
+                        if previous_trigger == "Fn" {
+                            if let Err(listener_error) =
+                                set_macos_fn_listener_enabled(app, hotkey_state, true)
+                            {
+                                log::warn!(
+                                    "Failed to re-enable global Fn listener after hotkey restore: {listener_error}"
+                                );
+                            }
+                        }
+                    }
+                } else {
+                    set_registered_hotkey_state(hotkey_state, None)?;
+                }
+                return Err(format!(
+                    "Could not register global hotkey '{next_trigger}': {error}"
+                ));
+            }
+        }
+    }
+
+    set_registered_hotkey_state(hotkey_state, next)
+}
+
+#[cfg(any(target_os = "android", target_os = "ios"))]
+fn apply_registered_hotkey(
+    _app: &tauri::AppHandle,
+    hotkey_state: &GlobalHotkeyState,
+    trigger: Option<&str>,
+) -> Result<(), String> {
+    let next = match trigger.map(str::trim).filter(|value| !value.is_empty()) {
+        Some(value) => Some(normalize_dictation_trigger(value)?),
+        None => None,
+    };
+    set_registered_hotkey_state(hotkey_state, next)
 }
 
 fn resolve_whisper_cli_path(override_path: Option<&str>, bundled_path: Option<&str>) -> String {
@@ -1175,6 +1700,7 @@ fn build_onboarding_payload(
     } else {
         settings.selected_model_id.clone()
     };
+    let dictation_trigger = resolve_effective_dictation_trigger(&settings);
     let list_selected_model_id = if override_model_path.is_some() {
         None
     } else {
@@ -1198,6 +1724,8 @@ fn build_onboarding_payload(
         selected_model_id,
         selected_model_path,
         selected_model_exists,
+        dictation_trigger,
+        default_dictation_trigger: default_dictation_trigger(),
         whisper_cli_available,
         whisper_cli_path: detected_whisper_cli_path.unwrap_or(configured_whisper_cli_path),
         models_dir: model_state.models_dir.to_string_lossy().to_string(),
@@ -1290,7 +1818,8 @@ fn choose_input_config(device: &cpal::Device) -> Result<cpal::SupportedStreamCon
 
         let replace = match &best {
             Some((best_rank, best_rate, _)) => {
-                format_rank > *best_rank || (format_rank == *best_rank && candidate_rate > *best_rate)
+                format_rank > *best_rank
+                    || (format_rank == *best_rank && candidate_rate > *best_rate)
             }
             None => true,
         };
@@ -1612,10 +2141,118 @@ fn transcribe_samples(
 
 #[tauri::command]
 fn get_dictation_onboarding(
+    app: tauri::AppHandle,
     config: State<'_, AppConfig>,
     model_state: State<'_, LocalModelState>,
+    hotkey_state: State<'_, GlobalHotkeyState>,
 ) -> Result<DictationOnboardingPayload, String> {
-    build_onboarding_payload(config.inner(), model_state.inner())
+    let payload = build_onboarding_payload(config.inner(), model_state.inner())?;
+    if let Err(error) = apply_registered_hotkey(
+        &app,
+        hotkey_state.inner(),
+        payload.dictation_trigger.as_deref(),
+    ) {
+        log::warn!("get_dictation_onboarding: failed to apply global hotkey: {error}");
+    }
+    Ok(payload)
+}
+
+#[tauri::command]
+fn get_dictation_trigger(
+    model_state: State<'_, LocalModelState>,
+) -> Result<DictationTriggerPayload, String> {
+    let settings = model_state
+        .settings
+        .lock()
+        .map_err(|_| "Failed to lock local model settings".to_string())?
+        .clone();
+    Ok(dictation_trigger_payload(&settings))
+}
+
+#[tauri::command]
+fn set_dictation_trigger(
+    app: tauri::AppHandle,
+    trigger: String,
+    model_state: State<'_, LocalModelState>,
+    hotkey_state: State<'_, GlobalHotkeyState>,
+) -> Result<DictationTriggerPayload, String> {
+    let normalized = normalize_dictation_trigger(&trigger)?;
+    let (previous_trigger, previous_trigger_raw, previous_trigger_enabled) = {
+        let settings = model_state
+            .settings
+            .lock()
+            .map_err(|_| "Failed to lock local model settings".to_string())?;
+        (
+            resolve_effective_dictation_trigger(&settings),
+            settings.dictation_trigger.clone(),
+            settings.dictation_trigger_enabled,
+        )
+    };
+
+    apply_registered_hotkey(&app, hotkey_state.inner(), Some(&normalized))?;
+
+    let settings_path = model_state.settings_path.clone();
+    let mut settings = model_state
+        .settings
+        .lock()
+        .map_err(|_| "Failed to lock local model settings".to_string())?;
+    settings.dictation_trigger = Some(normalized.clone());
+    settings.dictation_trigger_enabled = Some(true);
+    if let Err(error) = save_local_settings(&settings_path, &settings) {
+        settings.dictation_trigger = previous_trigger_raw;
+        settings.dictation_trigger_enabled = previous_trigger_enabled;
+        drop(settings);
+        if let Err(restore_error) =
+            apply_registered_hotkey(&app, hotkey_state.inner(), previous_trigger.as_deref())
+        {
+            log::warn!("set_dictation_trigger: failed to restore previous hotkey after save error: {restore_error}");
+        }
+        return Err(error);
+    }
+    Ok(dictation_trigger_payload(&settings))
+}
+
+#[tauri::command]
+fn clear_dictation_trigger(
+    app: tauri::AppHandle,
+    model_state: State<'_, LocalModelState>,
+    hotkey_state: State<'_, GlobalHotkeyState>,
+) -> Result<DictationTriggerPayload, String> {
+    let (previous_trigger, previous_trigger_raw, previous_trigger_enabled) = {
+        let settings = model_state
+            .settings
+            .lock()
+            .map_err(|_| "Failed to lock local model settings".to_string())?;
+        (
+            resolve_effective_dictation_trigger(&settings),
+            settings.dictation_trigger.clone(),
+            settings.dictation_trigger_enabled,
+        )
+    };
+
+    apply_registered_hotkey(&app, hotkey_state.inner(), None)?;
+
+    let settings_path = model_state.settings_path.clone();
+    let mut settings = model_state
+        .settings
+        .lock()
+        .map_err(|_| "Failed to lock local model settings".to_string())?;
+    settings.dictation_trigger = None;
+    settings.dictation_trigger_enabled = Some(false);
+    if let Err(error) = save_local_settings(&settings_path, &settings) {
+        settings.dictation_trigger = previous_trigger_raw;
+        settings.dictation_trigger_enabled = previous_trigger_enabled;
+        drop(settings);
+        if let Err(restore_error) =
+            apply_registered_hotkey(&app, hotkey_state.inner(), previous_trigger.as_deref())
+        {
+            log::warn!(
+                "clear_dictation_trigger: failed to restore previous hotkey after save error: {restore_error}"
+            );
+        }
+        return Err(error);
+    }
+    Ok(dictation_trigger_payload(&settings))
 }
 
 #[tauri::command]
@@ -1774,6 +2411,7 @@ async fn delete_dictation_model(
 
 #[tauri::command]
 fn start_native_dictation(
+    app: tauri::AppHandle,
     dictation: State<'_, DictationState>,
     config: State<'_, AppConfig>,
     model_state: State<'_, LocalModelState>,
@@ -1804,11 +2442,21 @@ fn start_native_dictation(
         samples,
         sample_rate,
     });
+    app.emit(
+        DICTATION_STATE_EVENT,
+        DictationStatePayload {
+            state: "listening".into(),
+            error: None,
+            transcript: None,
+        },
+    )
+    .ok();
     Ok(())
 }
 
 #[tauri::command]
 async fn stop_native_dictation(
+    app: tauri::AppHandle,
     dictation: State<'_, DictationState>,
     config: State<'_, AppConfig>,
     model_state: State<'_, LocalModelState>,
@@ -1826,6 +2474,15 @@ async fn stop_native_dictation(
 
     let _ = recording.stop_tx.send(());
     if recording.thread_handle.join().is_err() {
+        app.emit(
+            DICTATION_STATE_EVENT,
+            DictationStatePayload {
+                state: "error".into(),
+                error: Some("Audio capture thread crashed.".into()),
+                transcript: None,
+            },
+        )
+        .ok();
         return Err("Audio capture thread crashed.".to_string());
     }
 
@@ -1842,7 +2499,17 @@ async fn stop_native_dictation(
     let whisper_cli_path = detect_whisper_cli_path(&configured_whisper_cli_path)
         .unwrap_or(configured_whisper_cli_path);
 
-    tauri::async_runtime::spawn_blocking(move || {
+    app.emit(
+        DICTATION_STATE_EVENT,
+        DictationStatePayload {
+            state: "processing".into(),
+            error: None,
+            transcript: None,
+        },
+    )
+    .ok();
+
+    let result = tauri::async_runtime::spawn_blocking(move || {
         transcribe_samples(
             model_path,
             whisper_cli_path,
@@ -1851,11 +2518,52 @@ async fn stop_native_dictation(
         )
     })
     .await
-    .map_err(|e| format!("Failed to run transcription task: {e}"))?
+    .map_err(|e| {
+        app.emit(
+            DICTATION_STATE_EVENT,
+            DictationStatePayload {
+                state: "error".into(),
+                error: Some(e.to_string()),
+                transcript: None,
+            },
+        )
+        .ok();
+        format!("Failed to run transcription task: {e}")
+    })?;
+
+    match result {
+        Ok(transcript) => {
+            app.emit(
+                DICTATION_STATE_EVENT,
+                DictationStatePayload {
+                    state: "idle".into(),
+                    error: None,
+                    transcript: Some(transcript.clone()),
+                },
+            )
+            .ok();
+            Ok(transcript)
+        }
+        Err(e) => {
+            app.emit(
+                DICTATION_STATE_EVENT,
+                DictationStatePayload {
+                    state: "error".into(),
+                    error: Some(e.clone()),
+                    transcript: None,
+                },
+            )
+            .ok();
+            Err(e)
+        }
+    }
 }
 
 #[tauri::command]
-fn cancel_native_dictation(dictation: State<'_, DictationState>) -> Result<(), String> {
+fn cancel_native_dictation(
+    app: tauri::AppHandle,
+    dictation: State<'_, DictationState>,
+) -> Result<(), String> {
     let recording = {
         let mut guard = dictation
             .inner()
@@ -1870,12 +2578,24 @@ fn cancel_native_dictation(dictation: State<'_, DictationState>) -> Result<(), S
         let _ = recording.thread_handle.join();
     }
 
+    app.emit(
+        DICTATION_STATE_EVENT,
+        DictationStatePayload {
+            state: "idle".into(),
+            error: None,
+            transcript: None,
+        },
+    )
+    .ok();
     Ok(())
 }
 
 #[cfg(test)]
 mod tests {
-    use super::{normalize_transcript_text, resample_linear, whisper_help_text_looks_valid};
+    use super::{
+        default_dictation_trigger, normalize_dictation_trigger, resolve_effective_dictation_trigger,
+        resample_linear, whisper_help_text_looks_valid, LocalSettings,
+    };
 
     #[test]
     fn resample_linear_returns_same_when_rate_matches() {
@@ -1906,9 +2626,63 @@ mod tests {
     }
 
     #[test]
-    fn normalize_transcript_text_strips_blank_audio_marker() {
-        let raw = "[BLANK_AUDIO] Testing, check, check";
-        assert_eq!(normalize_transcript_text(raw), "Testing, check, check");
+    fn normalize_dictation_trigger_accepts_valid_combo() {
+        assert_eq!(
+            normalize_dictation_trigger("cmdorctrl + shift + d").unwrap(),
+            "CmdOrCtrl+Shift+D".to_string()
+        );
+    }
+
+    #[test]
+    fn normalize_dictation_trigger_accepts_fn_key() {
+        assert_eq!(normalize_dictation_trigger("fn").unwrap(), "Fn".to_string());
+        assert_eq!(normalize_dictation_trigger("globe").unwrap(), "Fn".to_string());
+    }
+
+    #[test]
+    fn normalize_dictation_trigger_rejects_fn_with_modifiers() {
+        assert!(normalize_dictation_trigger("Shift+Fn").is_err());
+    }
+
+    #[test]
+    fn normalize_dictation_trigger_rejects_missing_modifier() {
+        assert!(normalize_dictation_trigger("D").is_err());
+    }
+
+    #[test]
+    fn normalize_dictation_trigger_rejects_multiple_main_keys() {
+        assert!(normalize_dictation_trigger("Ctrl+K+J").is_err());
+    }
+
+    #[test]
+    fn resolve_effective_trigger_defaults_when_unset() {
+        let settings = LocalSettings::default();
+        assert_eq!(
+            resolve_effective_dictation_trigger(&settings),
+            Some(default_dictation_trigger())
+        );
+    }
+
+    #[test]
+    fn resolve_effective_trigger_honors_explicit_disable() {
+        let settings = LocalSettings {
+            dictation_trigger_enabled: Some(false),
+            ..LocalSettings::default()
+        };
+        assert_eq!(resolve_effective_dictation_trigger(&settings), None);
+    }
+
+    #[test]
+    fn resolve_effective_trigger_uses_saved_value() {
+        let settings = LocalSettings {
+            dictation_trigger: Some("CmdOrCtrl+Shift+K".to_string()),
+            dictation_trigger_enabled: Some(true),
+            ..LocalSettings::default()
+        };
+        assert_eq!(
+            resolve_effective_dictation_trigger(&settings),
+            Some("CmdOrCtrl+Shift+K".to_string())
+        );
     }
 }
 
@@ -1919,7 +2693,21 @@ fn main() {
     let whisper_model_path_override = std::env::var("WHISPER_MODEL_PATH").ok();
     let whisper_cli_path_override = std::env::var("WHISPER_CLI_PATH").ok();
 
-    let app = tauri::Builder::default()
+    let builder = tauri::Builder::default();
+    #[cfg(not(any(target_os = "android", target_os = "ios")))]
+    let builder = builder.plugin(
+        tauri_plugin_global_shortcut::Builder::new()
+            .with_handler(|app, _shortcut, event| {
+                if event.state() == ShortcutState::Pressed {
+                    if let Err(error) = app.emit(DICTATION_HOTKEY_EVENT, ()) {
+                        log::warn!("Failed to emit dictation hotkey event: {error}");
+                    }
+                }
+            })
+            .build(),
+    );
+
+    let app = builder
         .setup(move |app| {
             let bundled_whisper_cli_path = resolve_bundled_whisper_cli_path(app.handle());
             let app_data_dir = app.path().app_data_dir().map_err(|e| {
@@ -1934,6 +2722,7 @@ fn main() {
                 )
             })?;
             let initial_settings = load_local_settings(&settings_path);
+            let initial_dictation_trigger = resolve_effective_dictation_trigger(&initial_settings);
 
             app.manage(AppConfig {
                 whisper_model_path_override: whisper_model_path_override.clone(),
@@ -1946,18 +2735,26 @@ fn main() {
                 settings: Arc::new(Mutex::new(initial_settings)),
             });
             app.manage(DictationState::default());
+            app.manage(GlobalHotkeyState::default());
+
+            if let Err(error) = apply_registered_hotkey(
+                app.handle(),
+                app.state::<GlobalHotkeyState>().inner(),
+                initial_dictation_trigger.as_deref(),
+            ) {
+                log::warn!("Failed to apply initial global hotkey: {error}");
+            }
 
             if should_start_hidden() {
                 if let Some(window) = app.get_webview_window("main") {
                     let _ = window.hide();
                 }
             }
+
             if let Err(error) = create_pill_overlay_windows(app.handle()) {
-                log::warn!("overlay pill window unavailable: {}", error);
+                log::warn!("Failed to create pill overlay windows: {error}");
             }
-            if let Err(error) = register_fn_global_hotkey_monitor(app.handle()) {
-                log::warn!("global fn hotkey monitor unavailable: {}", error);
-            }
+
             Ok(())
         })
         .on_window_event(|window, event| {
@@ -1971,6 +2768,9 @@ fn main() {
         })
         .invoke_handler(tauri::generate_handler![
             get_dictation_onboarding,
+            get_dictation_trigger,
+            set_dictation_trigger,
+            clear_dictation_trigger,
             open_whisper_setup_page,
             install_dictation_model,
             delete_dictation_model,
