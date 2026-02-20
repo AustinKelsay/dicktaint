@@ -49,7 +49,7 @@ let restartTimer = null;
 let hasMicrophoneAccess = false;
 let isInstallingDictationModel = false;
 let isDeletingDictationModel = false;
-let nativeDictationModelReady = !isNativeDesktopMode();
+let nativeDictationModelReady = !isFocusedMacDesktopMode();
 let whisperCliAvailable = true;
 let dictationModels = [];
 let currentOnboarding = null;
@@ -276,6 +276,10 @@ function getTauriInvoke() {
   return window.__TAURI__?.core?.invoke || null;
 }
 
+function getTauriEventApi() {
+  return window.__TAURI__?.event || null;
+}
+
 function isMobileUserAgent() {
   const ua = navigator.userAgent || '';
   return /Android|iPhone|iPad|iPod/i.test(ua);
@@ -285,8 +289,17 @@ function isNativeDesktopMode() {
   return Boolean(getTauriInvoke()) && !isMobileUserAgent();
 }
 
+function isMacDesktopUserAgent() {
+  const ua = navigator.userAgent || '';
+  return /Macintosh|Mac OS X/i.test(ua);
+}
+
+function isFocusedMacDesktopMode() {
+  return isNativeDesktopMode() && isMacDesktopUserAgent();
+}
+
 function shouldUseTauriCommands() {
-  return isNativeDesktopMode();
+  return isFocusedMacDesktopMode();
 }
 
 function setUiMode(mode) {
@@ -296,6 +309,62 @@ function setUiMode(mode) {
 function setStatus(message, tone = 'neutral') {
   statusEl.textContent = message;
   statusEl.dataset.tone = tone;
+  syncHotkeyPillForStatus(message, tone);
+}
+
+function setHotkeyPill(message, state = 'idle', visible = true) {
+  emitHotkeyPillOverlay(message, state, visible);
+}
+
+function emitHotkeyPillOverlay(message, state = 'idle', visible = true) {
+  const tauriEvent = getTauriEventApi();
+  if (typeof tauriEvent?.emit !== 'function') return;
+
+  tauriEvent.emit(PILL_STATUS_EVENT, {
+    message: String(message || '').trim() || 'Hold fn to dictate',
+    state: String(state || 'idle'),
+    visible: Boolean(visible)
+  }).catch(() => {});
+}
+
+function summarizeHotkeyPillStatus(message, tone = 'neutral') {
+  if (!isFocusedMacDesktopMode()) {
+    return 'Desktop MVP: macOS only';
+  }
+  const normalized = String(message || '').toLowerCase();
+
+  if (tone === 'live') {
+    return 'Listening - release fn to stop';
+  }
+  if (tone === 'working') {
+    if (normalized.includes('transcrib')) return 'Transcribing...';
+    if (normalized.includes('microphone') || normalized.includes('starting') || normalized.includes('opening')) {
+      return 'Starting dictation...';
+    }
+    return 'Working...';
+  }
+  if (tone === 'ok') {
+    if (normalized.includes('transcrib') || normalized.includes('captured') || normalized.includes('transcript')) {
+      return 'Transcript ready';
+    }
+    return 'Ready - hold fn to start';
+  }
+  if (tone === 'error') {
+    return 'Dictation error - check status';
+  }
+  return 'Hold fn to dictate';
+}
+
+function syncHotkeyPillForStatus(message, tone = 'neutral') {
+  if (!isNativeDesktopMode()) {
+    setHotkeyPill('', 'idle', false);
+    return;
+  }
+  // Overlay window expects a tight state enum; map richer UI tones into it.
+  const state = tone === 'live'
+    ? 'live'
+    : (tone === 'working' ? 'working' : (tone === 'ok' ? 'ok' : (tone === 'error' ? 'error' : 'idle')));
+  setHotkeyPill(summarizeHotkeyPillStatus(message, tone), state, true);
 }
 
 function setAppScreen(screen) {
@@ -323,7 +392,7 @@ function setSetupScreenMode(mode) {
 }
 
 function syncFlowForSetupReadiness() {
-  const setupReady = !isNativeDesktopMode() || nativeDictationModelReady;
+  const setupReady = !isFocusedMacDesktopMode() || nativeDictationModelReady;
   if (!setupReady) {
     setSetupScreenMode('onboarding');
     setAppScreen('onboarding');
@@ -361,6 +430,11 @@ function syncSetupHealthPills() {
     setHealthPill(dictationModelHealthEl, 'ok', 'model: n/a (web)');
     return;
   }
+  if (!isFocusedMacDesktopMode()) {
+    setHealthPill(whisperCliHealthEl, 'error', 'whisper-cli: unsupported on this desktop OS');
+    setHealthPill(dictationModelHealthEl, 'error', 'model: unsupported on this desktop OS');
+    return;
+  }
 
   if (!currentOnboarding) {
     setHealthPill(whisperCliHealthEl, 'pending', 'whisper-cli: checking');
@@ -393,9 +467,14 @@ function refreshSelectedModelMeta() {
     return;
   }
 
+  const sizeValue = Number(selected.approx_size_gb);
+  const sizeLabel = Number.isFinite(sizeValue)
+    ? `${sizeValue.toFixed(2).replace(/\.00$/u, '')} GB`
+    : 'size unknown';
+
   const parts = [
     modelDisplayName(selected),
-    `${Number(selected.approx_size_gb).toFixed(2).replace(/\.00$/u, '')} GB`,
+    sizeLabel,
     selected.speed_note || 'speed unknown',
     selected.quality_note || 'quality unknown',
     selected.installed ? 'downloaded locally' : 'not downloaded',
@@ -458,12 +537,12 @@ function updateModelActionLabels() {
 }
 
 function syncControls() {
-  const hasCaptureSupport = isNativeDesktopMode() || Boolean(SpeechRecognitionApi);
-  const dictationModelMissing = isNativeDesktopMode() && !nativeDictationModelReady;
+  const hasCaptureSupport = isFocusedMacDesktopMode() || (!isNativeDesktopMode() && Boolean(SpeechRecognitionApi));
+  const dictationModelMissing = isFocusedMacDesktopMode() && !nativeDictationModelReady;
   const lockControls = isInstallingDictationModel || isDeletingDictationModel;
   const hotkeyDisabled = lockControls || !isNativeDesktopMode();
   const selected = getSelectedDictationModel();
-  const setupReady = !isNativeDesktopMode() || nativeDictationModelReady;
+  const setupReady = !isFocusedMacDesktopMode() || nativeDictationModelReady;
   const selectedAlreadyActive = Boolean(selected?.installed)
     && Boolean(currentOnboarding?.selected_model_exists)
     && currentOnboarding?.selected_model_id === selected.id;
@@ -502,7 +581,7 @@ function syncControls() {
     onboardingContinueBtn.textContent = setupReady ? 'Start Dictation' : 'Complete Setup to Continue';
   }
   if (openSettingsBtn) {
-    openSettingsBtn.disabled = lockControls || !isNativeDesktopMode();
+    openSettingsBtn.disabled = lockControls || !isFocusedMacDesktopMode();
   }
   if (backToDictationBtn) {
     backToDictationBtn.disabled = lockControls;
@@ -559,12 +638,12 @@ function clearRestartTimer() {
 function describeSpeechError(errorCode) {
   if (errorCode === 'not-allowed' || errorCode === 'service-not-allowed') {
     if (hasMicrophoneAccess) {
-      return isNativeDesktopMode()
+      return isFocusedMacDesktopMode()
         ? 'Speech recognition permission denied. In macOS Settings > Privacy & Security > Speech Recognition, allow this app/terminal and relaunch.'
         : 'Speech recognition permission denied by browser/runtime. Allow speech recognition and retry.';
     }
 
-    return isNativeDesktopMode()
+    return isFocusedMacDesktopMode()
       ? 'Microphone permission denied. In macOS Settings > Privacy & Security > Microphone, allow this app (or Terminal during tauri:dev), then relaunch.'
       : 'Microphone permission denied in your browser. Allow mic access for this site and try again.';
   }
@@ -609,6 +688,7 @@ async function ensureMicrophoneAccess() {
 function scheduleRecognitionRestart() {
   clearRestartTimer();
 
+  // Browser speech engines can end between utterances; auto-restart keeps hands-free flow.
   restartTimer = setTimeout(() => {
     if (!recognition || !shouldKeepDictating || isStartingDictation || isDictating) return;
 
@@ -773,6 +853,7 @@ async function clearDictationHotkey() {
 }
 
 async function loadDictationOnboarding({ quietStatus = false } = {}) {
+  // Web/mobile bypass desktop onboarding gates and run with browser/manual input paths.
   if (!isNativeDesktopMode()) {
     nativeDictationModelReady = true;
     whisperCliAvailable = true;
@@ -793,6 +874,26 @@ async function loadDictationOnboarding({ quietStatus = false } = {}) {
     }
     setAppScreen('dictation');
     syncDictationHotkeyUi();
+    syncControls();
+    return null;
+  }
+  if (!isFocusedMacDesktopMode()) {
+    nativeDictationModelReady = false;
+    whisperCliAvailable = false;
+    currentOnboarding = null;
+    setSetupScreenMode('onboarding');
+    if (dictationModelCard) {
+      dictationModelCard.hidden = true;
+    }
+    if (openSettingsBtn) {
+      openSettingsBtn.hidden = true;
+    }
+    setAppScreen('onboarding');
+    setDictationModelBusy('');
+    setDictationModelStatus(MAC_DESKTOP_ONLY_MESSAGE, 'error');
+    if (!quietStatus) {
+      setStatus(MAC_DESKTOP_ONLY_MESSAGE, 'error');
+    }
     syncControls();
     return null;
   }
@@ -913,7 +1014,7 @@ async function loadDictationOnboarding({ quietStatus = false } = {}) {
 
 async function installSelectedDictationModel() {
   const tauriInvoke = getTauriInvoke();
-  if (!tauriInvoke || !isNativeDesktopMode()) return;
+  if (!tauriInvoke || !isFocusedMacDesktopMode()) return;
 
   const selected = getSelectedDictationModel();
   if (!selected) {
@@ -985,8 +1086,8 @@ async function installSelectedDictationModel() {
 
 async function deleteSelectedDictationModel() {
   const tauriInvoke = getTauriInvoke();
-  if (!isNativeDesktopMode()) {
-    setStatus('Model deletion is only available in desktop mode.', 'error');
+  if (!isFocusedMacDesktopMode()) {
+    setStatus('Model deletion is only available in macOS desktop mode.', 'error');
     return;
   }
   if (!tauriInvoke) {
@@ -1225,7 +1326,7 @@ function initDictation() {
 
   if (onboardingContinueBtn) {
     onboardingContinueBtn.addEventListener('click', () => {
-      if (isNativeDesktopMode() && !nativeDictationModelReady) {
+      if (isFocusedMacDesktopMode() && !nativeDictationModelReady) {
         setStatus('Complete setup first, then start dictation.', 'neutral');
         return;
       }
@@ -1249,7 +1350,7 @@ function initDictation() {
     });
   }
 
-  if (isNativeDesktopMode()) {
+  if (isFocusedMacDesktopMode()) {
     if (installDictationModelBtn) {
       installDictationModelBtn.addEventListener('click', installSelectedDictationModel);
     }
@@ -1308,27 +1409,8 @@ function initDictation() {
       });
     }
 
-    startDictationBtn.addEventListener('click', async () => {
-      const tauriInvoke = getTauriInvoke();
-      if (!tauriInvoke || isDictating || isStartingDictation) return;
-
-      try {
-        isStartingDictation = true;
-        syncControls();
-        setUiMode('loading');
-        setStatus('Opening microphone...', 'working');
-        await tauriInvoke('start_native_dictation');
-        isStartingDictation = false;
-        setDictationState(true);
-        setUiMode('listening');
-        setStatus('Listening... click Stop to transcribe.', 'live');
-      } catch (error) {
-        const details = getErrorMessage(error);
-        isStartingDictation = false;
-        setDictationState(false);
-        setUiMode('error');
-        setStatus(`Could not start dictation: ${details}`, 'error');
-      }
+    startDictationBtn.addEventListener('click', () => {
+      startNativeDesktopDictation('button');
     });
 
     stopDictationBtn.addEventListener('click', async () => {
@@ -1357,6 +1439,22 @@ function initDictation() {
       }
     });
 
+    window.addEventListener('keydown', handleNativeHoldKeydown, true);
+    window.addEventListener('keyup', handleNativeHoldKeyup, true);
+    const tauriEvent = getTauriEventApi();
+    if (typeof tauriEvent?.listen === 'function' && !nativeHotkeyUnlisten) {
+      tauriEvent.listen(FN_HOTKEY_STATE_EVENT, (event) => handleNativeFnStateEvent(event?.payload))
+        .then((unlisten) => {
+          nativeHotkeyUnlisten = unlisten;
+        })
+        .catch(() => {});
+    }
+
+    syncControls();
+    return;
+  }
+
+  if (isNativeDesktopMode() && !isFocusedMacDesktopMode()) {
     syncControls();
     return;
   }
@@ -1468,5 +1566,6 @@ setUiMode('loading');
 setSetupScreenMode('onboarding');
 setAppScreen('onboarding');
 syncControls();
+syncHotkeyPillForStatus(statusEl.textContent || '', 'neutral');
 initDictation();
 initApp();

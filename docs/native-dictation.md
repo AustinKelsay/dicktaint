@@ -1,12 +1,16 @@
-# Native Desktop Dictation (Tauri)
+# Legacy Redirect: Native Dictation
 
-This document explains the desktop dictation path end-to-end.
+Canonical locations:
 
-Important: this native Whisper CLI path is desktop-only. Mobile runtime does not invoke these desktop-native commands.
+- [`../llm/implementation/NATIVE_DESKTOP_DICTATION.md`](../llm/implementation/NATIVE_DESKTOP_DICTATION.md)
+- [`../llm/implementation/MODEL_MANAGEMENT.md`](../llm/implementation/MODEL_MANAGEMENT.md)
+- [`../llm/implementation/CONFIG_AND_PATH_RESOLUTION.md`](../llm/implementation/CONFIG_AND_PATH_RESOLUTION.md)
 
-## Architecture
+Operational runbooks:
 
-Desktop mode uses a native speech path:
+- [`../llm/workflow/LOCAL_DEVELOPMENT.md`](../llm/workflow/LOCAL_DEVELOPMENT.md)
+- [`../llm/workflow/SMOKE_TESTS.md`](../llm/workflow/SMOKE_TESTS.md)
+- [`../llm/workflow/TROUBLESHOOTING.md`](../llm/workflow/TROUBLESHOOTING.md)
 
 1. Rust captures microphone audio with `cpal`.
 2. Rust writes a temporary mono 16 kHz WAV.
