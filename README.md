@@ -30,7 +30,7 @@ bun run dev
    ```bash
    bun run tauri:dev
    ```
-3. In `Speech-to-Text Setup (Whisper)`, wait for setup checks to finish.
+3. In the setup screen, wait for local checks to finish.
 4. Choose a model and click `Download + Use`.
 5. Click `Start Dictation` once status shows ready.
 
@@ -67,7 +67,8 @@ Notes:
 - `tauri:dev` resolves `whisper-cli` from sidecar candidates, `WHISPER_CLI_PATH`, or system `PATH`.
 - Onboarding marks one best-fit recommended model for the current machine (and still shows the full model list).
 - Dictation start is blocked until both prerequisites are met on that device: `whisper-cli` present and a local model selected.
-- Selected dictation model state is saved at `$HOME/.dicktaint/dictation-settings.json`, and model files are stored under `$HOME/.dicktaint/whisper-models/`.
+- Selected dictation model state and optional dictation hotkey are saved at `$HOME/.dicktaint/dictation-settings.json`, and model files are stored under `$HOME/.dicktaint/whisper-models/`.
+- The saved dictation hotkey is registered as a desktop global shortcut (system-wide while app is running). On macOS, `Fn` uses a native global listener when permitted; if blocked by permissions it falls back to in-app handling.
 - Desktop bundle config uses a `whisper-cli` sidecar (`src-tauri/tauri.conf.json` `externalBin`) so packaged app users do not need a separate CLI install.
 - In setup UI, use `Refresh Setup` to re-run checks and `Delete Local Model` to remove a downloaded model file.
 - If `WHISPER_MODEL_PATH` is set, it overrides onboarding selection for desktop dictation.
@@ -80,6 +81,14 @@ Notes:
   ```bash
   WHISPER_CLI_PATH=/absolute/path/to/whisper-cli bun run tauri:dev
   ```
+
+Hotkey setup (desktop):
+- Open `Settings` in the dictation screen.
+- In `Dictation Hotkey`, click `Record`, press a key combo, then click `Save Hotkey`.
+- The saved combo is registered as a global hotkey while the desktop app is running. On macOS, `Fn` is global when Input Monitoring permissions allow it, and otherwise falls back to in-app behavior.
+- `Reset Default` sets `Fn` on macOS and `CmdOrCtrl+Shift+D` on other desktop platforms.
+- `Disable Hotkey` removes the shortcut.
+- Hotkey config is per-device and persisted in `$HOME/.dicktaint/dictation-settings.json`.
 
 Desktop build (currently configured for compile checks, bundling disabled):
 
@@ -176,6 +185,7 @@ Notes:
 
 - Provides a local model management flow: pull, select, and delete Whisper models per device.
 - Provides a basic dictation flow: start dictation, stop, and edit transcript.
+- In desktop mode, allows configuring a dictation hotkey (default `Fn` on macOS, `CmdOrCtrl+Shift+D` elsewhere) to toggle start/stop dictation.
 - Web mode dictation uses browser speech recognition when available.
 - Desktop mode dictation uses native Rust audio capture + `whisper-cli`, with onboarding that recommends and installs local Whisper models per device.
 - Mobile mode currently does not use native Whisper CLI dictation; it uses manual text input or runtime speech API support.

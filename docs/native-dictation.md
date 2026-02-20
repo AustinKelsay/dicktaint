@@ -19,7 +19,7 @@ Model onboarding path:
 2. App profiles local hardware (RAM + CPU basics).
 3. App shows the full Whisper model list with fit labels and one best-fit recommendation.
 4. User downloads one model locally for this device.
-5. Selected model is persisted in `$HOME/.dicktaint/dictation-settings.json`.
+5. Selected model and optional dictation hotkey are persisted in `$HOME/.dicktaint/dictation-settings.json`.
 6. Start Dictation stays blocked until both `whisper-cli` and a local model are ready.
 
 ## Requirements
@@ -83,7 +83,7 @@ Expected result:
 
 In desktop mode, use onboarding in the app:
 
-1. Open the `Speech-to-Text Setup (Whisper)` panel.
+1. Open the setup screen in the desktop app.
 2. Review the device profile and fit notes.
 3. If `whisper-cli` is missing, click `Open CLI Setup (dev)` and then `Refresh Setup`.
 4. Click `Download + Use` on the recommended model (or another model you want).
@@ -109,6 +109,28 @@ Optional hard override (bypasses onboarding selection):
 ```bash
 WHISPER_MODEL_PATH="/absolute/path/to/ggml-base.en.bin" bun run tauri:dev
 ```
+
+## Dictation Hotkey
+
+Desktop settings includes a configurable hotkey for dictation start/stop.
+
+- Default combo: `Fn` on macOS, `CmdOrCtrl+Shift+D` on other desktop platforms
+- Set custom combo: `Settings` -> `Dictation Hotkey` -> `Record` -> press combo -> `Save Hotkey`
+- Saved combos are registered as global desktop shortcuts while the app is running. On macOS, `Fn` uses a native global listener when Input Monitoring allows it; otherwise it falls back to in-app behavior.
+- Reset default: click `Reset Default`
+- Disable: click `Disable Hotkey`
+
+Supported combo format:
+
+- Use one modifier (`CmdOrCtrl`, `Cmd`, `Ctrl`, `Alt`, `Shift`, or `Super`) plus one main key, or use `Fn` by itself on macOS.
+- Main key options: `Fn` (macOS only), `A-Z`, `0-9`, `F1-F24`, arrows, and common navigation keys (`Enter`, `Tab`, `Escape`, `Delete`, etc.)
+
+State is persisted at `$HOME/.dicktaint/dictation-settings.json` under local settings for that device.
+
+If hotkey save fails:
+
+- The combo is likely reserved by the OS or already in use by another app.
+- Pick a different modifier/key combination and retry.
 
 ## First Smoke Test
 

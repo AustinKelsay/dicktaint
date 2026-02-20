@@ -53,6 +53,20 @@
             <button id="retryWhisperCheck" class="ghost" type="button">Refresh Setup</button>
             <button id="openWhisperSetup" class="ghost quiet" type="button" hidden>Open CLI Setup (dev)</button>
           </div>
+          <section id="dictationHotkeyCard" class="hotkey-card" hidden>
+            <label for="dictationHotkeyInput">Dictation Hotkey</label>
+            <p class="hint">Press one combo to toggle dictation start/stop.</p>
+            <div class="hotkey-editor">
+              <input id="dictationHotkeyInput" type="text" readonly placeholder="CmdOrCtrl+Shift+D" />
+              <button id="recordDictationHotkey" class="secondary" type="button">Record</button>
+            </div>
+            <div class="dictation-setup-actions">
+              <button id="saveDictationHotkey" class="ghost" type="button">Save Hotkey</button>
+              <button id="resetDictationHotkey" class="ghost" type="button">Reset Default</button>
+              <button id="clearDictationHotkey" class="ghost danger-btn" type="button">Disable Hotkey</button>
+            </div>
+            <p id="dictationHotkeyStatus" class="hint">No hotkey configured yet.</p>
+          </section>
           <p id="dictationModelBusy" class="hint busy-note" hidden></p>
           <p id="dictationModelStatus" class="hint"></p>
           <p class="hint setup-note">
@@ -79,6 +93,20 @@
             <button id="stopDictation" class="secondary" type="button" disabled>Stop</button>
             <button id="clearTranscript" class="ghost" type="button">Clear</button>
           </div>
+          <div class="waveform" aria-hidden="true">
+            <span class="waveform-bar" style="--i:0"></span>
+            <span class="waveform-bar" style="--i:1"></span>
+            <span class="waveform-bar" style="--i:2"></span>
+            <span class="waveform-bar" style="--i:3"></span>
+            <span class="waveform-bar" style="--i:4"></span>
+            <span class="waveform-bar" style="--i:5"></span>
+            <span class="waveform-bar" style="--i:6"></span>
+            <span class="waveform-bar" style="--i:7"></span>
+            <span class="waveform-bar" style="--i:8"></span>
+            <span class="waveform-bar" style="--i:9"></span>
+            <span class="waveform-bar" style="--i:10"></span>
+            <span class="waveform-bar" style="--i:11"></span>
+          </div>
           <label for="transcriptInput">Transcript</label>
           <textarea id="transcriptInput" rows="10" placeholder="Your dictated text appears here..."></textarea>
         </article>
@@ -89,6 +117,28 @@
         <p id="status">Loading local-first setup...</p>
       </footer>
     </main>
+
+    <button id="quickDictationFab" class="fab-glass" type="button" aria-label="Start dictation">
+      <svg class="fab-icon" viewBox="0 0 24 24" fill="none" xmlns="http://www.w3.org/2000/svg" aria-hidden="true">
+        <rect x="9" y="2" width="6" height="12" rx="3" fill="currentColor"/>
+        <path d="M5 11a7 7 0 0 0 14 0" stroke="currentColor" stroke-width="2" stroke-linecap="round"/>
+        <line x1="12" y1="18" x2="12" y2="22" stroke="currentColor" stroke-width="2" stroke-linecap="round"/>
+        <line x1="9" y1="22" x2="15" y2="22" stroke="currentColor" stroke-width="2" stroke-linecap="round"/>
+      </svg>
+      <span class="fab-label">Dictate</span>
+      <span class="fab-wave" aria-hidden="true">
+        <span class="fab-wave-bar" style="--i:0"></span>
+        <span class="fab-wave-bar" style="--i:1"></span>
+        <span class="fab-wave-bar" style="--i:2"></span>
+        <span class="fab-wave-bar" style="--i:3"></span>
+        <span class="fab-wave-bar" style="--i:4"></span>
+      </span>
+      <svg class="fab-spinner" viewBox="0 0 24 24" fill="none" xmlns="http://www.w3.org/2000/svg" aria-hidden="true">
+        <circle cx="12" cy="12" r="9" stroke="rgba(47,192,163,0.25)" stroke-width="2"/>
+        <path d="M12 3a9 9 0 0 1 9 9" stroke="#2fc0a3" stroke-width="2" stroke-linecap="round"/>
+      </svg>
+      <span class="fab-shimmer" aria-hidden="true"></span>
+    </button>
 
     <script src="/app.js" defer></script>
   </body>

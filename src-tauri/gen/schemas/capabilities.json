@@ -1,1 +1,1 @@
-{"default":{"identifier":"default","description":"Default desktop capabilities","local":true,"windows":["main"],"permissions":["core:default"]}}
+{"default":{"identifier":"default","description":"Default desktop capabilities","local":true,"windows":["main"],"permissions":["core:default","global-shortcut:allow-register","global-shortcut:allow-unregister"]},"pill":{"identifier":"pill","description":"Pill floating window capabilities","local":true,"windows":["pill"],"permissions":["core:default"]}}
