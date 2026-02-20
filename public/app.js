@@ -32,6 +32,9 @@ const saveDictationHotkeyBtn = document.getElementById('saveDictationHotkey');
 const resetDictationHotkeyBtn = document.getElementById('resetDictationHotkey');
 const clearDictationHotkeyBtn = document.getElementById('clearDictationHotkey');
 const dictationHotkeyStatusEl = document.getElementById('dictationHotkeyStatus');
+const focusedFieldInsertCardEl = document.getElementById('focusedFieldInsertCard');
+const focusedFieldInsertToggleEl = document.getElementById('focusedFieldInsertToggle');
+const focusedFieldInsertStatusEl = document.getElementById('focusedFieldInsertStatus');
 const quickDictationFab = document.getElementById('quickDictationFab');
 
 const SpeechRecognitionApi = window.SpeechRecognition || window.webkitSpeechRecognition || null;
@@ -62,6 +65,8 @@ let defaultDictationHotkey = DEFAULT_DICTATION_HOTKEY;
 let activeHotkeySpec = null;
 let pendingDictationHotkey = '';
 let isCapturingDictationHotkey = false;
+let focusedFieldInsertEnabled = false;
+let isSavingFocusedFieldInsertSetting = false;
 let lastHotkeyToggleAtMs = 0;
 let nativeHotkeyActionInFlight = false;
 let nativeFnHoldActive = false;
@@ -79,6 +84,12 @@ function setDictationHotkeyStatus(message, tone = 'neutral') {
   if (!dictationHotkeyStatusEl) return;
   dictationHotkeyStatusEl.textContent = message;
   dictationHotkeyStatusEl.dataset.tone = tone;
+}
+
+function setFocusedFieldInsertStatus(message, tone = 'neutral') {
+  if (!focusedFieldInsertStatusEl) return;
+  focusedFieldInsertStatusEl.textContent = message;
+  focusedFieldInsertStatusEl.dataset.tone = tone;
 }
 
 function normalizeHotkeyModifier(token) {
@@ -267,6 +278,7 @@ function eventMatchesHotkey(event, spec) {
 function syncDictationHotkeyUi() {
   const nativeDesktop = isNativeDesktopMode();
   if (dictationHotkeyCardEl) dictationHotkeyCardEl.hidden = !nativeDesktop;
+  if (focusedFieldInsertCardEl) focusedFieldInsertCardEl.hidden = !nativeDesktop;
   if (!nativeDesktop) return;
 
   if (dictationHotkeyInputEl) {
@@ -606,6 +618,10 @@ function syncControls() {
   if (clearDictationHotkeyBtn) {
     clearDictationHotkeyBtn.disabled = hotkeyDisabled || !normalizedSaved;
   }
+  if (focusedFieldInsertToggleEl) {
+    focusedFieldInsertToggleEl.disabled = hotkeyDisabled || isSavingFocusedFieldInsertSetting;
+    focusedFieldInsertToggleEl.checked = focusedFieldInsertEnabled;
+  }
 
   if (appShell) {
     appShell.setAttribute('aria-busy', lockControls ? 'true' : 'false');
@@ -634,6 +650,7 @@ function appendTranscriptChunk(chunk) {
   if (!trimmed) return false;
   finalTranscript = `${finalTranscript} ${trimmed}`.trim();
   transcriptInput.value = finalTranscript;
+  void maybeInsertTranscriptIntoFocusedField(trimmed);
   return true;
 }
 
@@ -799,6 +816,71 @@ function applyDictationHotkeyPayload(payload, { preservePending = false } = {}) 
   syncControls();
 }
 
+function applyFocusedFieldInsertPayload(payload) {
+  const enabled = Boolean(
+    payload?.focused_field_insert_enabled
+      ?? payload?.focusedFieldInsertEnabled
+      ?? payload?.enabled
+  );
+  focusedFieldInsertEnabled = enabled;
+
+  if (focusedFieldInsertToggleEl) {
+    focusedFieldInsertToggleEl.checked = enabled;
+  }
+
+  if (enabled) {
+    setFocusedFieldInsertStatus('Focused-field insertion is enabled.', 'ok');
+  } else {
+    setFocusedFieldInsertStatus('Focused-field insertion is disabled.', 'neutral');
+  }
+  syncControls();
+}
+
+async function saveFocusedFieldInsertSetting(enabled) {
+  const tauriInvoke = getTauriInvoke();
+  if (!tauriInvoke || !isFocusedMacDesktopMode()) return;
+
+  try {
+    isSavingFocusedFieldInsertSetting = true;
+    syncControls();
+    const payload = await tauriInvoke('set_focused_field_insert_enabled', { enabled: Boolean(enabled) });
+    applyFocusedFieldInsertPayload(payload);
+    setStatus(
+      focusedFieldInsertEnabled
+        ? 'Focused-field insertion enabled.'
+        : 'Focused-field insertion disabled.',
+      'ok'
+    );
+  } catch (error) {
+    const details = getErrorMessage(error);
+    if (focusedFieldInsertToggleEl) {
+      focusedFieldInsertToggleEl.checked = focusedFieldInsertEnabled;
+    }
+    setFocusedFieldInsertStatus(`Could not save setting: ${details}`, 'error');
+    setStatus(`Could not save focused-field insertion setting: ${details}`, 'error');
+  } finally {
+    isSavingFocusedFieldInsertSetting = false;
+    syncControls();
+  }
+}
+
+async function maybeInsertTranscriptIntoFocusedField(chunk) {
+  const tauriInvoke = getTauriInvoke();
+  if (!tauriInvoke || !isFocusedMacDesktopMode() || !focusedFieldInsertEnabled) return;
+  if (typeof document.hasFocus === 'function' && document.hasFocus()) return;
+
+  const trimmed = String(chunk || '').trim();
+  if (!trimmed) return;
+
+  try {
+    await tauriInvoke('insert_text_into_focused_field', { text: trimmed });
+  } catch (error) {
+    const details = getErrorMessage(error);
+    setFocusedFieldInsertStatus(`Insert failed: ${details}`, 'error');
+    setStatus(`Transcript captured, but focused-field insert failed: ${details}`, 'error');
+  }
+}
+
 function beginDictationHotkeyCapture() {
   if (!isNativeDesktopMode()) return;
   isCapturingDictationHotkey = true;
@@ -870,12 +952,18 @@ async function loadDictationOnboarding({ quietStatus = false } = {}) {
     pendingDictationHotkey = '';
     activeHotkeySpec = null;
     isCapturingDictationHotkey = false;
+    focusedFieldInsertEnabled = false;
+    isSavingFocusedFieldInsertSetting = false;
+    setFocusedFieldInsertStatus('Focused-field insertion is disabled.', 'neutral');
     setSetupScreenMode('onboarding');
     if (dictationModelCard) {
       dictationModelCard.hidden = true;
     }
     if (dictationHotkeyCardEl) {
       dictationHotkeyCardEl.hidden = true;
+    }
+    if (focusedFieldInsertCardEl) {
+      focusedFieldInsertCardEl.hidden = true;
     }
     if (openSettingsBtn) {
       openSettingsBtn.hidden = true;
@@ -889,12 +977,18 @@ async function loadDictationOnboarding({ quietStatus = false } = {}) {
     nativeDictationModelReady = false;
     whisperCliAvailable = false;
     currentOnboarding = null;
+    focusedFieldInsertEnabled = false;
+    isSavingFocusedFieldInsertSetting = false;
+    setFocusedFieldInsertStatus('Focused-field insertion is unavailable on this platform.', 'neutral');
     setSetupScreenMode('onboarding');
     if (dictationModelCard) {
       dictationModelCard.hidden = true;
     }
     if (openSettingsBtn) {
       openSettingsBtn.hidden = true;
+    }
+    if (focusedFieldInsertCardEl) {
+      focusedFieldInsertCardEl.hidden = true;
     }
     setAppScreen('onboarding');
     setDictationModelBusy('');
@@ -915,12 +1009,18 @@ async function loadDictationOnboarding({ quietStatus = false } = {}) {
     pendingDictationHotkey = '';
     activeHotkeySpec = null;
     isCapturingDictationHotkey = false;
+    focusedFieldInsertEnabled = false;
+    isSavingFocusedFieldInsertSetting = false;
+    setFocusedFieldInsertStatus('Focused-field insertion is unavailable while desktop bridge is offline.', 'neutral');
     setSetupScreenMode('onboarding');
     if (openSettingsBtn) {
       openSettingsBtn.hidden = true;
     }
     if (dictationHotkeyCardEl) {
       dictationHotkeyCardEl.hidden = true;
+    }
+    if (focusedFieldInsertCardEl) {
+      focusedFieldInsertCardEl.hidden = true;
     }
     setAppScreen('onboarding');
     syncDictationHotkeyUi();
@@ -945,6 +1045,9 @@ async function loadDictationOnboarding({ quietStatus = false } = {}) {
     if (dictationHotkeyCardEl) {
       dictationHotkeyCardEl.hidden = false;
     }
+    if (focusedFieldInsertCardEl) {
+      focusedFieldInsertCardEl.hidden = false;
+    }
     if (openSettingsBtn) {
       openSettingsBtn.hidden = false;
     }
@@ -954,6 +1057,7 @@ async function loadDictationOnboarding({ quietStatus = false } = {}) {
 
     renderDictationModelOptions(onboarding.models, onboarding.selected_model_id);
     applyDictationHotkeyPayload(onboarding);
+    applyFocusedFieldInsertPayload(onboarding);
 
     if (openWhisperSetupBtn) {
       openWhisperSetupBtn.hidden = Boolean(onboarding.whisper_cli_available);
@@ -1000,12 +1104,18 @@ async function loadDictationOnboarding({ quietStatus = false } = {}) {
     pendingDictationHotkey = '';
     activeHotkeySpec = null;
     isCapturingDictationHotkey = false;
+    focusedFieldInsertEnabled = false;
+    isSavingFocusedFieldInsertSetting = false;
+    setFocusedFieldInsertStatus('Focused-field insertion is unavailable while setup is loading.', 'neutral');
     setSetupScreenMode('onboarding');
     if (openSettingsBtn) {
       openSettingsBtn.hidden = true;
     }
     if (dictationHotkeyCardEl) {
       dictationHotkeyCardEl.hidden = true;
+    }
+    if (focusedFieldInsertCardEl) {
+      focusedFieldInsertCardEl.hidden = true;
     }
     setAppScreen('onboarding');
     const details = getErrorMessage(error);
@@ -1525,6 +1635,12 @@ function initDictation() {
     }
     if (clearDictationHotkeyBtn) {
       clearDictationHotkeyBtn.addEventListener('click', clearDictationHotkey);
+    }
+    if (focusedFieldInsertToggleEl) {
+      focusedFieldInsertToggleEl.addEventListener('change', (event) => {
+        const next = Boolean(event?.currentTarget?.checked);
+        void saveFocusedFieldInsertSetting(next);
+      });
     }
     if (dictationModelSelect) {
       dictationModelSelect.addEventListener('change', () => {

@@ -2,7 +2,7 @@
 
 ## Status Snapshot
 
-- Date: 2026-02-17
+- Date: 2026-02-20
 - smoke coverage targets runtime-critical user paths
 
 ## Purpose
@@ -61,19 +61,27 @@ D) Background hold-to-talk smoke:
 3. reopen app
 4. verify transcript append and no stuck recording state
 
-E) Sidecar smoke:
+E) Focused-field insertion smoke (macOS desktop):
+
+1. open app settings and enable focused-field insertion
+2. focus a text input in another app (Notes, browser textarea, etc.)
+3. trigger dictation by button path or hold-to-talk path
+4. verify transcript pastes into the external focused field
+5. disable setting and verify paste no longer occurs
+
+F) Sidecar smoke:
 
 1. run `bun run whisper:smoke`
 2. verify transcript file generated and content check passes
 
-F) Automated baseline:
+G) Automated baseline:
 
 1. run `bun run test:all`
 2. run `bun run docs:verify`
 
 ## Verification
 
-This checklist is complete only when sections A-F all pass in the target runtime under test.
+This checklist is complete only when sections A-G all pass in the target runtime under test.
 
 ## Related Docs
 

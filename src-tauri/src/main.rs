@@ -214,6 +214,7 @@ struct LocalSettings {
     selected_model_path: Option<String>,
     dictation_trigger: Option<String>,
     dictation_trigger_enabled: Option<bool>,
+    focused_field_insert_enabled: Option<bool>,
 }
 
 struct LocalModelState {
@@ -458,6 +459,7 @@ struct DictationOnboardingPayload {
     selected_model_exists: bool,
     dictation_trigger: Option<String>,
     default_dictation_trigger: String,
+    focused_field_insert_enabled: bool,
     whisper_cli_available: bool,
     whisper_cli_path: String,
     models_dir: String,
@@ -469,6 +471,11 @@ struct DictationOnboardingPayload {
 struct DictationTriggerPayload {
     trigger: Option<String>,
     default_trigger: String,
+}
+
+#[derive(Serialize)]
+struct FocusedFieldInsertPayload {
+    enabled: bool,
 }
 
 #[derive(Serialize)]
@@ -757,6 +764,10 @@ fn resolve_effective_dictation_trigger(settings: &LocalSettings) -> Option<Strin
     }
 
     Some(default_dictation_trigger())
+}
+
+fn focused_field_insert_enabled(settings: &LocalSettings) -> bool {
+    matches!(settings.focused_field_insert_enabled, Some(true))
 }
 
 fn dictation_trigger_payload(settings: &LocalSettings) -> DictationTriggerPayload {
@@ -1726,6 +1737,7 @@ fn build_onboarding_payload(
         selected_model_exists,
         dictation_trigger,
         default_dictation_trigger: default_dictation_trigger(),
+        focused_field_insert_enabled: focused_field_insert_enabled(&settings),
         whisper_cli_available,
         whisper_cli_path: detected_whisper_cli_path.unwrap_or(configured_whisper_cli_path),
         models_dir: model_state.models_dir.to_string_lossy().to_string(),
@@ -2256,6 +2268,93 @@ fn clear_dictation_trigger(
 }
 
 #[tauri::command]
+fn set_focused_field_insert_enabled(
+    enabled: bool,
+    model_state: State<'_, LocalModelState>,
+) -> Result<FocusedFieldInsertPayload, String> {
+    let settings_path = model_state.settings_path.clone();
+    let mut settings = model_state
+        .settings
+        .lock()
+        .map_err(|_| "Failed to lock local model settings".to_string())?;
+    let previous = settings.focused_field_insert_enabled;
+    settings.focused_field_insert_enabled = Some(enabled);
+    if let Err(error) = save_local_settings(&settings_path, &settings) {
+        settings.focused_field_insert_enabled = previous;
+        return Err(error);
+    }
+    Ok(FocusedFieldInsertPayload {
+        enabled: focused_field_insert_enabled(&settings),
+    })
+}
+
+#[cfg(target_os = "macos")]
+fn insert_text_into_focused_field_impl(text: &str) -> Result<(), String> {
+    let trimmed = text.trim();
+    if trimmed.is_empty() {
+        return Ok(());
+    }
+
+    let script_lines = [
+        "on run argv",
+        "  if (count of argv) is 0 then return",
+        "  set dictatedText to item 1 of argv",
+        "  if dictatedText is \"\" then return",
+        "  set priorClipboard to the clipboard",
+        "  try",
+        "    set the clipboard to dictatedText",
+        "    tell application \"System Events\"",
+        "      keystroke \"v\" using {command down}",
+        "    end tell",
+        "    delay 0.05",
+        "  on error errMsg number errNum",
+        "    try",
+        "      set the clipboard to priorClipboard",
+        "    end try",
+        "    error errMsg number errNum",
+        "  end try",
+        "  set the clipboard to priorClipboard",
+        "end run",
+    ];
+
+    let mut command = Command::new("osascript");
+    for line in script_lines {
+        command.arg("-e").arg(line);
+    }
+    command.arg(trimmed);
+
+    let output = command.output().map_err(|e| {
+        format!("Failed to launch macOS text insertion automation (osascript): {e}")
+    })?;
+    if output.status.success() {
+        return Ok(());
+    }
+
+    let stderr = String::from_utf8_lossy(&output.stderr).trim().to_string();
+    let stdout = String::from_utf8_lossy(&output.stdout).trim().to_string();
+    let detail = if !stderr.is_empty() {
+        stderr
+    } else if !stdout.is_empty() {
+        stdout
+    } else {
+        "no output".to_string()
+    };
+    Err(format!(
+        "Focused field insertion failed. Allow Accessibility/Automation for this app (or Terminal during tauri:dev) and retry. Details: {detail}"
+    ))
+}
+
+#[cfg(not(target_os = "macos"))]
+fn insert_text_into_focused_field_impl(_text: &str) -> Result<(), String> {
+    Err("Focused field insertion is currently supported on macOS desktop only.".to_string())
+}
+
+#[tauri::command]
+fn insert_text_into_focused_field(text: String) -> Result<(), String> {
+    insert_text_into_focused_field_impl(&text)
+}
+
+#[tauri::command]
 async fn install_dictation_model(
     model: String,
     config: State<'_, AppConfig>,
@@ -2593,8 +2692,9 @@ fn cancel_native_dictation(
 #[cfg(test)]
 mod tests {
     use super::{
-        default_dictation_trigger, normalize_dictation_trigger, resolve_effective_dictation_trigger,
-        resample_linear, whisper_help_text_looks_valid, LocalSettings,
+        default_dictation_trigger, focused_field_insert_enabled, normalize_dictation_trigger,
+        resolve_effective_dictation_trigger, resample_linear, whisper_help_text_looks_valid,
+        LocalSettings,
     };
 
     #[test]
@@ -2684,6 +2784,21 @@ mod tests {
             Some("CmdOrCtrl+Shift+K".to_string())
         );
     }
+
+    #[test]
+    fn focused_field_insert_defaults_to_disabled() {
+        let settings = LocalSettings::default();
+        assert!(!focused_field_insert_enabled(&settings));
+    }
+
+    #[test]
+    fn focused_field_insert_uses_explicit_enabled_setting() {
+        let settings = LocalSettings {
+            focused_field_insert_enabled: Some(true),
+            ..LocalSettings::default()
+        };
+        assert!(focused_field_insert_enabled(&settings));
+    }
 }
 
 fn main() {
@@ -2771,7 +2886,9 @@ fn main() {
             get_dictation_trigger,
             set_dictation_trigger,
             clear_dictation_trigger,
+            set_focused_field_insert_enabled,
             open_whisper_setup_page,
+            insert_text_into_focused_field,
             install_dictation_model,
             delete_dictation_model,
             start_native_dictation,

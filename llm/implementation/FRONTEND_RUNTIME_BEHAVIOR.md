@@ -2,7 +2,7 @@
 
 ## Status Snapshot
 
-- Date: 2026-02-17
+- Date: 2026-02-20
 - Frontend runtime split is implemented in `public/app.js`
 
 ## Purpose
@@ -40,12 +40,15 @@ Setup gate on mac desktop:
 
 - `nativeDictationModelReady` depends on onboarding result for selected model existence + `whisper-cli` availability
 - start dictation controls remain disabled until setup ready
+- onboarding payload also drives `focusedFieldInsertEnabled` for optional focused-field paste behavior
 
 Native desktop start/stop contract:
 
 - start calls `start_native_dictation`
 - stop calls `stop_native_dictation`
 - clear calls `cancel_native_dictation` best-effort
+- focused-field toggle writes through `set_focused_field_insert_enabled`
+- finalized transcript path attempts `insert_text_into_focused_field` only when enabled and when app window is not focused
 
 Browser speech path:
 
