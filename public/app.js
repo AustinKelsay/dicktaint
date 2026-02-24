@@ -1849,7 +1849,7 @@ function initDictation() {
   }
 
   transcriptInput.addEventListener('input', () => {
-    currentDraftText = transcriptInput.value.trim();
+    currentDraftText = transcriptInput.value;
   });
 
   renderDictationHistory();
