@@ -767,6 +767,15 @@ function historySourceLabel(source) {
 async function copyTextToClipboard(text) {
   const trimmed = String(text || '').trim();
   if (!trimmed) return false;
+
+  const tauriClipboard = window.__TAURI__?.clipboard
+    || window.__TAURI__?.plugins?.clipboard
+    || null;
+  if (typeof tauriClipboard?.writeText === 'function') {
+    await tauriClipboard.writeText(trimmed);
+    return true;
+  }
+
   if (navigator.clipboard?.writeText) {
     await navigator.clipboard.writeText(trimmed);
     return true;
@@ -1587,10 +1596,14 @@ async function stopNativeDesktopDictation(trigger = 'button') {
       nativeSessionId: sessionId
     });
     setUiMode('idle');
-    if (trigger === 'hotkey-hold' || trigger === 'hotkey') {
-      setStatus('Dictation captured from fn hold and transcribed.', 'ok');
+    if (didAppendTranscript) {
+      if (trigger === 'hotkey-hold' || trigger === 'hotkey') {
+        setStatus('Dictation captured from fn hold and transcribed.', 'ok');
+      } else {
+        setStatus('Dictation captured and transcribed.', 'ok');
+      }
     } else {
-      setStatus('Dictation captured and transcribed.', 'ok');
+      setStatus('No new dictation content to save.', 'neutral');
     }
   } catch (error) {
     const details = getErrorMessage(error);
@@ -1819,6 +1832,8 @@ function initDictation() {
     pendingNativeStartAfterStop = false;
     pendingNativeStartTrigger = null;
     activeNativeSessionId = null;
+    setDictationState(false);
+    syncControls();
     clearRestartTimer();
     setDraftTranscriptText('');
     setUiMode('idle');
@@ -2101,7 +2116,7 @@ function resetDictationStateForTests() {
   nativeSessionSeq = 0;
   committedNativeSessionIds = new Set();
   startNativeDesktopDictationOverride = null;
-  transcriptInput.value = '';
+  setDraftTranscriptText('');
   renderDictationHistory();
   syncControls();
 }
