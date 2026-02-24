@@ -288,6 +288,84 @@ body[data-screen="dictation"] .app-shell {
   grid-column: 1 / -1;
 }
 
+.dictation-history {
+  display: grid;
+  gap: 0.52rem;
+  padding: 0.62rem;
+  border: 1px dashed #465977;
+  border-radius: var(--radius-md);
+  background: rgba(10, 17, 28, 0.5);
+}
+
+.dictation-history-head {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 0.5rem;
+}
+
+.dictation-history-head h3 {
+  margin: 0;
+  font-size: 0.78rem;
+  font-weight: 700;
+  letter-spacing: 0.08em;
+  text-transform: uppercase;
+  color: #d2dcf0;
+}
+
+#dictationHistoryEmpty {
+  margin: 0;
+}
+
+.dictation-history-list {
+  margin: 0;
+  padding: 0;
+  list-style: none;
+  display: grid;
+  gap: 0.45rem;
+  max-height: 260px;
+  overflow: auto;
+  padding-right: 0.12rem;
+}
+
+.dictation-history-item {
+  display: grid;
+  gap: 0.36rem;
+  padding: 0.52rem 0.58rem;
+  border: 1px solid #3a4f6a;
+  border-radius: 10px;
+  background: rgba(16, 26, 40, 0.66);
+}
+
+.dictation-history-text {
+  margin: 0;
+  color: #ecf2fc;
+  font-size: 0.89rem;
+  line-height: 1.35;
+  white-space: pre-wrap;
+  overflow-wrap: anywhere;
+  word-break: normal;
+}
+
+.dictation-history-meta {
+  margin: 0;
+  font-size: 0.72rem;
+  letter-spacing: 0.06em;
+  text-transform: uppercase;
+  color: #8fa4c2;
+}
+
+.dictation-history-actions {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 0.38rem;
+}
+
+.dictation-history-actions button {
+  padding: 0.34rem 0.58rem;
+  font-size: 0.78rem;
+}
+
 /* ── Waveform ─────────────────────────────────────────────── */
 
 .waveform {

@@ -12,6 +12,10 @@ const startDictationBtn = document.getElementById('startDictation');
 const stopDictationBtn = document.getElementById('stopDictation');
 const clearTranscriptBtn = document.getElementById('clearTranscript');
 const transcriptInput = document.getElementById('transcriptInput');
+const dictationHistorySection = document.getElementById('dictationHistorySection');
+const dictationHistoryListEl = document.getElementById('dictationHistoryList');
+const dictationHistoryEmptyEl = document.getElementById('dictationHistoryEmpty');
+const clearDictationHistoryBtn = document.getElementById('clearDictationHistory');
 const appShell = document.querySelector('.app-shell');
 const dictationModelCard = document.getElementById('dictationModelCard');
 const dictationModelSelect = document.getElementById('dictationModelSelect');
@@ -45,9 +49,12 @@ const DICTATION_STATE_EVENT = 'dictation:state-changed';
 const NATIVE_HOLD_HOTKEYS = new Set(['Fn', 'F19']);
 const MAC_DESKTOP_ONLY_MESSAGE = 'Desktop MVP currently supports macOS only. Current mobile focus is iPhone (iOS).';
 const PILL_STATUS_EVENT = 'dicktaint://pill-status';
+const DICTATION_HISTORY_LIMIT = 10;
 
 let recognition = null;
-let finalTranscript = '';
+let currentDraftText = '';
+let dictationHistory = [];
+let dictationHistorySeq = 0;
 let isDictating = false;
 let isStartingDictation = false;
 let shouldKeepDictating = false;
@@ -71,6 +78,15 @@ let lastHotkeyToggleAtMs = 0;
 let nativeHotkeyActionInFlight = false;
 let nativeFnHoldActive = false;
 let nativeFnStopRequested = false;
+let nativeStopRequestInFlight = false;
+let pendingNativeStartAfterStop = false;
+let pendingNativeStartTrigger = null;
+let activeNativeSessionId = null;
+let nativeSessionIdToIgnore = null;
+let rejectNextNativeAppend = false;
+let nativeSessionSeq = 0;
+let committedNativeSessionIds = new Set();
+let startNativeDesktopDictationOverride = null;
 
 function modelDisplayName(model) {
   return String(model?.display_name || '').replace(/\s+\(Selected\)$/u, '').trim();
@@ -572,9 +588,21 @@ function syncControls() {
   const hasPendingHotkey = Boolean(normalizedPending);
   const savedIsDefault = Boolean(normalizedSaved && defaultDictationHotkey && normalizedSaved === defaultDictationHotkey);
 
-  startDictationBtn.disabled = lockControls || !hasCaptureSupport || isDictating || isStartingDictation || dictationModelMissing;
-  stopDictationBtn.disabled = lockControls || !hasCaptureSupport || (!isDictating && !isStartingDictation);
-  clearTranscriptBtn.disabled = lockControls;
+  startDictationBtn.disabled = (
+    lockControls
+    || !hasCaptureSupport
+    || isDictating
+    || isStartingDictation
+    || nativeStopRequestInFlight
+    || dictationModelMissing
+  );
+  stopDictationBtn.disabled = (
+    lockControls
+    || !hasCaptureSupport
+    || nativeStopRequestInFlight
+    || (!isDictating && !isStartingDictation)
+  );
+  clearTranscriptBtn.disabled = lockControls || nativeStopRequestInFlight;
 
   if (installDictationModelBtn) {
     installDictationModelBtn.disabled = (
@@ -645,11 +673,240 @@ function setDictationState(dictating) {
   syncControls();
 }
 
-function appendTranscriptChunk(chunk) {
+function normalizeNativeDictationError(text) {
+  return String(text || '').trim().toLowerCase();
+}
+
+function isStartConflictDictationError(text) {
+  const normalized = normalizeNativeDictationError(text);
+  return normalized.includes('dictation already running');
+}
+
+function isStopNoopDictationError(text) {
+  const normalized = normalizeNativeDictationError(text);
+  return normalized.includes('dictation is not running');
+}
+
+function nextDictationHistoryId() {
+  dictationHistorySeq += 1;
+  return `dict-${Date.now()}-${dictationHistorySeq}`;
+}
+
+function pushDictationHistory(chunk, source = 'native') {
+  const trimmed = String(chunk || '').trim();
+  if (!trimmed) return;
+  dictationHistory = [
+    {
+      id: nextDictationHistoryId(),
+      text: trimmed,
+      source,
+      createdAt: new Date().toISOString()
+    },
+    ...dictationHistory
+  ].slice(0, DICTATION_HISTORY_LIMIT);
+  renderDictationHistory();
+}
+
+function nextNativeSessionId() {
+  nativeSessionSeq += 1;
+  return `native-${Date.now()}-${nativeSessionSeq}`;
+}
+
+/**
+ * Attempts to record a native session as committed.
+ * Returns false when a duplicate session id is detected; null/empty ids return true.
+ */
+function tryCommitNativeSession(sessionId) {
+  if (!sessionId) return true;
+  if (committedNativeSessionIds.has(sessionId)) return false;
+  committedNativeSessionIds.add(sessionId);
+  if (committedNativeSessionIds.size > 64) {
+    const keep = Array.from(committedNativeSessionIds).slice(-32);
+    committedNativeSessionIds = new Set(keep);
+  }
+  return true;
+}
+
+function queueNativeStartAfterCurrentStop(trigger = 'hotkey') {
+  pendingNativeStartAfterStop = true;
+  pendingNativeStartTrigger = trigger;
+}
+
+async function maybeStartQueuedNativeDictation() {
+  if (!pendingNativeStartAfterStop) return;
+  if (isDictating || isStartingDictation || nativeStopRequestInFlight) return;
+
+  const trigger = pendingNativeStartTrigger || 'hotkey';
+  pendingNativeStartAfterStop = false;
+  pendingNativeStartTrigger = null;
+  const startFn = startNativeDesktopDictationOverride || startNativeDesktopDictation;
+  try {
+    await startFn(trigger);
+  } catch (error) {
+    const details = getErrorMessage(error);
+    isStartingDictation = false;
+    setDictationState(false);
+    setUiMode('error');
+    setStatus(`Could not start dictation: ${details}`, 'error');
+    console.error('Could not start queued dictation', error);
+  }
+}
+
+function setDraftTranscriptText(text) {
+  currentDraftText = String(text || '').trim();
+  transcriptInput.value = currentDraftText;
+}
+
+function appendToDraftTranscript(text) {
+  const trimmed = String(text || '').trim();
+  if (!trimmed) return false;
+  currentDraftText = `${currentDraftText} ${trimmed}`.trim();
+  transcriptInput.value = currentDraftText;
+  return true;
+}
+
+function findDictationHistoryEntry(historyId) {
+  const id = String(historyId || '').trim();
+  if (!id) return null;
+  return dictationHistory.find((entry) => entry.id === id) || null;
+}
+
+function formatHistoryTimestamp(value) {
+  const date = new Date(value);
+  if (Number.isNaN(date.getTime())) return '';
+  return date.toLocaleTimeString([], { hour: 'numeric', minute: '2-digit' });
+}
+
+function historySourceLabel(source) {
+  const value = String(source || '').trim().toLowerCase();
+  if (value === 'web') return 'WEB';
+  if (value === 'native' || value === 'native-event') return 'DESKTOP';
+  return 'DICTATION';
+}
+
+async function copyTextToClipboard(text) {
+  const trimmed = String(text || '').trim();
+  if (!trimmed) return false;
+
+  const tauriClipboard = window.__TAURI__?.clipboard
+    || window.__TAURI__?.plugins?.clipboard
+    || null;
+  if (typeof tauriClipboard?.writeText === 'function') {
+    await tauriClipboard.writeText(trimmed);
+    return true;
+  }
+
+  if (navigator.clipboard?.writeText) {
+    await navigator.clipboard.writeText(trimmed);
+    return true;
+  }
+
+  console.warn('Clipboard fallback unavailable: no tauri clipboard API or navigator.clipboard.writeText.');
+  return false;
+}
+
+async function runDictationHistoryAction(historyAction, historyId) {
+  const action = String(historyAction || '').trim();
+  const id = String(historyId || '').trim();
+  const entry = findDictationHistoryEntry(id);
+  if (!entry) {
+    setStatus('That history entry is no longer available.', 'error');
+    return false;
+  }
+
+  if (action === 'reinsert') {
+    if (appendToDraftTranscript(entry.text)) {
+      transcriptInput.focus();
+      setStatus('Reinserted previous dictation into transcript.', 'ok');
+      return true;
+    }
+    return false;
+  }
+
+  if (action === 'copy') {
+    try {
+      const copied = await copyTextToClipboard(entry.text);
+      if (copied) {
+        setStatus('Copied dictation entry to clipboard.', 'ok');
+      } else {
+        setStatus('Could not copy dictation entry to clipboard.', 'error');
+      }
+      return copied;
+    } catch (error) {
+      const details = getErrorMessage(error);
+      setStatus(`Could not copy dictation entry: ${details}`, 'error');
+      return false;
+    }
+  }
+
+  setStatus(`Unknown history action: ${action || '(empty)'}.`, 'error');
+  return false;
+}
+
+function renderDictationHistory() {
+  if (!dictationHistorySection || !dictationHistoryListEl || !dictationHistoryEmptyEl) return;
+  dictationHistorySection.hidden = false;
+  const hasHistory = dictationHistory.length > 0;
+  dictationHistoryEmptyEl.hidden = hasHistory;
+  if (clearDictationHistoryBtn) clearDictationHistoryBtn.disabled = !hasHistory;
+
+  dictationHistoryListEl.innerHTML = '';
+  if (!hasHistory) return;
+
+  for (const entry of dictationHistory) {
+    const item = document.createElement('li');
+    item.className = 'dictation-history-item';
+
+    const text = document.createElement('p');
+    text.className = 'dictation-history-text';
+    text.textContent = entry.text;
+
+    const meta = document.createElement('p');
+    meta.className = 'dictation-history-meta';
+    const stamp = formatHistoryTimestamp(entry.createdAt);
+    const source = historySourceLabel(entry.source);
+    meta.textContent = stamp ? `${stamp} • ${source}` : source;
+
+    const actions = document.createElement('div');
+    actions.className = 'dictation-history-actions';
+
+    const reuseBtn = document.createElement('button');
+    reuseBtn.type = 'button';
+    reuseBtn.className = 'ghost quiet';
+    reuseBtn.textContent = 'Reinsert';
+    reuseBtn.dataset.historyAction = 'reinsert';
+    reuseBtn.dataset.historyId = entry.id;
+
+    const copyBtn = document.createElement('button');
+    copyBtn.type = 'button';
+    copyBtn.className = 'ghost quiet';
+    copyBtn.textContent = 'Copy';
+    copyBtn.dataset.historyAction = 'copy';
+    copyBtn.dataset.historyId = entry.id;
+
+    actions.appendChild(reuseBtn);
+    actions.appendChild(copyBtn);
+    item.appendChild(text);
+    item.appendChild(meta);
+    item.appendChild(actions);
+    dictationHistoryListEl.appendChild(item);
+  }
+}
+
+function appendTranscriptChunk(chunk, { source = 'native', nativeSessionId = null } = {}) {
   const trimmed = String(chunk || '').trim();
   if (!trimmed) return false;
-  finalTranscript = `${finalTranscript} ${trimmed}`.trim();
-  transcriptInput.value = finalTranscript;
+  const isNativeSource = source === 'native' || source === 'native-event';
+  if (isNativeSource && rejectNextNativeAppend) {
+    return false;
+  }
+  if (isNativeSource && nativeSessionIdToIgnore && (nativeSessionId === null || nativeSessionId === nativeSessionIdToIgnore)) {
+    return false;
+  }
+  if (!tryCommitNativeSession(nativeSessionId)) return false;
+  appendToDraftTranscript(trimmed);
+  rejectNextNativeAppend = false;
+  pushDictationHistory(trimmed, source);
   void maybeInsertTranscriptIntoFocusedField(trimmed);
   return true;
 }
@@ -1303,9 +1560,14 @@ async function openWhisperSetupPage() {
   }
 }
 
-async function startNativeDesktopDictation(trigger = 'button') {
+async function startNativeDesktopDictation(trigger = 'button', shouldRetryOnConflict = true) {
   const tauriInvoke = getTauriInvoke();
   if (!tauriInvoke || !isFocusedMacDesktopMode()) return;
+  if (nativeStopRequestInFlight) {
+    queueNativeStartAfterCurrentStop(trigger);
+    setStatus('Finishing previous dictation... next one will start automatically.', 'working');
+    return;
+  }
   if (isDictating || isStartingDictation) return;
 
   if (!nativeDictationModelReady) {
@@ -1315,9 +1577,12 @@ async function startNativeDesktopDictation(trigger = 'button') {
 
   try {
     isStartingDictation = true;
+    nativeSessionIdToIgnore = null;
+    rejectNextNativeAppend = true;
     syncControls();
     setUiMode('loading');
     setStatus('Opening microphone...', 'working');
+    activeNativeSessionId = nextNativeSessionId();
     await tauriInvoke('start_native_dictation');
     isStartingDictation = false;
     setDictationState(true);
@@ -1329,8 +1594,28 @@ async function startNativeDesktopDictation(trigger = 'button') {
     }
   } catch (error) {
     const details = getErrorMessage(error);
+    if (shouldRetryOnConflict && isStartConflictDictationError(details)) {
+      setStatus('Recovering from stale dictation state...', 'working');
+      nativeSessionIdToIgnore = null;
+      rejectNextNativeAppend = true;
+      activeNativeSessionId = null;
+      isStartingDictation = false;
+      setDictationState(false);
+      try {
+        await tauriInvoke('cancel_native_dictation');
+        return startNativeDesktopDictation(trigger, false);
+      } catch (recoverError) {
+        isStartingDictation = false;
+        setDictationState(false);
+        setUiMode('error');
+        setStatus(`Could not recover dictation session: ${getErrorMessage(recoverError)}`, 'error');
+        return;
+      }
+    }
+
     isStartingDictation = false;
     setDictationState(false);
+    activeNativeSessionId = null;
     setUiMode('error');
     setStatus(`Could not start dictation: ${details}`, 'error');
   }
@@ -1339,30 +1624,43 @@ async function startNativeDesktopDictation(trigger = 'button') {
 async function stopNativeDesktopDictation(trigger = 'button') {
   const tauriInvoke = getTauriInvoke();
   if (!tauriInvoke || (!isDictating && !isStartingDictation)) return;
+  if (nativeStopRequestInFlight) return;
 
+  nativeStopRequestInFlight = true;
+  const sessionId = activeNativeSessionId;
   try {
     setUiMode('loading');
     setStatus('Transcribing captured audio...', 'working');
-    const transcriptBeforeStop = finalTranscript;
     const transcript = await tauriInvoke('stop_native_dictation');
-    if (finalTranscript === transcriptBeforeStop) {
-      const didAppendTranscript = appendTranscriptChunk(transcript);
-      if (didAppendTranscript) {
-        setUiMode('idle');
+    const didAppendTranscript = appendTranscriptChunk(transcript, {
+      source: 'native',
+      nativeSessionId: sessionId
+    });
+    setUiMode('idle');
+    if (didAppendTranscript) {
+      if (trigger === 'hotkey-hold' || trigger === 'hotkey') {
+        setStatus('Dictation captured from fn hold and transcribed.', 'ok');
+      } else {
+        setStatus('Dictation captured and transcribed.', 'ok');
       }
-    }
-    if (trigger === 'hotkey-hold' || trigger === 'hotkey') {
-      setStatus('Dictation captured from fn hold and transcribed.', 'ok');
     } else {
-      setStatus('Dictation captured and transcribed.', 'ok');
+      setStatus('No new dictation content to save.', 'neutral');
     }
   } catch (error) {
     const details = getErrorMessage(error);
+    if (isStopNoopDictationError(details)) {
+      setUiMode('idle');
+      activeNativeSessionId = null;
+      setStatus('No active dictation session to stop.', 'neutral');
+      return;
+    }
     setUiMode('error');
     setStatus(`Could not stop dictation: ${details}`, 'error');
   } finally {
+    nativeStopRequestInFlight = false;
     isStartingDictation = false;
     setDictationState(false);
+    void maybeStartQueuedNativeDictation();
   }
 }
 
@@ -1382,6 +1680,11 @@ function applyNativeFnHoldState(pressed) {
   if (nextPressed) {
     nativeFnHoldActive = true;
     nativeFnStopRequested = false;
+    if (nativeStopRequestInFlight) {
+      queueNativeStartAfterCurrentStop('hotkey-hold');
+      setHotkeyPill('finishing previous dictation...', 'working', true);
+      return;
+    }
 
     if (isDictating || isStartingDictation || nativeHotkeyActionInFlight) return;
     nativeHotkeyActionInFlight = true;
@@ -1446,6 +1749,11 @@ function triggerDictationToggleFromHotkey() {
   if (isInstallingDictationModel || isDeletingDictationModel) return;
   if (!nativeDictationModelReady) {
     setStatus('Complete setup first, then start dictation.', 'neutral');
+    return;
+  }
+  if (nativeStopRequestInFlight) {
+    queueNativeStartAfterCurrentStop('hotkey');
+    setStatus('Finishing previous dictation... next one will start automatically.', 'working');
     return;
   }
 
@@ -1524,21 +1832,30 @@ function initDictation() {
         setUiMode('loading');
         setStatus('Transcribing captured audio...', 'working');
       } else if (s === 'idle') {
-        const didAppendTranscript = appendTranscriptChunk(payload?.transcript);
+        const didAppendTranscript = nativeStopRequestInFlight
+          ? false
+          : appendTranscriptChunk(payload?.transcript, {
+            source: 'native-event',
+            nativeSessionId: activeNativeSessionId
+          });
         if (isDictating || isStartingDictation || didAppendTranscript) {
           isStartingDictation = false;
           setDictationState(false);
           setUiMode('idle');
         }
+        activeNativeSessionId = null;
         if (didAppendTranscript) {
           setStatus('Dictation captured and transcribed.', 'ok');
         }
       } else if (s === 'error') {
         const details = getErrorMessage(payload?.error);
+        activeNativeSessionId = null;
+        nativeStopRequestInFlight = false;
         isStartingDictation = false;
         setDictationState(false);
         setUiMode('error');
         setStatus(`Could not transcribe dictation: ${details}`, 'error');
+        void maybeStartQueuedNativeDictation();
       }
     }).catch(err => {
       console.error('Failed to register DICTATION_STATE_EVENT listener', err);
@@ -1556,12 +1873,39 @@ function initDictation() {
 
     shouldKeepDictating = false;
     isStartingDictation = false;
+    pendingNativeStartAfterStop = false;
+    pendingNativeStartTrigger = null;
+    nativeSessionIdToIgnore = activeNativeSessionId;
+    rejectNextNativeAppend = false;
+    activeNativeSessionId = null;
+    setDictationState(false);
+    syncControls();
     clearRestartTimer();
-    finalTranscript = '';
-    transcriptInput.value = '';
+    setDraftTranscriptText('');
     setUiMode('idle');
-    setStatus('Transcript cleared.', 'neutral');
+    setStatus('Transcript cleared. Recent dictation history is still available in app state.', 'neutral');
   });
+
+  if (clearDictationHistoryBtn) {
+    clearDictationHistoryBtn.addEventListener('click', () => {
+      dictationHistory = [];
+      renderDictationHistory();
+      setStatus('Recent dictation history cleared.', 'neutral');
+    });
+  }
+
+  if (dictationHistoryListEl) {
+    dictationHistoryListEl.addEventListener('click', (event) => {
+      const target = event.target instanceof Element
+        ? event.target.closest('button[data-history-action][data-history-id]')
+        : null;
+      if (!target) return;
+
+      const historyAction = String(target.dataset.historyAction || '').trim();
+      const historyId = String(target.dataset.historyId || '').trim();
+      void runDictationHistoryAction(historyAction, historyId);
+    });
+  }
 
   if (quickDictationFab) {
     quickDictationFab.addEventListener('click', () => {
@@ -1574,8 +1918,10 @@ function initDictation() {
   }
 
   transcriptInput.addEventListener('input', () => {
-    finalTranscript = transcriptInput.value.trim();
+    currentDraftText = transcriptInput.value;
   });
+
+  renderDictationHistory();
 
   if (onboardingContinueBtn) {
     onboardingContinueBtn.addEventListener('click', () => {
@@ -1672,30 +2018,8 @@ function initDictation() {
       startNativeDesktopDictation('button');
     });
 
-    stopDictationBtn.addEventListener('click', async () => {
-      const tauriInvoke = getTauriInvoke();
-      if (!tauriInvoke || (!isDictating && !isStartingDictation)) return;
-
-      try {
-        const transcriptBeforeStop = finalTranscript;
-        setUiMode('loading');
-        setStatus('Transcribing captured audio...', 'working');
-        const transcript = await tauriInvoke('stop_native_dictation');
-        if (finalTranscript === transcriptBeforeStop) {
-          const didAppendTranscript = appendTranscriptChunk(transcript);
-          if (didAppendTranscript) {
-            setUiMode('idle');
-            setStatus('Dictation captured and transcribed.', 'ok');
-          }
-        }
-      } catch (error) {
-        const details = getErrorMessage(error);
-        setUiMode('error');
-        setStatus(`Could not stop dictation: ${details}`, 'error');
-      } finally {
-        isStartingDictation = false;
-        setDictationState(false);
-      }
+    stopDictationBtn.addEventListener('click', () => {
+      void stopNativeDesktopDictation('button');
     });
 
     window.addEventListener('keydown', handleNativeHoldKeydown, true);
@@ -1733,13 +2057,13 @@ function initDictation() {
       const result = event.results[i];
       const chunk = result[0]?.transcript || '';
       if (result.isFinal) {
-        finalTranscript += chunk.trim() ? `${chunk.trim()} ` : '';
+        appendTranscriptChunk(chunk, { source: 'web' });
       } else {
         interimTranscript += chunk;
       }
     }
 
-    transcriptInput.value = `${finalTranscript}${interimTranscript}`.trim();
+    transcriptInput.value = `${currentDraftText} ${interimTranscript}`.trim();
   };
 
   recognition.onerror = (event) => {
@@ -1810,6 +2134,67 @@ function initDictation() {
 
 async function initApp() {
   await loadDictationOnboarding();
+}
+
+function getDictationTestState() {
+  return {
+    currentDraftText,
+    dictationHistory: dictationHistory.map((entry) => ({ ...entry })),
+    pendingNativeStartAfterStop,
+    pendingNativeStartTrigger,
+    nativeStopRequestInFlight,
+    isDictating,
+    isStartingDictation
+  };
+}
+
+function resetDictationStateForTests() {
+  dictationHistory = [];
+  dictationHistorySeq = 0;
+  isDictating = false;
+  isStartingDictation = false;
+  shouldKeepDictating = false;
+  nativeStopRequestInFlight = false;
+  pendingNativeStartAfterStop = false;
+  pendingNativeStartTrigger = null;
+  activeNativeSessionId = null;
+  nativeSessionIdToIgnore = null;
+  rejectNextNativeAppend = true;
+  nativeSessionSeq = 0;
+  committedNativeSessionIds = new Set();
+  startNativeDesktopDictationOverride = null;
+  setDraftTranscriptText('');
+  renderDictationHistory();
+  syncControls();
+}
+
+if (typeof globalThis !== 'undefined' && globalThis.__DICKTAINT_EXPOSE_TEST_API__) {
+  globalThis.__DICKTAINT_TEST_API__ = {
+    appendTranscriptChunk,
+    runDictationHistoryAction,
+    queueNativeStartAfterCurrentStop,
+    maybeStartQueuedNativeDictation,
+    setDraftTranscriptText,
+    getState: getDictationTestState,
+    resetState: resetDictationStateForTests,
+    setNativeFlags(next = {}) {
+      if (typeof next.nativeStopRequestInFlight === 'boolean') {
+        nativeStopRequestInFlight = next.nativeStopRequestInFlight;
+      }
+      if (typeof next.isDictating === 'boolean') isDictating = next.isDictating;
+      if (typeof next.isStartingDictation === 'boolean') isStartingDictation = next.isStartingDictation;
+      if (typeof next.pendingNativeStartAfterStop === 'boolean') {
+        pendingNativeStartAfterStop = next.pendingNativeStartAfterStop;
+      }
+      if (typeof next.pendingNativeStartTrigger === 'string' || next.pendingNativeStartTrigger === null) {
+        pendingNativeStartTrigger = next.pendingNativeStartTrigger;
+      }
+      syncControls();
+    },
+    setStartNativeDesktopDictationOverride(fn) {
+      startNativeDesktopDictationOverride = typeof fn === 'function' ? fn : null;
+    }
+  };
 }
 
 setUiMode('loading');
