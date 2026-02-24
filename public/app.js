@@ -82,6 +82,7 @@ let nativeStopRequestInFlight = false;
 let pendingNativeStartAfterStop = false;
 let pendingNativeStartTrigger = null;
 let activeNativeSessionId = null;
+let nativeSessionIdToIgnore = null;
 let nativeSessionSeq = 0;
 let committedNativeSessionIds = new Set();
 let startNativeDesktopDictationOverride = null;
@@ -600,7 +601,7 @@ function syncControls() {
     || nativeStopRequestInFlight
     || (!isDictating && !isStartingDictation)
   );
-  clearTranscriptBtn.disabled = lockControls;
+  clearTranscriptBtn.disabled = lockControls || nativeStopRequestInFlight;
 
   if (installDictationModelBtn) {
     installDictationModelBtn.disabled = (
@@ -671,6 +672,20 @@ function setDictationState(dictating) {
   syncControls();
 }
 
+function normalizeNativeDictationError(text) {
+  return String(text || '').trim().toLowerCase();
+}
+
+function isStartConflictDictationError(text) {
+  const normalized = normalizeNativeDictationError(text);
+  return normalized.includes('dictation already running');
+}
+
+function isStopNoopDictationError(text) {
+  const normalized = normalizeNativeDictationError(text);
+  return normalized.includes('dictation is not running');
+}
+
 function nextDictationHistoryId() {
   dictationHistorySeq += 1;
   return `dict-${Date.now()}-${dictationHistorySeq}`;
@@ -696,7 +711,11 @@ function nextNativeSessionId() {
   return `native-${Date.now()}-${nativeSessionSeq}`;
 }
 
-function markNativeSessionCommitted(sessionId) {
+/**
+ * Attempts to record a native session as committed.
+ * Returns false when a duplicate session id is detected; null/empty ids return true.
+ */
+function tryCommitNativeSession(sessionId) {
   if (!sessionId) return true;
   if (committedNativeSessionIds.has(sessionId)) return false;
   committedNativeSessionIds.add(sessionId);
@@ -781,18 +800,8 @@ async function copyTextToClipboard(text) {
     return true;
   }
 
-  const helper = document.createElement('textarea');
-  helper.value = trimmed;
-  helper.setAttribute('readonly', '');
-  helper.style.position = 'fixed';
-  helper.style.opacity = '0';
-  helper.style.pointerEvents = 'none';
-  document.body.appendChild(helper);
-  helper.focus();
-  helper.select();
-  const copied = document.execCommand('copy');
-  helper.remove();
-  return copied;
+  console.warn('Clipboard fallback unavailable: no tauri clipboard API or navigator.clipboard.writeText.');
+  return false;
 }
 
 async function runDictationHistoryAction(historyAction, historyId) {
@@ -885,7 +894,11 @@ function renderDictationHistory() {
 function appendTranscriptChunk(chunk, { source = 'native', nativeSessionId = null } = {}) {
   const trimmed = String(chunk || '').trim();
   if (!trimmed) return false;
-  if (!markNativeSessionCommitted(nativeSessionId)) return false;
+  const isNativeSource = source === 'native' || source === 'native-event';
+  if (isNativeSource && nativeSessionIdToIgnore && (nativeSessionId === null || nativeSessionId === nativeSessionIdToIgnore)) {
+    return false;
+  }
+  if (!tryCommitNativeSession(nativeSessionId)) return false;
   appendToDraftTranscript(trimmed);
   pushDictationHistory(trimmed, source);
   void maybeInsertTranscriptIntoFocusedField(trimmed);
@@ -1541,7 +1554,7 @@ async function openWhisperSetupPage() {
   }
 }
 
-async function startNativeDesktopDictation(trigger = 'button') {
+async function startNativeDesktopDictation(trigger = 'button', shouldRetryOnConflict = true) {
   const tauriInvoke = getTauriInvoke();
   if (!tauriInvoke || !isFocusedMacDesktopMode()) return;
   if (nativeStopRequestInFlight) {
@@ -1558,11 +1571,12 @@ async function startNativeDesktopDictation(trigger = 'button') {
 
   try {
     isStartingDictation = true;
+    nativeSessionIdToIgnore = null;
     syncControls();
     setUiMode('loading');
     setStatus('Opening microphone...', 'working');
-    await tauriInvoke('start_native_dictation');
     activeNativeSessionId = nextNativeSessionId();
+    await tauriInvoke('start_native_dictation');
     isStartingDictation = false;
     setDictationState(true);
     setUiMode('listening');
@@ -1573,8 +1587,27 @@ async function startNativeDesktopDictation(trigger = 'button') {
     }
   } catch (error) {
     const details = getErrorMessage(error);
+    if (shouldRetryOnConflict && isStartConflictDictationError(details)) {
+      setStatus('Recovering from stale dictation state...', 'working');
+      nativeSessionIdToIgnore = null;
+      activeNativeSessionId = null;
+      isStartingDictation = false;
+      setDictationState(false);
+      try {
+        await tauriInvoke('cancel_native_dictation');
+        return startNativeDesktopDictation(trigger, false);
+      } catch (recoverError) {
+        isStartingDictation = false;
+        setDictationState(false);
+        setUiMode('error');
+        setStatus(`Could not recover dictation session: ${getErrorMessage(recoverError)}`, 'error');
+        return;
+      }
+    }
+
     isStartingDictation = false;
     setDictationState(false);
+    activeNativeSessionId = null;
     setUiMode('error');
     setStatus(`Could not start dictation: ${details}`, 'error');
   }
@@ -1582,7 +1615,7 @@ async function startNativeDesktopDictation(trigger = 'button') {
 
 async function stopNativeDesktopDictation(trigger = 'button') {
   const tauriInvoke = getTauriInvoke();
-  if (!tauriInvoke || (!isDictating && !isStartingDictation && !nativeStopRequestInFlight)) return;
+  if (!tauriInvoke || (!isDictating && !isStartingDictation)) return;
   if (nativeStopRequestInFlight) return;
 
   nativeStopRequestInFlight = true;
@@ -1607,11 +1640,16 @@ async function stopNativeDesktopDictation(trigger = 'button') {
     }
   } catch (error) {
     const details = getErrorMessage(error);
+    if (isStopNoopDictationError(details)) {
+      setUiMode('idle');
+      activeNativeSessionId = null;
+      setStatus('No active dictation session to stop.', 'neutral');
+      return;
+    }
     setUiMode('error');
     setStatus(`Could not stop dictation: ${details}`, 'error');
   } finally {
     nativeStopRequestInFlight = false;
-    activeNativeSessionId = null;
     isStartingDictation = false;
     setDictationState(false);
     void maybeStartQueuedNativeDictation();
@@ -1777,7 +1815,6 @@ function initDictation() {
     tauriEventApi.listen(DICTATION_STATE_EVENT, ({ payload }) => {
       const s = payload?.state ?? 'idle';
       if (s === 'listening') {
-        if (!activeNativeSessionId) activeNativeSessionId = nextNativeSessionId();
         isStartingDictation = false;
         setDictationState(true);
         setUiMode('listening');
@@ -1828,9 +1865,9 @@ function initDictation() {
 
     shouldKeepDictating = false;
     isStartingDictation = false;
-    nativeStopRequestInFlight = false;
     pendingNativeStartAfterStop = false;
     pendingNativeStartTrigger = null;
+    nativeSessionIdToIgnore = activeNativeSessionId;
     activeNativeSessionId = null;
     setDictationState(false);
     syncControls();
@@ -2103,7 +2140,6 @@ function getDictationTestState() {
 }
 
 function resetDictationStateForTests() {
-  currentDraftText = '';
   dictationHistory = [];
   dictationHistorySeq = 0;
   isDictating = false;
@@ -2113,6 +2149,7 @@ function resetDictationStateForTests() {
   pendingNativeStartAfterStop = false;
   pendingNativeStartTrigger = null;
   activeNativeSessionId = null;
+  nativeSessionIdToIgnore = null;
   nativeSessionSeq = 0;
   committedNativeSessionIds = new Set();
   startNativeDesktopDictationOverride = null;
