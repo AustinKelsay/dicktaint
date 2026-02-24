@@ -83,6 +83,7 @@ let pendingNativeStartAfterStop = false;
 let pendingNativeStartTrigger = null;
 let activeNativeSessionId = null;
 let nativeSessionIdToIgnore = null;
+let rejectNextNativeAppend = false;
 let nativeSessionSeq = 0;
 let committedNativeSessionIds = new Set();
 let startNativeDesktopDictationOverride = null;
@@ -838,6 +839,7 @@ async function runDictationHistoryAction(historyAction, historyId) {
     }
   }
 
+  setStatus(`Unknown history action: ${action || '(empty)'}.`, 'error');
   return false;
 }
 
@@ -895,11 +897,15 @@ function appendTranscriptChunk(chunk, { source = 'native', nativeSessionId = nul
   const trimmed = String(chunk || '').trim();
   if (!trimmed) return false;
   const isNativeSource = source === 'native' || source === 'native-event';
+  if (isNativeSource && rejectNextNativeAppend) {
+    return false;
+  }
   if (isNativeSource && nativeSessionIdToIgnore && (nativeSessionId === null || nativeSessionId === nativeSessionIdToIgnore)) {
     return false;
   }
   if (!tryCommitNativeSession(nativeSessionId)) return false;
   appendToDraftTranscript(trimmed);
+  rejectNextNativeAppend = false;
   pushDictationHistory(trimmed, source);
   void maybeInsertTranscriptIntoFocusedField(trimmed);
   return true;
@@ -1572,6 +1578,7 @@ async function startNativeDesktopDictation(trigger = 'button', shouldRetryOnConf
   try {
     isStartingDictation = true;
     nativeSessionIdToIgnore = null;
+    rejectNextNativeAppend = true;
     syncControls();
     setUiMode('loading');
     setStatus('Opening microphone...', 'working');
@@ -1590,6 +1597,7 @@ async function startNativeDesktopDictation(trigger = 'button', shouldRetryOnConf
     if (shouldRetryOnConflict && isStartConflictDictationError(details)) {
       setStatus('Recovering from stale dictation state...', 'working');
       nativeSessionIdToIgnore = null;
+      rejectNextNativeAppend = true;
       activeNativeSessionId = null;
       isStartingDictation = false;
       setDictationState(false);
@@ -1868,6 +1876,7 @@ function initDictation() {
     pendingNativeStartAfterStop = false;
     pendingNativeStartTrigger = null;
     nativeSessionIdToIgnore = activeNativeSessionId;
+    rejectNextNativeAppend = false;
     activeNativeSessionId = null;
     setDictationState(false);
     syncControls();
@@ -2150,6 +2159,7 @@ function resetDictationStateForTests() {
   pendingNativeStartTrigger = null;
   activeNativeSessionId = null;
   nativeSessionIdToIgnore = null;
+  rejectNextNativeAppend = true;
   nativeSessionSeq = 0;
   committedNativeSessionIds = new Set();
   startNativeDesktopDictationOverride = null;

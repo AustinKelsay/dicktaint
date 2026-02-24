@@ -2354,11 +2354,14 @@ fn insert_text_into_focused_field(
     state: State<'_, LocalModelState>,
     text: String,
 ) -> Result<(), String> {
-    let settings = state
-        .settings
-        .lock()
-        .map_err(|_| "Failed to lock local model settings".to_string())?;
-    if !focused_field_insert_enabled(&settings) {
+    let focused_field_insert_enabled = {
+        let settings = state
+            .settings
+            .lock()
+            .map_err(|_| "Failed to lock local model settings".to_string())?;
+        focused_field_insert_enabled(&settings)
+    };
+    if !focused_field_insert_enabled {
         return Err(
             "Focused-field insertion is disabled in settings. Enable \"Dictate Into Focused Field\" to use this command."
                 .to_string(),
