@@ -720,7 +720,16 @@ async function maybeStartQueuedNativeDictation() {
   pendingNativeStartAfterStop = false;
   pendingNativeStartTrigger = null;
   const startFn = startNativeDesktopDictationOverride || startNativeDesktopDictation;
-  await startFn(trigger);
+  try {
+    await startFn(trigger);
+  } catch (error) {
+    const details = getErrorMessage(error);
+    isStartingDictation = false;
+    setDictationState(false);
+    setUiMode('error');
+    setStatus(`Could not start dictation: ${details}`, 'error');
+    console.error('Could not start queued dictation', error);
+  }
 }
 
 function setDraftTranscriptText(text) {
@@ -1577,9 +1586,7 @@ async function stopNativeDesktopDictation(trigger = 'button') {
       source: 'native',
       nativeSessionId: sessionId
     });
-    if (didAppendTranscript) {
-      setUiMode('idle');
-    }
+    setUiMode('idle');
     if (trigger === 'hotkey-hold' || trigger === 'hotkey') {
       setStatus('Dictation captured from fn hold and transcribed.', 'ok');
     } else {
@@ -1790,6 +1797,7 @@ function initDictation() {
         setDictationState(false);
         setUiMode('error');
         setStatus(`Could not transcribe dictation: ${details}`, 'error');
+        void maybeStartQueuedNativeDictation();
       }
     }).catch(err => {
       console.error('Failed to register DICTATION_STATE_EVENT listener', err);
