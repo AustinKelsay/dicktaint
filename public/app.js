@@ -1578,7 +1578,7 @@ async function startNativeDesktopDictation(trigger = 'button', shouldRetryOnConf
   try {
     isStartingDictation = true;
     nativeSessionIdToIgnore = null;
-    rejectNextNativeAppend = true;
+    rejectNextNativeAppend = false;
     syncControls();
     setUiMode('loading');
     setStatus('Opening microphone...', 'working');
@@ -1597,7 +1597,7 @@ async function startNativeDesktopDictation(trigger = 'button', shouldRetryOnConf
     if (shouldRetryOnConflict && isStartConflictDictationError(details)) {
       setStatus('Recovering from stale dictation state...', 'working');
       nativeSessionIdToIgnore = null;
-      rejectNextNativeAppend = true;
+      rejectNextNativeAppend = false;
       activeNativeSessionId = null;
       isStartingDictation = false;
       setDictationState(false);
@@ -2159,7 +2159,7 @@ function resetDictationStateForTests() {
   pendingNativeStartTrigger = null;
   activeNativeSessionId = null;
   nativeSessionIdToIgnore = null;
-  rejectNextNativeAppend = true;
+  rejectNextNativeAppend = false;
   nativeSessionSeq = 0;
   committedNativeSessionIds = new Set();
   startNativeDesktopDictationOverride = null;
