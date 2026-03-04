@@ -121,15 +121,45 @@ Hotkey setup (desktop):
 - `Disable Hotkey` removes the shortcut.
 - Hotkey config is per-device and persisted in `$HOME/.dicktaint/dictation-settings.json`.
 
-Desktop build (currently configured for compile checks, bundling disabled):
+Desktop build (local/manual):
 
 ```bash
 bun run tauri:build
 ```
 
-To actually ship sidecar binaries, place platform builds in:
+To ship desktop builds, place platform sidecar binaries in:
 
 `src-tauri/binaries/` (see `src-tauri/binaries/README.md`).
+
+## Simple GitHub release process (macOS)
+
+This repo now includes a GitHub Actions workflow at `.github/workflows/release-macos.yml`.
+
+What it does:
+- runs on tag push (`v*`)
+- builds Tauri macOS bundles (`.dmg` + `.app.tar.gz`)
+- creates a GitHub Release and uploads artifacts + `SHA256SUMS.txt`
+
+How to release:
+
+1. Make sure `main` is green and pushed.
+2. Create and push a version tag:
+   ```bash
+   git checkout main
+   git pull
+   git tag v0.1.1
+   git push origin v0.1.1
+   ```
+3. Wait for the `Release macOS App` workflow to finish.
+4. Open GitHub Releases and share the uploaded `.dmg` with users.
+
+User install flow:
+- download `.dmg` from Releases
+- open and drag `dicktaint.app` to Applications
+- launch the app
+
+Current limitation:
+- this automated release is macOS-first. Non-macOS sidecar binaries in this repo are still placeholders.
 
 ## Mobile (Tauri iOS / iPhone)
 
