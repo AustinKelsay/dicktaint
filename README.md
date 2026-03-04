@@ -137,7 +137,7 @@ This repo now includes a GitHub Actions workflow at `.github/workflows/release-m
 
 What it does:
 - runs on tag push (`v*`)
-- builds Tauri macOS bundles (`.dmg` + `.app.tar.gz`)
+- builds Tauri macOS bundles for both Apple Silicon and Intel (`.dmg` + `.app.tar.gz`)
 - creates a GitHub Release and uploads artifacts + `SHA256SUMS.txt`
 
 How to release:
@@ -159,7 +159,7 @@ User install flow:
 - launch the app
 
 Current limitation:
-- this automated release is macOS-first. Non-macOS sidecar binaries in this repo are still placeholders.
+- this automated release is macOS-first (Apple Silicon + Intel). Non-macOS sidecar binaries in this repo are still placeholders.
 
 ## Mobile (Tauri iOS / iPhone)
 
