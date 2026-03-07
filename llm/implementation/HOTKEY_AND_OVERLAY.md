@@ -56,7 +56,7 @@ Frontend behavior:
 Permission expectations:
 
 - Input Monitoring and Accessibility may be required for global key monitoring
-- Accessibility/Automation may be required for focused-field paste (`System Events` keystroke path)
+- Accessibility is required for focused-field paste; the app now uses native pasteboard + key event posting instead of `System Events`
 
 Dependency constraint:
 

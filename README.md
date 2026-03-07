@@ -87,7 +87,7 @@ Notes:
 - MVP background behavior: closing the desktop window now hides it instead of quitting, so dictation state can stay running in the background process.
 - App launches visible by default. Optional: set `DICKTAINT_START_HIDDEN=1` if you want hidden startup behavior.
 - MVP hold-to-talk hotkey (macOS): hold `fn` (or fallback `F19`) to record, then release to stop and transcribe, even while the app window is hidden.
-- The onboarding/settings flow now shows per-machine setup + permission guidance (microphone, Input Monitoring, Accessibility/Automation) so Intel and Apple silicon Macs surface the same runtime expectations.
+- The onboarding/settings flow now shows per-machine setup + permission guidance (microphone, Input Monitoring, Accessibility) so Intel and Apple silicon Macs surface the same runtime expectations.
 - A small bottom-center hotkey pill now renders as a native macOS transparent overlay window (outside the main app window), with rounded edges and quick dictation state feedback that follows the active hotkey mode (`Fn` hold vs custom toggle shortcut).
 - If hold-to-talk hotkey capture does not fire, allow Input Monitoring/Accessibility for the app (or Terminal during `tauri:dev`) and relaunch.
 - Desktop onboarding is local-first and model-first: verify `whisper-cli`, inspect hardware, then download/select one local Whisper model per device.
@@ -116,7 +116,7 @@ Hotkey setup (desktop):
 - In `Dictation Hotkey`, choose a preset, click `Record`, or type your own combo, then click `Save Hotkey`.
 - Optional: enable `Dictate Into Focused Field` to paste completed transcripts into the currently focused field in the frontmost app (macOS desktop).
 - Focused-field insertion runs when dictation finalizes while another app is focused; the transcript box inside dicktaint is still updated.
-- If paste fails, allow Accessibility/Automation permissions for the app (or Terminal during `tauri:dev`) and retry.
+- If paste fails, allow Accessibility for the app (or Terminal during `tauri:dev`) and retry. dicktaint now opens the Accessibility settings page automatically when that permission is missing.
 - The saved combo is registered as a global hotkey while the desktop app is running. On macOS, `Fn` is global when Input Monitoring permissions allow it, and otherwise the UI now calls out that it has fallen back to focused-window behavior until that permission is granted.
 - `Reset Default` sets `Fn` on macOS and `CmdOrCtrl+Shift+D` on other desktop platforms.
 - `Disable Hotkey` removes the shortcut.

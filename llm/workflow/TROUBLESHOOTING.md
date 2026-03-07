@@ -78,7 +78,7 @@ Out of scope:
 
 1. enable `Dictate Into Focused Field` in app settings
 2. ensure target app text field is focused when dictation completes
-3. grant Accessibility and Automation permission for app/Terminal (`System Events`)
+3. grant Accessibility permission for the app/Terminal and let dicktaint reopen the macOS Accessibility settings page if permission is missing
 4. retry with a plain text field to rule out app-specific input restrictions
 
 Escalation payload to capture:

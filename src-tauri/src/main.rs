@@ -1,5 +1,13 @@
 use cpal::traits::{DeviceTrait, HostTrait, StreamTrait};
 use cpal::{SampleFormat, Stream};
+#[cfg(target_os = "macos")]
+use objc2::rc::Retained;
+#[cfg(target_os = "macos")]
+use objc2::runtime::ProtocolObject;
+#[cfg(target_os = "macos")]
+use objc2_app_kit::{NSPasteboard, NSPasteboardItem, NSPasteboardWriting};
+#[cfg(target_os = "macos")]
+use objc2_foundation::{NSArray, NSString};
 use serde::{Deserialize, Serialize};
 use std::collections::HashSet;
 #[cfg(target_os = "macos")]
@@ -285,6 +293,8 @@ type CGEventFlags = u64;
 #[cfg(target_os = "macos")]
 const CG_EVENT_TAP_LOCATION_SESSION: u32 = 1;
 #[cfg(target_os = "macos")]
+const CG_EVENT_TAP_LOCATION_HID: u32 = 0;
+#[cfg(target_os = "macos")]
 const CG_EVENT_TAP_PLACEMENT_HEAD_INSERT: u32 = 0;
 #[cfg(target_os = "macos")]
 const CG_EVENT_TAP_OPTION_LISTEN_ONLY: u32 = 1;
@@ -292,9 +302,15 @@ const CG_EVENT_TAP_OPTION_LISTEN_ONLY: u32 = 1;
 const CG_EVENT_TYPE_FLAGS_CHANGED: u32 = 12;
 
 #[cfg(target_os = "macos")]
+const MACOS_COMMAND_FLAG_MASK: CGEventFlags = 1 << 20;
+#[cfg(target_os = "macos")]
 const MACOS_FN_FLAG_MASK: CGEventFlags = 1 << 23;
 #[cfg(target_os = "macos")]
 const MACOS_NON_FN_MODIFIER_MASK: CGEventFlags = (1 << 17) | (1 << 18) | (1 << 19) | (1 << 20);
+#[cfg(target_os = "macos")]
+const KEYCODE_COMMAND: u16 = 0x37;
+#[cfg(target_os = "macos")]
+const KEYCODE_V: u16 = 0x09;
 
 #[cfg(target_os = "macos")]
 type MacFnEventTapCallback =
@@ -313,6 +329,13 @@ extern "C" {
     ) -> CFMachPortRef;
     fn CGEventTapEnable(tap: CFMachPortRef, enable: bool);
     fn CGEventGetFlags(event: CGEventRef) -> CGEventFlags;
+    fn CGEventCreateKeyboardEvent(
+        source: *const c_void,
+        virtual_key: u16,
+        key_down: bool,
+    ) -> CGEventRef;
+    fn CGEventSetFlags(event: CGEventRef, flags: CGEventFlags);
+    fn CGEventPost(tap: u32, event: CGEventRef);
 }
 
 #[cfg(target_os = "macos")]
@@ -331,6 +354,12 @@ extern "C" {
     fn CFRunLoopAddSource(rl: CFRunLoopRef, source: CFRunLoopSourceRef, mode: CFStringRef);
     fn CFRunLoopRemoveSource(rl: CFRunLoopRef, source: CFRunLoopSourceRef, mode: CFStringRef);
     fn CFRelease(cf: *const c_void);
+}
+
+#[cfg(target_os = "macos")]
+#[link(name = "ApplicationServices", kind = "framework")]
+extern "C" {
+    fn AXIsProcessTrusted() -> bool;
 }
 
 #[cfg(target_os = "macos")]
@@ -501,6 +530,8 @@ struct DictationOnboardingPayload {
     dictation_trigger_status: String,
     dictation_trigger_permission_hint: Option<String>,
     focused_field_insert_enabled: bool,
+    focused_field_insert_permission_granted: bool,
+    focused_field_insert_permission_status: String,
     whisper_cli_available: bool,
     whisper_cli_path: String,
     models_dir: String,
@@ -520,6 +551,14 @@ struct DictationTriggerPayload {
 #[derive(Serialize)]
 struct FocusedFieldInsertPayload {
     enabled: bool,
+    permission_granted: bool,
+    permission_status: String,
+}
+
+#[derive(Clone)]
+struct FocusedFieldInsertPermissionStatus {
+    granted: bool,
+    status: String,
 }
 
 #[derive(Serialize)]
@@ -807,6 +846,73 @@ fn resolve_effective_dictation_trigger(settings: &LocalSettings) -> Option<Strin
 
 fn focused_field_insert_enabled(settings: &LocalSettings) -> bool {
     matches!(settings.focused_field_insert_enabled, Some(true))
+}
+
+#[cfg(target_os = "macos")]
+fn macos_accessibility_permission_granted() -> bool {
+    unsafe { AXIsProcessTrusted() }
+}
+
+#[cfg(not(target_os = "macos"))]
+fn macos_accessibility_permission_granted() -> bool {
+    false
+}
+
+#[cfg(target_os = "macos")]
+fn open_accessibility_settings() -> Result<(), String> {
+    let status = Command::new("open")
+        .arg("x-apple.systempreferences:com.apple.preference.security?Privacy_Accessibility")
+        .status()
+        .map_err(|e| format!("Failed to open macOS Accessibility settings: {e}"))?;
+    if status.success() {
+        Ok(())
+    } else {
+        Err("Failed to open macOS Accessibility settings.".to_string())
+    }
+}
+
+fn focused_field_insert_permission_status(
+    enabled: bool,
+    prompt_if_missing: bool,
+) -> FocusedFieldInsertPermissionStatus {
+    #[cfg(target_os = "macos")]
+    {
+        let granted = macos_accessibility_permission_granted();
+        if granted {
+            return FocusedFieldInsertPermissionStatus {
+                granted: true,
+                status: if enabled {
+                    "Accessibility permission granted. Finished transcripts can be pasted into the focused field of other apps."
+                        .to_string()
+                } else {
+                    "Accessibility permission granted. Enable focused-field insertion to paste dictated text into other apps."
+                        .to_string()
+                },
+            };
+        }
+
+        if prompt_if_missing {
+            if let Err(error) = open_accessibility_settings() {
+                log::warn!("Failed to open Accessibility settings: {error}");
+            }
+        }
+
+        return FocusedFieldInsertPermissionStatus {
+            granted: false,
+            status: "Focused-field insertion needs Accessibility permission. Opened System Settings > Privacy & Security > Accessibility. Allow dicktaint, then retry the paste."
+                .to_string(),
+        };
+    }
+
+    #[allow(unreachable_code)]
+    FocusedFieldInsertPermissionStatus {
+        granted: false,
+        status: if enabled {
+            "Focused-field insertion is currently supported on macOS desktop only.".to_string()
+        } else {
+            "Focused-field insertion is unavailable on this platform.".to_string()
+        },
+    }
 }
 
 impl Default for TriggerRuntimeDetails {
@@ -1968,6 +2074,8 @@ fn build_onboarding_payload(
     let detected_whisper_cli_path = detect_whisper_cli_path(&configured_whisper_cli_path);
     let whisper_cli_available = detected_whisper_cli_path.is_some();
     let onboarding_required = !selected_model_exists || !whisper_cli_available;
+    let focused_field_permission =
+        focused_field_insert_permission_status(focused_field_insert_enabled(&settings), false);
 
     Ok(DictationOnboardingPayload {
         onboarding_required,
@@ -1980,6 +2088,8 @@ fn build_onboarding_payload(
         dictation_trigger_status: trigger_runtime.status,
         dictation_trigger_permission_hint: trigger_runtime.permission_hint,
         focused_field_insert_enabled: focused_field_insert_enabled(&settings),
+        focused_field_insert_permission_granted: focused_field_permission.granted,
+        focused_field_insert_permission_status: focused_field_permission.status,
         whisper_cli_available,
         whisper_cli_path: detected_whisper_cli_path.unwrap_or(configured_whisper_cli_path),
         models_dir: model_state.models_dir.to_string_lossy().to_string(),
@@ -2523,6 +2633,7 @@ fn set_focused_field_insert_enabled(
     enabled: bool,
     model_state: State<'_, LocalModelState>,
 ) -> Result<FocusedFieldInsertPayload, String> {
+    let permission = focused_field_insert_permission_status(enabled, enabled);
     let settings_path = model_state.settings_path.clone();
     let mut settings = model_state
         .settings
@@ -2536,7 +2647,90 @@ fn set_focused_field_insert_enabled(
     }
     Ok(FocusedFieldInsertPayload {
         enabled: focused_field_insert_enabled(&settings),
+        permission_granted: permission.granted,
+        permission_status: permission.status,
     })
+}
+
+#[cfg(target_os = "macos")]
+fn write_text_to_general_pasteboard(
+    text: &str,
+) -> Result<
+    (
+        Retained<NSPasteboard>,
+        Option<Vec<Retained<NSPasteboardItem>>>,
+    ),
+    String,
+> {
+    let pasteboard = NSPasteboard::generalPasteboard();
+    let snapshot = pasteboard.pasteboardItems().map(|items| items.to_vec());
+
+    let ns_text = NSString::from_str(text);
+    let object = ProtocolObject::from_ref(&*ns_text);
+    let objects = NSArray::from_slice(&[object]);
+
+    let _ = pasteboard.clearContents();
+    if !pasteboard.writeObjects(&objects) {
+        return Err("Failed to place dictated text on the macOS pasteboard.".to_string());
+    }
+
+    Ok((pasteboard, snapshot))
+}
+
+#[cfg(target_os = "macos")]
+fn restore_general_pasteboard(
+    pasteboard: &NSPasteboard,
+    snapshot: Option<Vec<Retained<NSPasteboardItem>>>,
+) -> Result<(), String> {
+    let _ = pasteboard.clearContents();
+
+    let Some(items) = snapshot else {
+        return Ok(());
+    };
+
+    if items.is_empty() {
+        return Ok(());
+    }
+
+    let objects: Vec<&ProtocolObject<dyn NSPasteboardWriting>> = items
+        .iter()
+        .map(|item| ProtocolObject::from_ref(&**item))
+        .collect();
+    let object_array = NSArray::from_slice(&objects);
+    if !pasteboard.writeObjects(&object_array) {
+        return Err(
+            "Failed to restore the previous macOS pasteboard contents after dictation paste."
+                .to_string(),
+        );
+    }
+
+    Ok(())
+}
+
+#[cfg(target_os = "macos")]
+fn post_keyboard_event(keycode: u16, key_down: bool, flags: CGEventFlags) -> Result<(), String> {
+    let event = unsafe { CGEventCreateKeyboardEvent(std::ptr::null(), keycode, key_down) };
+    if event.is_null() {
+        return Err(format!(
+            "Failed to create macOS keyboard event for keycode {keycode}."
+        ));
+    }
+
+    unsafe {
+        CGEventSetFlags(event, flags);
+        CGEventPost(CG_EVENT_TAP_LOCATION_HID, event);
+        CFRelease(event as *const c_void);
+    }
+    Ok(())
+}
+
+#[cfg(target_os = "macos")]
+fn post_command_v_paste() -> Result<(), String> {
+    post_keyboard_event(KEYCODE_COMMAND, true, MACOS_COMMAND_FLAG_MASK)?;
+    post_keyboard_event(KEYCODE_V, true, MACOS_COMMAND_FLAG_MASK)?;
+    post_keyboard_event(KEYCODE_V, false, MACOS_COMMAND_FLAG_MASK)?;
+    post_keyboard_event(KEYCODE_COMMAND, false, 0)?;
+    Ok(())
 }
 
 #[cfg(target_os = "macos")]
@@ -2546,53 +2740,25 @@ fn insert_text_into_focused_field_impl(text: &str) -> Result<(), String> {
         return Ok(());
     }
 
-    let script_lines = [
-        "on run argv",
-        "  if (count of argv) is 0 then return",
-        "  set dictatedText to item 1 of argv",
-        "  if dictatedText is \"\" then return",
-        "  set priorClipboard to the clipboard",
-        "  try",
-        "    set the clipboard to dictatedText",
-        "    tell application \"System Events\"",
-        "      keystroke \"v\" using {command down}",
-        "    end tell",
-        "    delay 0.05",
-        "  on error errMsg number errNum",
-        "    try",
-        "      set the clipboard to priorClipboard",
-        "    end try",
-        "    error errMsg number errNum",
-        "  end try",
-        "  set the clipboard to priorClipboard",
-        "end run",
-    ];
-
-    let mut command = Command::new("osascript");
-    for line in script_lines {
-        command.arg("-e").arg(line);
-    }
-    command.arg(trimmed);
-
-    let output = command.output().map_err(|e| {
-        format!("Failed to launch macOS text insertion automation (osascript): {e}")
-    })?;
-    if output.status.success() {
-        return Ok(());
+    let permission = focused_field_insert_permission_status(true, true);
+    if !permission.granted {
+        return Err(permission.status);
     }
 
-    let stderr = String::from_utf8_lossy(&output.stderr).trim().to_string();
-    let stdout = String::from_utf8_lossy(&output.stdout).trim().to_string();
-    let detail = if !stderr.is_empty() {
-        stderr
-    } else if !stdout.is_empty() {
-        stdout
-    } else {
-        "no output".to_string()
-    };
-    Err(format!(
-        "Focused field insertion failed. Allow Accessibility/Automation for this app (or Terminal during tauri:dev) and retry. Details: {detail}"
-    ))
+    let (pasteboard, snapshot) = write_text_to_general_pasteboard(trimmed)?;
+    let paste_result = post_command_v_paste();
+    thread::sleep(Duration::from_millis(80));
+    let restore_result = restore_general_pasteboard(&pasteboard, snapshot);
+
+    if let Err(error) = restore_result {
+        log::warn!("{error}");
+    }
+
+    paste_result.map_err(|error| {
+        format!(
+            "Focused field insertion failed while sending native paste keystrokes. Allow Accessibility for dicktaint in System Settings > Privacy & Security > Accessibility, then retry. Details: {error}"
+        )
+    })
 }
 
 #[cfg(not(target_os = "macos"))]

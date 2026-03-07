@@ -223,6 +223,8 @@ function createMockDom({ nativeDesktop = false, onboardingPayload = null } = {})
               dictation_trigger_status: 'Hold Fn anywhere to dictate, then release to transcribe.',
               dictation_trigger_permission_hint: null,
               focused_field_insert_enabled: false,
+              focused_field_insert_permission_granted: true,
+              focused_field_insert_permission_status: 'Accessibility permission granted. Finished transcripts can be pasted into the focused field of other apps.',
               whisper_cli_available: true,
               whisper_cli_path: '/usr/local/bin/whisper-cli',
               models_dir: '/tmp/models',

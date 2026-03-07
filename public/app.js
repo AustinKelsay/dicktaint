@@ -86,6 +86,8 @@ let dictationTriggerMode = 'disabled';
 let dictationTriggerStatus = 'Hotkey disabled.';
 let dictationTriggerPermissionHint = '';
 let focusedFieldInsertEnabled = false;
+let focusedFieldInsertPermissionGranted = false;
+let focusedFieldInsertPermissionStatus = 'Focused-field insertion is disabled.';
 let isSavingFocusedFieldInsertSetting = false;
 let lastHotkeyToggleAtMs = 0;
 let nativeHotkeyActionInFlight = false;
@@ -450,10 +452,13 @@ function renderPermissionGuidance() {
   }
 
   items.push({
-    tone: focusedFieldInsertEnabled ? 'warn' : 'neutral',
+    tone: focusedFieldInsertEnabled
+      ? (focusedFieldInsertPermissionGranted ? 'ok' : 'warn')
+      : 'neutral',
     text: focusedFieldInsertEnabled
-      ? 'Accessibility + Automation: required for Dictate Into Focused Field. Allow dicktaint or Terminal (during tauri:dev) to control System Events.'
-      : 'Accessibility + Automation: only needed if you enable Dictate Into Focused Field.'
+      ? (focusedFieldInsertPermissionStatus
+        || 'Accessibility is required for Dictate Into Focused Field.')
+      : 'Accessibility is only needed if you enable Dictate Into Focused Field.'
   });
 
   dictationPermissionListEl.innerHTML = '';
@@ -1286,16 +1291,39 @@ function applyFocusedFieldInsertPayload(payload) {
       ?? payload?.focusedFieldInsertEnabled
       ?? payload?.enabled
   );
+  focusedFieldInsertPermissionGranted = Boolean(
+    payload?.focused_field_insert_permission_granted
+      ?? payload?.focusedFieldInsertPermissionGranted
+      ?? payload?.permission_granted
+  );
+  focusedFieldInsertPermissionStatus = String(
+    (
+      payload?.focused_field_insert_permission_status
+      ?? payload?.focusedFieldInsertPermissionStatus
+      ?? payload?.permission_status
+    ) || ''
+  ).trim();
   focusedFieldInsertEnabled = enabled;
 
   if (focusedFieldInsertToggleEl) {
     focusedFieldInsertToggleEl.checked = enabled;
   }
 
-  if (enabled) {
-    setFocusedFieldInsertStatus('Focused-field insertion is enabled.', 'ok');
+  if (enabled && focusedFieldInsertPermissionGranted) {
+    setFocusedFieldInsertStatus(
+      focusedFieldInsertPermissionStatus || 'Focused-field insertion is enabled.',
+      'ok'
+    );
+  } else if (enabled) {
+    setFocusedFieldInsertStatus(
+      focusedFieldInsertPermissionStatus || 'Focused-field insertion needs Accessibility permission.',
+      'error'
+    );
   } else {
-    setFocusedFieldInsertStatus('Focused-field insertion is disabled.', 'neutral');
+    setFocusedFieldInsertStatus(
+      focusedFieldInsertPermissionStatus || 'Focused-field insertion is disabled.',
+      'neutral'
+    );
   }
   syncControls();
 }
@@ -1311,9 +1339,11 @@ async function saveFocusedFieldInsertSetting(enabled) {
     applyFocusedFieldInsertPayload(payload);
     setStatus(
       focusedFieldInsertEnabled
-        ? 'Focused-field insertion enabled.'
+        ? (focusedFieldInsertPermissionGranted
+          ? 'Focused-field insertion enabled.'
+          : focusedFieldInsertPermissionStatus)
         : 'Focused-field insertion disabled.',
-      'ok'
+      focusedFieldInsertEnabled && !focusedFieldInsertPermissionGranted ? 'error' : 'ok'
     );
   } catch (error) {
     const details = getErrorMessage(error);
@@ -1421,6 +1451,8 @@ async function loadDictationOnboarding({ quietStatus = false } = {}) {
     dictationTriggerStatus = 'Hotkey disabled.';
     dictationTriggerPermissionHint = '';
     focusedFieldInsertEnabled = false;
+    focusedFieldInsertPermissionGranted = false;
+    focusedFieldInsertPermissionStatus = 'Focused-field insertion is disabled.';
     isSavingFocusedFieldInsertSetting = false;
     setFocusedFieldInsertStatus('Focused-field insertion is disabled.', 'neutral');
     setSetupScreenMode('onboarding');
@@ -1447,6 +1479,8 @@ async function loadDictationOnboarding({ quietStatus = false } = {}) {
     currentOnboarding = null;
     currentDeviceProfile = { os: detectDesktopOs(), architecture: navigator.platform || '' };
     focusedFieldInsertEnabled = false;
+    focusedFieldInsertPermissionGranted = false;
+    focusedFieldInsertPermissionStatus = 'Focused-field insertion is unavailable on this platform.';
     isSavingFocusedFieldInsertSetting = false;
     dictationTriggerMode = 'disabled';
     dictationTriggerStatus = 'Hotkey unavailable on this platform.';
@@ -1486,6 +1520,8 @@ async function loadDictationOnboarding({ quietStatus = false } = {}) {
     dictationTriggerStatus = 'Desktop bridge offline.';
     dictationTriggerPermissionHint = '';
     focusedFieldInsertEnabled = false;
+    focusedFieldInsertPermissionGranted = false;
+    focusedFieldInsertPermissionStatus = 'Focused-field insertion is unavailable while desktop bridge is offline.';
     isSavingFocusedFieldInsertSetting = false;
     setFocusedFieldInsertStatus('Focused-field insertion is unavailable while desktop bridge is offline.', 'neutral');
     setSetupScreenMode('onboarding');
@@ -1586,6 +1622,8 @@ async function loadDictationOnboarding({ quietStatus = false } = {}) {
     dictationTriggerStatus = 'Could not load hotkey state.';
     dictationTriggerPermissionHint = '';
     focusedFieldInsertEnabled = false;
+    focusedFieldInsertPermissionGranted = false;
+    focusedFieldInsertPermissionStatus = 'Focused-field insertion is unavailable while setup is loading.';
     isSavingFocusedFieldInsertSetting = false;
     setFocusedFieldInsertStatus('Focused-field insertion is unavailable while setup is loading.', 'neutral');
     setSetupScreenMode('onboarding');
@@ -2435,6 +2473,8 @@ function resetDictationStateForTests() {
   dictationTriggerMode = 'disabled';
   dictationTriggerStatus = 'Hotkey disabled.';
   dictationTriggerPermissionHint = '';
+  focusedFieldInsertPermissionGranted = false;
+  focusedFieldInsertPermissionStatus = 'Focused-field insertion is disabled.';
   savedDictationHotkey = null;
   pendingDictationHotkey = '';
   activeHotkeySpec = null;

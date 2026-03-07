@@ -55,7 +55,7 @@ Command payload notes:
 - `DictationOnboardingPayload` includes `focused_field_insert_enabled: bool`
 - `DictationOnboardingPayload` also includes `dictation_trigger_mode`, `dictation_trigger_status`, and `dictation_trigger_permission_hint`
 - `DictationTriggerPayload` includes `trigger`, `default_trigger`, `trigger_mode`, `trigger_status`, and `trigger_permission_hint`
-- `FocusedFieldInsertPayload` includes `enabled`
+- `FocusedFieldInsertPayload` includes `enabled`, `permission_granted`, and `permission_status`
 
 Event channels:
 
