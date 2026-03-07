@@ -55,11 +55,12 @@
           </div>
           <section id="dictationHotkeyCard" class="hotkey-card" hidden>
             <label for="dictationHotkeyInput">Dictation Hotkey</label>
-            <p class="hint">Press one combo to toggle dictation start/stop.</p>
+            <p class="hint">Use a preset, record one, or type your own combo.</p>
             <div class="hotkey-editor">
-              <input id="dictationHotkeyInput" type="text" readonly placeholder="CmdOrCtrl+Shift+D" />
+              <input id="dictationHotkeyInput" type="text" spellcheck="false" autocapitalize="off" autocomplete="off" placeholder="CmdOrCtrl+Shift+D" />
               <button id="recordDictationHotkey" class="secondary" type="button">Record</button>
             </div>
+            <div id="dictationHotkeyPresets" class="preset-row" aria-label="Recommended hotkey presets"></div>
             <div class="dictation-setup-actions">
               <button id="saveDictationHotkey" class="ghost" type="button">Save Hotkey</button>
               <button id="resetDictationHotkey" class="ghost" type="button">Reset Default</button>
@@ -75,6 +76,11 @@
               <span>Enable focused-field insertion</span>
             </label>
             <p id="focusedFieldInsertStatus" class="hint">Focused-field insertion is disabled.</p>
+          </section>
+          <section id="dictationPermissionsCard" class="hotkey-card" hidden>
+            <label>Permissions</label>
+            <p id="dictationPermissionSummary" class="hint">Microphone access is requested when you first start dictation.</p>
+            <ul id="dictationPermissionList" class="permission-list"></ul>
           </section>
           <p id="dictationModelBusy" class="hint busy-note" hidden></p>
           <p id="dictationModelStatus" class="hint"></p>

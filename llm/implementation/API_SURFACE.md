@@ -53,12 +53,13 @@ Tauri commands:
 Command payload notes:
 
 - `DictationOnboardingPayload` includes `focused_field_insert_enabled: bool`
-- `DictationTriggerPayload` includes `trigger` and `default_trigger`
+- `DictationOnboardingPayload` also includes `dictation_trigger_mode`, `dictation_trigger_status`, and `dictation_trigger_permission_hint`
+- `DictationTriggerPayload` includes `trigger`, `default_trigger`, `trigger_mode`, `trigger_status`, and `trigger_permission_hint`
 - `FocusedFieldInsertPayload` includes `enabled`
 
 Event channels:
 
-- backend to frontend: `dictation:hotkey-triggered` payload `()`
+- backend to frontend: `dictation:hotkey-triggered` payload `{ pressed }`
 - backend to frontend: `dictation:state-changed` payload `{ state, error?, transcript? }`
 - frontend to overlay: `dicktaint://pill-status` payload `{ message, state, visible }`
 - allowed `state`: `idle`, `working`, `live`, `ok`, `error`

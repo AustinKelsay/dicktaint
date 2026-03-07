@@ -35,7 +35,7 @@ Out of scope:
 Backend behavior:
 
 - registers global monitor for macOS `flagsChanged`
-- emits `dictation:hotkey-triggered` only on edge transitions
+- emits `dictation:hotkey-triggered` with `{ pressed }` so `Fn` hold can start on press and stop on release even when the main window is hidden
 - creates native transparent overlay windows per monitor (up to 6)
 - close request on main window hides app instead of quitting
 - macOS reopen event re-shows and focuses main window
@@ -44,10 +44,13 @@ Frontend behavior:
 
 - listens for `dictation:hotkey-triggered`
 - fallback focused listeners for `Fn` / `F19`
-- on press: start native dictation
-- on release: stop native dictation and transcribe
+- on `Fn` press: start native dictation
+- on `Fn` release: stop native dictation and transcribe
+- on non-`Fn` shortcut press: toggle start/stop
 - release-during-start race handled by deferred stop flag
 - status emits `dicktaint://pill-status` updates for overlay UI
+- pill copy reflects the saved hotkey and its mode (`global-hold`, `focused-window-hold`, `global-toggle`)
+- onboarding/settings surface hotkey runtime state plus permission guidance
 - finalized transcript appends locally and can optionally paste into the focused field when setting is enabled and another app is focused
 
 Permission expectations:

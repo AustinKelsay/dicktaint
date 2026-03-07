@@ -36,9 +36,13 @@ const saveDictationHotkeyBtn = document.getElementById('saveDictationHotkey');
 const resetDictationHotkeyBtn = document.getElementById('resetDictationHotkey');
 const clearDictationHotkeyBtn = document.getElementById('clearDictationHotkey');
 const dictationHotkeyStatusEl = document.getElementById('dictationHotkeyStatus');
+const dictationHotkeyPresetsEl = document.getElementById('dictationHotkeyPresets');
 const focusedFieldInsertCardEl = document.getElementById('focusedFieldInsertCard');
 const focusedFieldInsertToggleEl = document.getElementById('focusedFieldInsertToggle');
 const focusedFieldInsertStatusEl = document.getElementById('focusedFieldInsertStatus');
+const dictationPermissionsCardEl = document.getElementById('dictationPermissionsCard');
+const dictationPermissionSummaryEl = document.getElementById('dictationPermissionSummary');
+const dictationPermissionListEl = document.getElementById('dictationPermissionList');
 const quickDictationFab = document.getElementById('quickDictationFab');
 
 const SpeechRecognitionApi = window.SpeechRecognition || window.webkitSpeechRecognition || null;
@@ -50,6 +54,11 @@ const NATIVE_HOLD_HOTKEYS = new Set(['Fn', 'F19']);
 const MAC_DESKTOP_ONLY_MESSAGE = 'Desktop MVP currently supports macOS only. Current mobile focus is iPhone (iOS).';
 const PILL_STATUS_EVENT = 'dicktaint://pill-status';
 const DICTATION_HISTORY_LIMIT = 10;
+const HOTKEY_PRESET_OPTIONS = [
+  { value: 'Fn', label: 'Hold Fn' },
+  { value: 'CmdOrCtrl+Shift+D', label: 'Cmd/Ctrl+Shift+D' },
+  { value: 'CmdOrCtrl+Alt+Space', label: 'Cmd/Ctrl+Alt+Space' }
+];
 
 let recognition = null;
 let currentDraftText = '';
@@ -62,6 +71,7 @@ let restartTimer = null;
 let hasMicrophoneAccess = false;
 let isInstallingDictationModel = false;
 let isDeletingDictationModel = false;
+let currentDeviceProfile = null;
 let nativeDictationModelReady = !isFocusedMacDesktopMode();
 let whisperCliAvailable = true;
 let dictationModels = [];
@@ -72,6 +82,9 @@ let defaultDictationHotkey = DEFAULT_DICTATION_HOTKEY;
 let activeHotkeySpec = null;
 let pendingDictationHotkey = '';
 let isCapturingDictationHotkey = false;
+let dictationTriggerMode = 'disabled';
+let dictationTriggerStatus = 'Hotkey disabled.';
+let dictationTriggerPermissionHint = '';
 let focusedFieldInsertEnabled = false;
 let isSavingFocusedFieldInsertSetting = false;
 let lastHotkeyToggleAtMs = 0;
@@ -93,7 +106,12 @@ function modelDisplayName(model) {
 }
 
 function isMacPlatform() {
-  return /Mac|iPhone|iPad|iPod/i.test(navigator.platform || navigator.userAgent || '');
+  const source = [
+    navigator.userAgentData?.platform,
+    navigator.platform,
+    navigator.userAgent
+  ].filter(Boolean).join(' ');
+  return /Mac|iPhone|iPad|iPod/i.test(source);
 }
 
 function setDictationHotkeyStatus(message, tone = 'neutral') {
@@ -237,6 +255,9 @@ function parseHotkeyCombo(raw) {
 }
 
 function eventKeyToken(event) {
+  const code = String(event?.code || '').trim();
+  if (/^fn$/i.test(code)) return 'Fn';
+  if (/^f19$/i.test(code)) return 'F19';
   return normalizeHotkeyKey(event.key);
 }
 
@@ -291,10 +312,164 @@ function eventMatchesHotkey(event, spec) {
   return true;
 }
 
+function getSuggestedHotkeyOptions() {
+  if (isFocusedMacDesktopMode()) {
+    return HOTKEY_PRESET_OPTIONS;
+  }
+  return HOTKEY_PRESET_OPTIONS.filter((option) => option.value !== 'Fn');
+}
+
+function humanizeArchitecture(arch) {
+  const value = String(arch || '').trim().toLowerCase();
+  if (['aarch64', 'arm64'].includes(value)) return 'Apple silicon';
+  if (['x86_64', 'x64', 'amd64'].includes(value)) return 'Intel';
+  return arch || 'unknown arch';
+}
+
+function describeMachineLabel(device = currentDeviceProfile) {
+  if (!device) return 'This Mac';
+  if (String(device.os || '').toLowerCase() === 'macos') {
+    const arch = humanizeArchitecture(device.architecture);
+    return arch === 'Apple silicon' ? 'This Apple silicon Mac' : (arch === 'Intel' ? 'This Intel Mac' : 'This Mac');
+  }
+  return 'This device';
+}
+
+function instructionHotkeyLabel(raw = savedDictationHotkey || pendingDictationHotkey || defaultDictationHotkey) {
+  const value = String(raw || '').trim();
+  if (!value) return 'a hotkey';
+  return value === 'Fn' ? 'Fn / Globe' : value;
+}
+
+function isHoldToTalkHotkey() {
+  return dictationTriggerMode === 'global-hold'
+    || dictationTriggerMode === 'focused-window-hold'
+    || activeHotkeySpec?.key === 'Fn';
+}
+
+function idlePillMessage() {
+  if (!isNativeDesktopMode()) return '';
+  if (!isFocusedMacDesktopMode()) return 'Desktop MVP: macOS only';
+  if (!currentOnboarding) return 'Checking dictation setup...';
+  if (!nativeDictationModelReady) return 'Finish setup in dicktaint';
+  if (!savedDictationHotkey) return 'Hotkey disabled - open settings';
+  if (dictationTriggerMode === 'focused-window-hold') {
+    return `Focus dicktaint, then hold ${instructionHotkeyLabel(savedDictationHotkey)}`;
+  }
+  if (isHoldToTalkHotkey()) {
+    return `Hold ${instructionHotkeyLabel(savedDictationHotkey)} to dictate`;
+  }
+  return `Press ${instructionHotkeyLabel(savedDictationHotkey)} to dictate`;
+}
+
+function listeningStatusForTrigger(trigger) {
+  if (trigger === 'hotkey-hold' || isHoldToTalkHotkey()) {
+    return `Listening... release ${instructionHotkeyLabel(savedDictationHotkey)} to stop and transcribe.`;
+  }
+  if (trigger === 'hotkey') {
+    return `Listening... press ${instructionHotkeyLabel(savedDictationHotkey)} again to stop and transcribe.`;
+  }
+  return 'Listening... click Stop to transcribe.';
+}
+
+function completedStatusForTrigger(trigger) {
+  if (trigger === 'hotkey-hold' || isHoldToTalkHotkey()) {
+    return `Dictation captured from ${instructionHotkeyLabel(savedDictationHotkey)} hold and transcribed.`;
+  }
+  if (trigger === 'hotkey') {
+    return `Dictation captured from ${instructionHotkeyLabel(savedDictationHotkey)} and transcribed.`;
+  }
+  return 'Dictation captured and transcribed.';
+}
+
+function renderDictationHotkeyPresets() {
+  if (!dictationHotkeyPresetsEl) return;
+  dictationHotkeyPresetsEl.innerHTML = '';
+  const activeValue = String(pendingDictationHotkey || savedDictationHotkey || '').trim();
+  const normalizedActive = parseHotkeyCombo(activeValue);
+
+  for (const option of getSuggestedHotkeyOptions()) {
+    const button = document.createElement('button');
+    button.type = 'button';
+    button.className = 'ghost quiet preset-chip';
+    button.textContent = option.label;
+    button.dataset.hotkeyPreset = option.value;
+    if (normalizedActive.ok && normalizedActive.display === option.value) {
+      button.className += ' is-active';
+    }
+    dictationHotkeyPresetsEl.appendChild(button);
+  }
+}
+
+function renderPermissionGuidance() {
+  if (!dictationPermissionsCardEl || !dictationPermissionSummaryEl || !dictationPermissionListEl) return;
+
+  dictationPermissionsCardEl.hidden = !isNativeDesktopMode();
+  if (!isNativeDesktopMode()) return;
+
+  const machineLabel = describeMachineLabel();
+  if (!isFocusedMacDesktopMode()) {
+    dictationPermissionSummaryEl.textContent = `${machineLabel} is outside the supported macOS desktop path.`;
+    dictationPermissionListEl.innerHTML = '';
+    return;
+  }
+
+  dictationPermissionSummaryEl.textContent = nativeDictationModelReady
+    ? `${machineLabel} is ready. ${dictationTriggerStatus}`
+    : `${machineLabel} still needs local setup. ${dictationTriggerStatus}`;
+
+  const items = [
+    {
+      tone: nativeDictationModelReady ? 'ok' : 'neutral',
+      text: 'Microphone: macOS asks the first time you start dictation. If audio fails later, relaunch after changing permission.'
+    }
+  ];
+
+  if (savedDictationHotkey) {
+    if (dictationTriggerMode === 'focused-window-hold') {
+      items.push({
+        tone: 'warn',
+        text: dictationTriggerPermissionHint || 'Input Monitoring is required for global Fn hold-to-talk. Without it, Fn only works while dicktaint is focused.'
+      });
+    } else if (dictationTriggerMode === 'global-hold') {
+      items.push({
+        tone: 'ok',
+        text: 'Input Monitoring: global Fn hold-to-talk is active for this app while it is running.'
+      });
+    } else {
+      items.push({
+        tone: 'ok',
+        text: `Hotkey: ${instructionHotkeyLabel(savedDictationHotkey)} is registered globally while dicktaint is running.`
+      });
+    }
+  } else {
+    items.push({
+      tone: 'neutral',
+      text: 'Hotkey: disabled. Open Settings if you want a system-wide trigger again.'
+    });
+  }
+
+  items.push({
+    tone: focusedFieldInsertEnabled ? 'warn' : 'neutral',
+    text: focusedFieldInsertEnabled
+      ? 'Accessibility + Automation: required for Dictate Into Focused Field. Allow dicktaint or Terminal (during tauri:dev) to control System Events.'
+      : 'Accessibility + Automation: only needed if you enable Dictate Into Focused Field.'
+  });
+
+  dictationPermissionListEl.innerHTML = '';
+  for (const item of items) {
+    const li = document.createElement('li');
+    li.dataset.tone = item.tone;
+    li.textContent = item.text;
+    dictationPermissionListEl.appendChild(li);
+  }
+}
+
 function syncDictationHotkeyUi() {
   const nativeDesktop = isNativeDesktopMode();
   if (dictationHotkeyCardEl) dictationHotkeyCardEl.hidden = !nativeDesktop;
   if (focusedFieldInsertCardEl) focusedFieldInsertCardEl.hidden = !nativeDesktop;
+  if (dictationPermissionsCardEl) dictationPermissionsCardEl.hidden = !nativeDesktop;
   if (!nativeDesktop) return;
 
   if (dictationHotkeyInputEl) {
@@ -304,6 +479,8 @@ function syncDictationHotkeyUi() {
   if (recordDictationHotkeyBtn) {
     recordDictationHotkeyBtn.textContent = isCapturingDictationHotkey ? 'Press Keys...' : 'Record';
   }
+  renderDictationHotkeyPresets();
+  renderPermissionGuidance();
 }
 
 function getTauriInvoke() {
@@ -316,7 +493,22 @@ function getTauriEventApi() {
   return window.__TAURI__?.event || null;
 }
 
+function detectDesktopOs() {
+  const source = [
+    currentDeviceProfile?.os,
+    navigator.userAgentData?.platform,
+    navigator.platform,
+    navigator.userAgent
+  ].filter(Boolean).join(' ');
+
+  if (/mac|darwin/i.test(source)) return 'macos';
+  if (/win/i.test(source)) return 'windows';
+  if (/linux|x11/i.test(source)) return 'linux';
+  return 'unknown';
+}
+
 function isMobileUserAgent() {
+  if (navigator.userAgentData?.mobile) return true;
   const ua = navigator.userAgent || '';
   return /Android|iPhone|iPad|iPod/i.test(ua);
 }
@@ -325,13 +517,8 @@ function isNativeDesktopMode() {
   return Boolean(getTauriInvoke()) && !isMobileUserAgent();
 }
 
-function isMacDesktopUserAgent() {
-  const ua = navigator.userAgent || '';
-  return /Macintosh|Mac OS X/i.test(ua);
-}
-
 function isFocusedMacDesktopMode() {
-  return isNativeDesktopMode() && isMacDesktopUserAgent();
+  return isNativeDesktopMode() && detectDesktopOs() === 'macos';
 }
 
 function shouldUseTauriCommands() {
@@ -364,13 +551,15 @@ function emitHotkeyPillOverlay(message, state = 'idle', visible = true) {
 }
 
 function summarizeHotkeyPillStatus(message, tone = 'neutral') {
-  if (!isFocusedMacDesktopMode()) {
-    return 'Desktop MVP: macOS only';
-  }
+  if (!isFocusedMacDesktopMode()) return 'Desktop MVP: macOS only';
   const normalized = String(message || '').toLowerCase();
+  const hotkeyLabel = instructionHotkeyLabel(savedDictationHotkey);
 
   if (tone === 'live') {
-    return 'Listening - release fn to stop';
+    if (isHoldToTalkHotkey()) {
+      return `Listening - release ${hotkeyLabel}`;
+    }
+    return `Listening - press ${hotkeyLabel} again`;
   }
   if (tone === 'working') {
     if (normalized.includes('transcrib')) return 'Transcribing...';
@@ -383,16 +572,17 @@ function summarizeHotkeyPillStatus(message, tone = 'neutral') {
     if (normalized.includes('transcrib') || normalized.includes('captured') || normalized.includes('transcript')) {
       return 'Transcript ready';
     }
-    return 'Ready - hold fn to start';
+    return idlePillMessage();
   }
   if (tone === 'error') {
     return 'Dictation error - check status';
   }
-  return 'Hold fn to dictate';
+  return idlePillMessage();
 }
 
 function syncHotkeyPillForStatus(message, tone = 'neutral') {
-  if (!isNativeDesktopMode()) {
+  const visible = isNativeDesktopMode() && isFocusedMacDesktopMode();
+  if (!visible) {
     setHotkeyPill('', 'idle', false);
     return;
   }
@@ -991,7 +1181,8 @@ function describeDeviceProfile(device) {
   if (!device) return '';
   const ram = Number(device.total_memory_gb) || 0;
   const cores = Number(device.logical_cpu_cores) || 1;
-  return `${ram} GB RAM • ${cores} logical CPU cores • ${device.architecture || 'unknown arch'} • ${device.os || 'unknown os'}`;
+  const machine = describeMachineLabel(device).replace(/^This /u, '');
+  return `${machine} • ${ram} GB RAM • ${cores} logical CPU cores • ${device.os || 'unknown os'}`;
 }
 
 function buildDictationModelLabel(model) {
@@ -1038,6 +1229,22 @@ function renderDictationModelOptions(models, selectedModelId) {
 }
 
 function applyDictationHotkeyPayload(payload, { preservePending = false } = {}) {
+  dictationTriggerMode = String(
+    payload?.dictation_trigger_mode
+      || payload?.trigger_mode
+      || 'disabled'
+  ).trim() || 'disabled';
+  dictationTriggerStatus = String(
+    payload?.dictation_trigger_status
+      || payload?.trigger_status
+      || 'Hotkey disabled.'
+  ).trim() || 'Hotkey disabled.';
+  dictationTriggerPermissionHint = String(
+    payload?.dictation_trigger_permission_hint
+      || payload?.trigger_permission_hint
+      || ''
+  ).trim();
+
   const rawDefault = String(
     payload?.default_trigger
       || payload?.default_dictation_trigger
@@ -1069,7 +1276,7 @@ function applyDictationHotkeyPayload(payload, { preservePending = false } = {}) 
   savedDictationHotkey = parsedTrigger.display;
   activeHotkeySpec = parsedTrigger;
   if (!preservePending) pendingDictationHotkey = parsedTrigger.display;
-  setDictationHotkeyStatus(`Current hotkey: ${parsedTrigger.display}`, 'ok');
+  setDictationHotkeyStatus(`Current hotkey: ${parsedTrigger.display}. ${dictationTriggerStatus}`, 'ok');
   syncControls();
 }
 
@@ -1141,7 +1348,7 @@ async function maybeInsertTranscriptIntoFocusedField(chunk) {
 function beginDictationHotkeyCapture() {
   if (!isNativeDesktopMode()) return;
   isCapturingDictationHotkey = true;
-  setDictationHotkeyStatus('Press your desired key combo now. Press Escape to cancel.', 'neutral');
+  setDictationHotkeyStatus('Press your desired key combo now. Press Escape to cancel. For Fn/Globe, tap and release it once.', 'neutral');
   syncControls();
 }
 
@@ -1149,7 +1356,7 @@ function cancelDictationHotkeyCapture() {
   if (!isCapturingDictationHotkey) return;
   isCapturingDictationHotkey = false;
   if (savedDictationHotkey) {
-    setDictationHotkeyStatus(`Current hotkey: ${savedDictationHotkey}`, 'ok');
+    setDictationHotkeyStatus(`Current hotkey: ${savedDictationHotkey}. ${dictationTriggerStatus}`, 'ok');
   } else {
     setDictationHotkeyStatus(`Hotkey disabled. Default: ${defaultDictationHotkey}.`, 'neutral');
   }
@@ -1205,10 +1412,14 @@ async function loadDictationOnboarding({ quietStatus = false } = {}) {
     nativeDictationModelReady = true;
     whisperCliAvailable = true;
     currentOnboarding = null;
+    currentDeviceProfile = null;
     savedDictationHotkey = null;
     pendingDictationHotkey = '';
     activeHotkeySpec = null;
     isCapturingDictationHotkey = false;
+    dictationTriggerMode = 'disabled';
+    dictationTriggerStatus = 'Hotkey disabled.';
+    dictationTriggerPermissionHint = '';
     focusedFieldInsertEnabled = false;
     isSavingFocusedFieldInsertSetting = false;
     setFocusedFieldInsertStatus('Focused-field insertion is disabled.', 'neutral');
@@ -1234,8 +1445,12 @@ async function loadDictationOnboarding({ quietStatus = false } = {}) {
     nativeDictationModelReady = false;
     whisperCliAvailable = false;
     currentOnboarding = null;
+    currentDeviceProfile = { os: detectDesktopOs(), architecture: navigator.platform || '' };
     focusedFieldInsertEnabled = false;
     isSavingFocusedFieldInsertSetting = false;
+    dictationTriggerMode = 'disabled';
+    dictationTriggerStatus = 'Hotkey unavailable on this platform.';
+    dictationTriggerPermissionHint = '';
     setFocusedFieldInsertStatus('Focused-field insertion is unavailable on this platform.', 'neutral');
     setSetupScreenMode('onboarding');
     if (dictationModelCard) {
@@ -1262,10 +1477,14 @@ async function loadDictationOnboarding({ quietStatus = false } = {}) {
     nativeDictationModelReady = false;
     whisperCliAvailable = false;
     currentOnboarding = null;
+    currentDeviceProfile = null;
     savedDictationHotkey = null;
     pendingDictationHotkey = '';
     activeHotkeySpec = null;
     isCapturingDictationHotkey = false;
+    dictationTriggerMode = 'disabled';
+    dictationTriggerStatus = 'Desktop bridge offline.';
+    dictationTriggerPermissionHint = '';
     focusedFieldInsertEnabled = false;
     isSavingFocusedFieldInsertSetting = false;
     setFocusedFieldInsertStatus('Focused-field insertion is unavailable while desktop bridge is offline.', 'neutral');
@@ -1293,6 +1512,7 @@ async function loadDictationOnboarding({ quietStatus = false } = {}) {
 
     const onboarding = await tauriInvoke('get_dictation_onboarding');
     currentOnboarding = onboarding;
+    currentDeviceProfile = onboarding.device || null;
     whisperCliAvailable = Boolean(onboarding.whisper_cli_available);
     nativeDictationModelReady = Boolean(onboarding.selected_model_exists && whisperCliAvailable);
 
@@ -1357,10 +1577,14 @@ async function loadDictationOnboarding({ quietStatus = false } = {}) {
     nativeDictationModelReady = false;
     whisperCliAvailable = false;
     currentOnboarding = null;
+    currentDeviceProfile = null;
     savedDictationHotkey = null;
     pendingDictationHotkey = '';
     activeHotkeySpec = null;
     isCapturingDictationHotkey = false;
+    dictationTriggerMode = 'disabled';
+    dictationTriggerStatus = 'Could not load hotkey state.';
+    dictationTriggerPermissionHint = '';
     focusedFieldInsertEnabled = false;
     isSavingFocusedFieldInsertSetting = false;
     setFocusedFieldInsertStatus('Focused-field insertion is unavailable while setup is loading.', 'neutral');
@@ -1587,11 +1811,7 @@ async function startNativeDesktopDictation(trigger = 'button', shouldRetryOnConf
     isStartingDictation = false;
     setDictationState(true);
     setUiMode('listening');
-    if (trigger === 'hotkey-hold' || trigger === 'hotkey') {
-      setStatus('Listening... release fn/F19 to stop and transcribe.', 'live');
-    } else {
-      setStatus('Listening... click Stop to transcribe.', 'live');
-    }
+    setStatus(listeningStatusForTrigger(trigger), 'live');
   } catch (error) {
     const details = getErrorMessage(error);
     if (shouldRetryOnConflict && isStartConflictDictationError(details)) {
@@ -1638,11 +1858,7 @@ async function stopNativeDesktopDictation(trigger = 'button') {
     });
     setUiMode('idle');
     if (didAppendTranscript) {
-      if (trigger === 'hotkey-hold' || trigger === 'hotkey') {
-        setStatus('Dictation captured from fn hold and transcribed.', 'ok');
-      } else {
-        setStatus('Dictation captured and transcribed.', 'ok');
-      }
+      setStatus(completedStatusForTrigger(trigger), 'ok');
     } else {
       setStatus('No new dictation content to save.', 'neutral');
     }
@@ -1770,35 +1986,50 @@ function triggerDictationToggleFromHotkey() {
   }
 }
 
+function maybeCaptureDictationHotkeyEvent(event) {
+  if (!isCapturingDictationHotkey) return false;
+
+  const isCancel = event.type === 'keydown'
+    && event.key === 'Escape'
+    && !event.metaKey
+    && !event.ctrlKey
+    && !event.altKey
+    && !event.shiftKey;
+  if (isCancel) {
+    event.preventDefault();
+    cancelDictationHotkeyCapture();
+    return true;
+  }
+
+  const capturedCombo = buildHotkeyFromEvent(event);
+  if (!capturedCombo) return false;
+
+  if (event.type === 'keyup' && capturedCombo !== 'Fn') {
+    return false;
+  }
+
+  event.preventDefault();
+  const parsed = parseHotkeyCombo(capturedCombo);
+  if (!parsed.ok) {
+    setDictationHotkeyStatus(parsed.error, 'error');
+    return true;
+  }
+
+  pendingDictationHotkey = parsed.display;
+  isCapturingDictationHotkey = false;
+  setDictationHotkeyStatus(`Pending hotkey: ${parsed.display}. Click "Save Hotkey" to apply.`, 'neutral');
+  syncControls();
+  return true;
+}
+
 function handleDictationHotkeyEvent(event) {
   if (!isNativeDesktopMode()) return;
 
-  if (isCapturingDictationHotkey) {
-    const isCancel = event.key === 'Escape'
-      && !event.metaKey
-      && !event.ctrlKey
-      && !event.altKey
-      && !event.shiftKey;
-    if (isCancel) {
-      event.preventDefault();
-      cancelDictationHotkeyCapture();
-      return;
-    }
+  if (maybeCaptureDictationHotkeyEvent(event)) {
+    return;
+  }
 
-    const capturedCombo = buildHotkeyFromEvent(event);
-    if (!capturedCombo) return;
-    event.preventDefault();
-
-    const parsed = parseHotkeyCombo(capturedCombo);
-    if (!parsed.ok) {
-      setDictationHotkeyStatus(parsed.error, 'error');
-      return;
-    }
-
-    pendingDictationHotkey = parsed.display;
-    isCapturingDictationHotkey = false;
-    setDictationHotkeyStatus(`Pending hotkey: ${parsed.display}. Click "Save Hotkey" to apply.`, 'neutral');
-    syncControls();
+  if (event.type !== 'keydown') {
     return;
   }
 
@@ -1812,8 +2043,13 @@ function handleDictationHotkeyEvent(event) {
 function initDictation() {
   const tauriEventApi = window.__TAURI__?.event || null;
   if (isNativeDesktopMode() && tauriEventApi?.listen) {
-    tauriEventApi.listen(DICTATION_HOTKEY_EVENT, () => {
+    tauriEventApi.listen(DICTATION_HOTKEY_EVENT, ({ payload }) => {
       if (isCapturingDictationHotkey) return;
+      if (activeHotkeySpec?.ok && activeHotkeySpec.key === 'Fn') {
+        applyNativeFnHoldState(payload?.pressed !== false);
+        return;
+      }
+      if (payload?.pressed === false) return;
       triggerDictationToggleFromHotkey();
     }).catch(err => {
       console.error('Failed to register DICTATION_HOTKEY_EVENT listener', err);
@@ -1864,6 +2100,7 @@ function initDictation() {
   }
 
   document.addEventListener('keydown', handleDictationHotkeyEvent);
+  document.addEventListener('keyup', handleDictationHotkeyEvent);
 
   clearTranscriptBtn.addEventListener('click', () => {
     const tauriInvoke = shouldUseTauriCommands() ? getTauriInvoke() : null;
@@ -1966,6 +2203,34 @@ function initDictation() {
     }
     if (recordDictationHotkeyBtn) {
       recordDictationHotkeyBtn.addEventListener('click', beginDictationHotkeyCapture);
+    }
+    if (dictationHotkeyInputEl) {
+      dictationHotkeyInputEl.addEventListener('input', (event) => {
+        pendingDictationHotkey = String(event?.currentTarget?.value || '').trim();
+        isCapturingDictationHotkey = false;
+        if (!pendingDictationHotkey) {
+          setDictationHotkeyStatus(`Hotkey disabled. Default: ${defaultDictationHotkey}.`, 'neutral');
+        } else {
+          setDictationHotkeyStatus(`Pending hotkey: ${pendingDictationHotkey}. Click "Save Hotkey" to apply.`, 'neutral');
+        }
+        syncControls();
+      });
+    }
+    if (dictationHotkeyPresetsEl) {
+      dictationHotkeyPresetsEl.addEventListener('click', (event) => {
+        const target = event.target instanceof Element
+          ? event.target.closest('button[data-hotkey-preset]')
+          : null;
+        if (!target) return;
+
+        pendingDictationHotkey = String(target.dataset.hotkeyPreset || '').trim();
+        isCapturingDictationHotkey = false;
+        if (dictationHotkeyInputEl) {
+          dictationHotkeyInputEl.value = pendingDictationHotkey;
+        }
+        setDictationHotkeyStatus(`Preset selected: ${pendingDictationHotkey}. Click "Save Hotkey" to apply.`, 'neutral');
+        syncControls();
+      });
     }
     if (saveDictationHotkeyBtn) {
       saveDictationHotkeyBtn.addEventListener('click', async () => {
@@ -2144,7 +2409,11 @@ function getDictationTestState() {
     pendingNativeStartTrigger,
     nativeStopRequestInFlight,
     isDictating,
-    isStartingDictation
+    isStartingDictation,
+    dictationTriggerMode,
+    dictationTriggerStatus,
+    savedDictationHotkey,
+    pendingDictationHotkey
   };
 }
 
@@ -2163,6 +2432,13 @@ function resetDictationStateForTests() {
   nativeSessionSeq = 0;
   committedNativeSessionIds = new Set();
   startNativeDesktopDictationOverride = null;
+  dictationTriggerMode = 'disabled';
+  dictationTriggerStatus = 'Hotkey disabled.';
+  dictationTriggerPermissionHint = '';
+  savedDictationHotkey = null;
+  pendingDictationHotkey = '';
+  activeHotkeySpec = null;
+  currentDeviceProfile = { os: 'macos', architecture: 'aarch64' };
   setDraftTranscriptText('');
   renderDictationHistory();
   syncControls();
@@ -2175,6 +2451,8 @@ if (typeof globalThis !== 'undefined' && globalThis.__DICKTAINT_EXPOSE_TEST_API_
     queueNativeStartAfterCurrentStop,
     maybeStartQueuedNativeDictation,
     setDraftTranscriptText,
+    applyDictationHotkeyPayload,
+    summarizeHotkeyPillStatus,
     getState: getDictationTestState,
     resetState: resetDictationStateForTests,
     setNativeFlags(next = {}) {

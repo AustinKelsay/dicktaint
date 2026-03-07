@@ -28,6 +28,10 @@ class MockElement {
     return this._innerHTML;
   }
 
+  get options() {
+    return this.children;
+  }
+
   addEventListener(type, handler) {
     if (!this._listeners.has(type)) this._listeners.set(type, []);
     this._listeners.get(type).push(handler);
@@ -86,11 +90,21 @@ class MockElement {
       }
       return null;
     }
+    if (selector === 'button[data-hotkey-preset]') {
+      if (
+        this.tagName === 'BUTTON'
+        && this.dataset
+        && this.dataset.hotkeyPreset
+      ) {
+        return this;
+      }
+      return null;
+    }
     return null;
   }
 }
 
-function createMockDom() {
+function createMockDom({ nativeDesktop = false, onboardingPayload = null } = {}) {
   const ids = [
     'status',
     'onboardingScreen',
@@ -129,9 +143,13 @@ function createMockDom() {
     'resetDictationHotkey',
     'clearDictationHotkey',
     'dictationHotkeyStatus',
+    'dictationHotkeyPresets',
     'focusedFieldInsertCard',
     'focusedFieldInsertToggle',
     'focusedFieldInsertStatus',
+    'dictationPermissionsCard',
+    'dictationPermissionSummary',
+    'dictationPermissionList',
     'quickDictationFab'
   ];
 
@@ -144,6 +162,7 @@ function createMockDom() {
   elements.get('dictationModelSelect').tagName = 'SELECT';
   elements.get('dictationHotkeyInput').tagName = 'INPUT';
   elements.get('focusedFieldInsertToggle').tagName = 'INPUT';
+  elements.get('dictationPermissionList').tagName = 'UL';
   elements.get('status').textContent = 'Loading...';
 
   const appShell = new MockElement('appShell', 'DIV');
@@ -189,7 +208,52 @@ function createMockDom() {
 
   const windowListeners = new Map();
   global.window = {
-    __TAURI__: null,
+    __TAURI__: nativeDesktop ? {
+      core: {
+        invoke: async (command) => {
+          if (command === 'get_dictation_onboarding') {
+            return onboardingPayload || {
+              onboarding_required: false,
+              selected_model_id: 'base-en',
+              selected_model_path: '/tmp/ggml-base.en.bin',
+              selected_model_exists: true,
+              dictation_trigger: 'Fn',
+              default_dictation_trigger: 'Fn',
+              dictation_trigger_mode: 'global-hold',
+              dictation_trigger_status: 'Hold Fn anywhere to dictate, then release to transcribe.',
+              dictation_trigger_permission_hint: null,
+              focused_field_insert_enabled: false,
+              whisper_cli_available: true,
+              whisper_cli_path: '/usr/local/bin/whisper-cli',
+              models_dir: '/tmp/models',
+              device: {
+                total_memory_gb: 16,
+                logical_cpu_cores: 8,
+                architecture: 'aarch64',
+                os: 'macos'
+              },
+              models: [
+                {
+                  id: 'base-en',
+                  display_name: 'Whisper Base (English)',
+                  approx_size_gb: 0.15,
+                  speed_note: 'Fast',
+                  quality_note: 'Balanced',
+                  installed: true,
+                  recommended: true,
+                  likely_runnable: true
+                }
+              ]
+            };
+          }
+          throw new Error(`Unhandled Tauri command in test: ${command}`);
+        }
+      },
+      event: {
+        listen: async () => () => {},
+        emit: async () => {}
+      }
+    } : null,
     navigator: global.navigator,
     addEventListener(type, handler) {
       if (!windowListeners.has(type)) windowListeners.set(type, []);
@@ -201,11 +265,13 @@ function createMockDom() {
   return { clipboardCalls };
 }
 
-function loadAppWithTestApi() {
+async function loadAppWithTestApi() {
   global.__DICKTAINT_EXPOSE_TEST_API__ = true;
   delete global.__DICKTAINT_TEST_API__;
   delete require.cache[require.resolve('../public/app.js')];
   require('../public/app.js');
+  await Promise.resolve();
+  await Promise.resolve();
   return global.__DICKTAINT_TEST_API__;
 }
 
@@ -213,9 +279,9 @@ describe('dictation frontend history + chaining', () => {
   let api;
   let clipboardCalls;
 
-  beforeEach(() => {
+  beforeEach(async () => {
     ({ clipboardCalls } = createMockDom());
-    api = loadAppWithTestApi();
+    api = await loadAppWithTestApi();
     api.resetState();
   });
 
@@ -332,5 +398,60 @@ describe('dictation frontend history + chaining', () => {
     expect(state.currentDraftText).toBe('');
     expect(state.dictationHistory).toHaveLength(1);
     expect(state.dictationHistory[0].text).toBe('message one');
+  });
+});
+
+describe('dictation frontend hotkey polish', () => {
+  let api;
+
+  beforeEach(async () => {
+    createMockDom({ nativeDesktop: true });
+    api = await loadAppWithTestApi();
+    api.resetState();
+  });
+
+  afterEach(() => {
+    delete global.__DICKTAINT_TEST_API__;
+    delete global.__DICKTAINT_EXPOSE_TEST_API__;
+    delete global.window;
+    delete global.document;
+    delete global.navigator;
+    delete global.Element;
+  });
+
+  it('tracks focused-window fn fallback from backend payloads', () => {
+    api.applyDictationHotkeyPayload({
+      trigger: 'Fn',
+      default_trigger: 'Fn',
+      trigger_mode: 'focused-window-hold',
+      trigger_status: 'Hold Fn to dictate while dicktaint is focused. Grant Input Monitoring for global hold-to-talk.',
+      trigger_permission_hint: 'Allow Input Monitoring for dicktaint.'
+    });
+
+    const state = api.getState();
+    expect(state.dictationTriggerMode).toBe('focused-window-hold');
+    expect(state.savedDictationHotkey).toBe('Fn');
+    expect(document.getElementById('dictationHotkeyStatus').textContent).toContain('Current hotkey: Fn');
+    expect(document.getElementById('dictationHotkeyStatus').textContent).toContain('focused');
+  });
+
+  it('renders pill messaging from the active hotkey mode', () => {
+    api.applyDictationHotkeyPayload({
+      trigger: 'CmdOrCtrl+Shift+D',
+      default_trigger: 'Fn',
+      trigger_mode: 'global-toggle',
+      trigger_status: 'Press CmdOrCtrl+Shift+D anywhere to start or stop dictation.'
+    });
+
+    expect(api.summarizeHotkeyPillStatus('Listening...', 'live')).toBe('Listening - press CmdOrCtrl+Shift+D again');
+
+    api.applyDictationHotkeyPayload({
+      trigger: 'Fn',
+      default_trigger: 'Fn',
+      trigger_mode: 'global-hold',
+      trigger_status: 'Hold Fn anywhere to dictate, then release to transcribe.'
+    });
+
+    expect(api.summarizeHotkeyPillStatus('Listening...', 'live')).toBe('Listening - release Fn / Globe');
   });
 });
