@@ -456,4 +456,29 @@ describe('dictation frontend hotkey polish', () => {
 
     expect(api.summarizeHotkeyPillStatus('Listening...', 'live')).toBe('Listening - release Fn / Globe');
   });
+
+  it('keeps a newer live session active when an older transcript finishes later', () => {
+    api.handleNativeDictationStatePayload({
+      state: 'listening',
+      session_id: 1
+    });
+    api.handleNativeDictationStatePayload({
+      state: 'processing',
+      session_id: 1
+    });
+    api.handleNativeDictationStatePayload({
+      state: 'listening',
+      session_id: 2
+    });
+    api.handleNativeDictationStatePayload({
+      state: 'idle',
+      session_id: 1,
+      transcript: 'first session'
+    });
+
+    const state = api.getState();
+    expect(state.isDictating).toBe(true);
+    expect(state.activeNativeSessionId).toBe('2');
+    expect(state.currentDraftText).toBe('first session');
+  });
 });

@@ -87,6 +87,7 @@ Notes:
 - MVP background behavior: closing the desktop window now hides it instead of quitting, so dictation state can stay running in the background process.
 - App launches visible by default. Optional: set `DICKTAINT_START_HIDDEN=1` if you want hidden startup behavior.
 - MVP hold-to-talk hotkey (macOS): hold `fn` (or fallback `F19`) to record, then release to stop and transcribe, even while the app window is hidden.
+- Global hotkeys are now executed in the Rust backend instead of relying on the main window webview, so hidden/background dictation keeps working even when the renderer is suspended.
 - The onboarding/settings flow now shows per-machine setup + permission guidance (microphone, Input Monitoring, Accessibility) so Intel and Apple silicon Macs surface the same runtime expectations.
 - A small bottom-center hotkey pill now renders as a native macOS transparent overlay window (outside the main app window), with rounded edges and quick dictation state feedback that follows the active hotkey mode (`Fn` hold vs custom toggle shortcut).
 - If hold-to-talk hotkey capture does not fire, allow Input Monitoring/Accessibility for the app (or Terminal during `tauri:dev`) and relaunch.
@@ -97,6 +98,7 @@ Notes:
 - Dictation start is blocked until both prerequisites are met on that device: `whisper-cli` present and a local model selected.
 - Selected dictation model state and optional dictation hotkey are saved at `$HOME/.dicktaint/dictation-settings.json`, and model files are stored under `$HOME/.dicktaint/whisper-models/`.
 - The saved dictation hotkey is registered as a desktop global shortcut (system-wide while app is running). On macOS, `Fn` uses a native global listener when permitted; if blocked by permissions it falls back to in-app handling.
+- Dictation state events now include a backend session id so a completed older transcript cannot incorrectly clear a newer live recording in the UI.
 - Desktop bundle config uses a `whisper-cli` sidecar (`src-tauri/tauri.conf.json` `externalBin`) so packaged app users do not need a separate CLI install.
 - In setup UI, use `Refresh Setup` to re-run checks and `Delete Local Model` to remove a downloaded model file.
 - If `WHISPER_MODEL_PATH` is set, it overrides onboarding selection for desktop dictation.

@@ -59,9 +59,9 @@ Command payload notes:
 
 Event channels:
 
-- backend to frontend: `dictation:hotkey-triggered` payload `{ pressed }`
-- backend to frontend: `dictation:state-changed` payload `{ state, error?, transcript? }`
-- frontend to overlay: `dicktaint://pill-status` payload `{ message, state, visible }`
+- frontend local fallback only: `dictation:hotkey-triggered` payload `{ pressed }`
+- backend to frontend: `dictation:state-changed` payload `{ state, error?, transcript?, session_id? }`
+- backend/frontend to overlay: `dicktaint://pill-status` payload `{ message, state, visible }`
 - allowed `state`: `idle`, `working`, `live`, `ok`, `error`
 
 Environment variables with contract impact:

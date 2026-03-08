@@ -19,8 +19,9 @@ use std::os::unix::fs::PermissionsExt;
 use std::path::{Path, PathBuf};
 use std::process::{Command, Output};
 use std::str::FromStr;
+use std::sync::atomic::{AtomicU64, Ordering};
 #[cfg(target_os = "macos")]
-use std::sync::atomic::{AtomicBool, Ordering};
+use std::sync::atomic::AtomicBool;
 use std::sync::{mpsc, Arc, Mutex};
 use std::thread;
 use std::time::{Duration, SystemTime, UNIX_EPOCH};
@@ -38,8 +39,8 @@ const DEFAULT_DICTATION_TRIGGER: &str = "Fn";
 #[cfg(not(target_os = "macos"))]
 const DEFAULT_DICTATION_TRIGGER: &str = "CmdOrCtrl+Shift+D";
 const MAX_DICTATION_TRIGGER_LENGTH: usize = 64;
-const DICTATION_HOTKEY_EVENT: &str = "dictation:hotkey-triggered";
 const DICTATION_STATE_EVENT: &str = "dictation:state-changed";
+const PILL_STATUS_EVENT: &str = "dicktaint://pill-status";
 const WHISPER_CPP_SETUP_URL: &str = "https://github.com/ggml-org/whisper.cpp#quick-start";
 const START_HIDDEN_ENV: &str = "DICKTAINT_START_HIDDEN";
 const PILL_WINDOW_LABEL_PREFIX: &str = "pill";
@@ -50,15 +51,18 @@ const PILL_WINDOW_BOTTOM_MARGIN: i32 = 18;
 const MAX_PILL_WINDOWS: usize = 6;
 
 #[derive(Clone, Serialize)]
-struct DictationHotkeyEventPayload {
-    pressed: bool,
-}
-
-#[derive(Clone, Serialize)]
 struct DictationStatePayload {
     state: String,
     error: Option<String>,
     transcript: Option<String>,
+    session_id: Option<u64>,
+}
+
+#[derive(Clone, Serialize)]
+struct PillStatusPayload {
+    message: String,
+    state: String,
+    visible: bool,
 }
 
 #[derive(Clone)]
@@ -68,9 +72,18 @@ struct AppConfig {
     bundled_whisper_cli_path: Option<String>,
 }
 
-#[derive(Default)]
 struct DictationState {
     active_recording: Mutex<Option<ActiveRecording>>,
+    next_session_id: AtomicU64,
+}
+
+impl Default for DictationState {
+    fn default() -> Self {
+        Self {
+            active_recording: Mutex::new(None),
+            next_session_id: AtomicU64::new(1),
+        }
+    }
 }
 
 #[derive(Clone, Copy)]
@@ -482,12 +495,14 @@ unsafe extern "C" fn macos_fn_event_tap_callback(
 
     let has_non_fn_modifiers = (flags & MACOS_NON_FN_MODIFIER_MASK) != 0;
     if fn_down != was_fn_down && !has_non_fn_modifiers {
-        if let Err(error) = callback_ctx.app.emit(
-            DICTATION_HOTKEY_EVENT,
-            DictationHotkeyEventPayload { pressed: fn_down },
-        ) {
-            log::warn!("Failed to emit global Fn hotkey event: {error}");
-        }
+        dispatch_backend_hotkey_action(
+            &callback_ctx.app,
+            if fn_down {
+                BackendHotkeyAction::HoldStart
+            } else {
+                BackendHotkeyAction::HoldStop
+            },
+        );
     }
 
     event
@@ -576,10 +591,18 @@ struct DictationModelDeletion {
 }
 
 struct ActiveRecording {
+    session_id: u64,
     stop_tx: mpsc::Sender<()>,
     thread_handle: thread::JoinHandle<()>,
     samples: Arc<Mutex<Vec<f32>>>,
     sample_rate: u32,
+}
+
+#[derive(Clone, Copy)]
+enum BackendHotkeyAction {
+    Toggle,
+    HoldStart,
+    HoldStop,
 }
 
 fn parse_truthy_env(value: &str) -> bool {
@@ -599,6 +622,161 @@ fn show_main_window(app: &tauri::AppHandle) {
         let _ = window.unminimize();
         let _ = window.set_focus();
     }
+}
+
+fn active_hotkey_label(app: &tauri::AppHandle) -> String {
+    let hotkey_state = app.state::<GlobalHotkeyState>();
+    let trigger = current_registered_hotkey(hotkey_state.inner())
+        .ok()
+        .flatten()
+        .unwrap_or_else(default_dictation_trigger);
+    if trigger == "Fn" {
+        "Fn / Globe".to_string()
+    } else {
+        trigger
+    }
+}
+
+fn idle_pill_message(app: &tauri::AppHandle) -> String {
+    let hotkey_state = app.state::<GlobalHotkeyState>();
+    let runtime = current_trigger_runtime_details(hotkey_state.inner()).unwrap_or_default();
+    let label = active_hotkey_label(app);
+    match runtime.mode {
+        HotkeyDeliveryMode::GlobalHold | HotkeyDeliveryMode::FocusedWindowHold => {
+            format!("Hold {label} to dictate")
+        }
+        HotkeyDeliveryMode::GlobalToggle => format!("Press {label} to dictate"),
+        HotkeyDeliveryMode::Disabled => "Hotkey disabled".to_string(),
+    }
+}
+
+fn emit_pill_status(
+    app: &tauri::AppHandle,
+    message: impl Into<String>,
+    state: impl Into<String>,
+    visible: bool,
+) {
+    app.emit(
+        PILL_STATUS_EVENT,
+        PillStatusPayload {
+            message: message.into(),
+            state: state.into(),
+            visible,
+        },
+    )
+    .ok();
+}
+
+fn sync_pill_for_dictation_state(
+    app: &tauri::AppHandle,
+    state: &str,
+    error: Option<&str>,
+) {
+    let hotkey_state = app.state::<GlobalHotkeyState>();
+    let runtime = current_trigger_runtime_details(hotkey_state.inner()).unwrap_or_default();
+    let label = active_hotkey_label(app);
+
+    let (message, pill_state) = match state {
+        "listening" => {
+            let message = match runtime.mode {
+                HotkeyDeliveryMode::GlobalHold | HotkeyDeliveryMode::FocusedWindowHold => {
+                    format!("Listening - release {label}")
+                }
+                HotkeyDeliveryMode::GlobalToggle => format!("Listening - press {label} again"),
+                HotkeyDeliveryMode::Disabled => "Listening...".to_string(),
+            };
+            (message, "live")
+        }
+        "processing" => ("Transcribing...".to_string(), "working"),
+        "error" => (
+            if error
+                .map(str::trim)
+                .filter(|value| !value.is_empty())
+                .is_some()
+            {
+                "Dictation error - check status".to_string()
+            } else {
+                idle_pill_message(app)
+            },
+            if error
+                .map(str::trim)
+                .filter(|value| !value.is_empty())
+                .is_some()
+            {
+                "error"
+            } else {
+                "idle"
+            },
+        ),
+        _ => (idle_pill_message(app), "idle"),
+    };
+
+    emit_pill_status(app, message, pill_state, true);
+}
+
+fn emit_dictation_state(
+    app: &tauri::AppHandle,
+    state: &str,
+    error: Option<String>,
+    transcript: Option<String>,
+    session_id: Option<u64>,
+) {
+    sync_pill_for_dictation_state(app, state, error.as_deref());
+    app.emit(
+        DICTATION_STATE_EVENT,
+        DictationStatePayload {
+            state: state.to_string(),
+            error,
+            transcript,
+            session_id,
+        },
+    )
+    .ok();
+}
+
+fn current_active_session_id(app: &tauri::AppHandle) -> Result<Option<u64>, String> {
+    let dictation = app.state::<DictationState>();
+    dictation
+        .active_recording
+        .lock()
+        .map_err(|_| "Failed to lock dictation state".to_string())
+        .map(|guard| guard.as_ref().map(|recording| recording.session_id))
+}
+
+fn dictation_is_running(app: &tauri::AppHandle) -> Result<bool, String> {
+    current_active_session_id(app).map(|value| value.is_some())
+}
+
+fn dispatch_backend_hotkey_action(app: &tauri::AppHandle, action: BackendHotkeyAction) {
+    let handle = app.clone();
+    tauri::async_runtime::spawn(async move {
+        let result: Result<(), String> = match action {
+            BackendHotkeyAction::Toggle => match dictation_is_running(&handle) {
+                Ok(true) => stop_native_dictation_inner(handle.clone()).await.map(|_| ()),
+                Ok(false) => start_native_dictation_inner(&handle).map(|_| ()),
+                Err(error) => Err(error),
+            },
+            BackendHotkeyAction::HoldStart => match dictation_is_running(&handle) {
+                Ok(true) => Ok(()),
+                Ok(false) => start_native_dictation_inner(&handle).map(|_| ()),
+                Err(error) => Err(error),
+            },
+            BackendHotkeyAction::HoldStop => match dictation_is_running(&handle) {
+                Ok(true) => stop_native_dictation_inner(handle.clone()).await.map(|_| ()),
+                Ok(false) => Ok(()),
+                Err(error) => Err(error),
+            },
+        };
+
+        if let Err(error) = result {
+            let trimmed = error.trim();
+            let benign = trimmed == "Dictation already running." || trimmed == "Dictation is not running.";
+            if !benign {
+                log::warn!("Global hotkey action failed: {error}");
+                emit_dictation_state(&handle, "error", Some(error), None, None);
+            }
+        }
+    });
 }
 
 #[cfg(target_os = "macos")]
@@ -2941,13 +3119,11 @@ async fn delete_dictation_model(
         .map_err(|e| format!("Model delete task failed: {e}"))?
 }
 
-#[tauri::command]
-fn start_native_dictation(
-    app: tauri::AppHandle,
-    dictation: State<'_, DictationState>,
-    config: State<'_, AppConfig>,
-    model_state: State<'_, LocalModelState>,
-) -> Result<(), String> {
+fn start_native_dictation_inner(app: &tauri::AppHandle) -> Result<u64, String> {
+    let config = app.state::<AppConfig>();
+    let model_state = app.state::<LocalModelState>();
+    let dictation = app.state::<DictationState>();
+
     resolve_active_model_path(config.inner(), model_state.inner())?;
     let configured_whisper_cli_path = resolve_whisper_cli_path(
         config.whisper_cli_path_override.as_deref(),
@@ -2958,7 +3134,6 @@ fn start_native_dictation(
     ensure_whisper_cli_available(&whisper_cli_path)?;
 
     let mut guard = dictation
-        .inner()
         .active_recording
         .lock()
         .map_err(|_| "Failed to lock dictation state".to_string())?;
@@ -2966,36 +3141,26 @@ fn start_native_dictation(
         return Err("Dictation already running.".to_string());
     }
 
+    let session_id = dictation.next_session_id.fetch_add(1, Ordering::SeqCst);
     let samples = Arc::new(Mutex::new(Vec::<f32>::new()));
     let (stop_tx, thread_handle, sample_rate) = spawn_recording_thread(Arc::clone(&samples))?;
     *guard = Some(ActiveRecording {
+        session_id,
         stop_tx,
         thread_handle,
         samples,
         sample_rate,
     });
-    app.emit(
-        DICTATION_STATE_EVENT,
-        DictationStatePayload {
-            state: "listening".into(),
-            error: None,
-            transcript: None,
-        },
-    )
-    .ok();
-    Ok(())
+    drop(guard);
+
+    emit_dictation_state(app, "listening", None, None, Some(session_id));
+    Ok(session_id)
 }
 
-#[tauri::command]
-async fn stop_native_dictation(
-    app: tauri::AppHandle,
-    dictation: State<'_, DictationState>,
-    config: State<'_, AppConfig>,
-    model_state: State<'_, LocalModelState>,
-) -> Result<String, String> {
+async fn stop_native_dictation_inner(app: tauri::AppHandle) -> Result<String, String> {
     let recording = {
+        let dictation = app.state::<DictationState>();
         let mut guard = dictation
-            .inner()
             .active_recording
             .lock()
             .map_err(|_| "Failed to lock dictation state".to_string())?;
@@ -3003,18 +3168,17 @@ async fn stop_native_dictation(
             .take()
             .ok_or_else(|| "Dictation is not running.".to_string())?
     };
+    let session_id = recording.session_id;
 
     let _ = recording.stop_tx.send(());
     if recording.thread_handle.join().is_err() {
-        app.emit(
-            DICTATION_STATE_EVENT,
-            DictationStatePayload {
-                state: "error".into(),
-                error: Some("Audio capture thread crashed.".into()),
-                transcript: None,
-            },
-        )
-        .ok();
+        emit_dictation_state(
+            &app,
+            "error",
+            Some("Audio capture thread crashed.".into()),
+            None,
+            Some(session_id),
+        );
         return Err("Audio capture thread crashed.".to_string());
     }
 
@@ -3023,23 +3187,22 @@ async fn stop_native_dictation(
         .lock()
         .map_err(|_| "Failed to read captured audio".to_string())?
         .clone();
-    let model_path = resolve_active_model_path(config.inner(), model_state.inner())?;
-    let configured_whisper_cli_path = resolve_whisper_cli_path(
-        config.whisper_cli_path_override.as_deref(),
-        config.bundled_whisper_cli_path.as_deref(),
-    );
+    let model_path = {
+        let config = app.state::<AppConfig>();
+        let model_state = app.state::<LocalModelState>();
+        resolve_active_model_path(config.inner(), model_state.inner())?
+    };
+    let configured_whisper_cli_path = {
+        let config = app.state::<AppConfig>();
+        resolve_whisper_cli_path(
+            config.whisper_cli_path_override.as_deref(),
+            config.bundled_whisper_cli_path.as_deref(),
+        )
+    };
     let whisper_cli_path = detect_whisper_cli_path(&configured_whisper_cli_path)
         .unwrap_or(configured_whisper_cli_path);
 
-    app.emit(
-        DICTATION_STATE_EVENT,
-        DictationStatePayload {
-            state: "processing".into(),
-            error: None,
-            transcript: None,
-        },
-    )
-    .ok();
+    emit_dictation_state(&app, "processing", None, None, Some(session_id));
 
     let result = tauri::async_runtime::spawn_blocking(move || {
         transcribe_samples(
@@ -3051,75 +3214,61 @@ async fn stop_native_dictation(
     })
     .await
     .map_err(|e| {
-        app.emit(
-            DICTATION_STATE_EVENT,
-            DictationStatePayload {
-                state: "error".into(),
-                error: Some(e.to_string()),
-                transcript: None,
-            },
-        )
-        .ok();
+        emit_dictation_state(&app, "error", Some(e.to_string()), None, Some(session_id));
         format!("Failed to run transcription task: {e}")
     })?;
 
     match result {
         Ok(transcript) => {
-            app.emit(
-                DICTATION_STATE_EVENT,
-                DictationStatePayload {
-                    state: "idle".into(),
-                    error: None,
-                    transcript: Some(transcript.clone()),
-                },
-            )
-            .ok();
+            emit_dictation_state(
+                &app,
+                "idle",
+                None,
+                Some(transcript.clone()),
+                Some(session_id),
+            );
             Ok(transcript)
         }
         Err(e) => {
-            app.emit(
-                DICTATION_STATE_EVENT,
-                DictationStatePayload {
-                    state: "error".into(),
-                    error: Some(e.clone()),
-                    transcript: None,
-                },
-            )
-            .ok();
+            emit_dictation_state(&app, "error", Some(e.clone()), None, Some(session_id));
             Err(e)
         }
     }
 }
 
-#[tauri::command]
-fn cancel_native_dictation(
-    app: tauri::AppHandle,
-    dictation: State<'_, DictationState>,
-) -> Result<(), String> {
+fn cancel_native_dictation_inner(app: &tauri::AppHandle) -> Result<(), String> {
     let recording = {
+        let dictation = app.state::<DictationState>();
         let mut guard = dictation
-            .inner()
             .active_recording
             .lock()
             .map_err(|_| "Failed to lock dictation state".to_string())?;
         guard.take()
     };
+    let session_id = recording.as_ref().map(|value| value.session_id);
 
     if let Some(recording) = recording {
         let _ = recording.stop_tx.send(());
         let _ = recording.thread_handle.join();
     }
 
-    app.emit(
-        DICTATION_STATE_EVENT,
-        DictationStatePayload {
-            state: "idle".into(),
-            error: None,
-            transcript: None,
-        },
-    )
-    .ok();
+    emit_dictation_state(app, "idle", None, None, session_id);
     Ok(())
+}
+
+#[tauri::command]
+fn start_native_dictation(app: tauri::AppHandle) -> Result<(), String> {
+    start_native_dictation_inner(&app).map(|_| ())
+}
+
+#[tauri::command]
+async fn stop_native_dictation(app: tauri::AppHandle) -> Result<String, String> {
+    stop_native_dictation_inner(app).await
+}
+
+#[tauri::command]
+fn cancel_native_dictation(app: tauri::AppHandle) -> Result<(), String> {
+    cancel_native_dictation_inner(&app)
 }
 
 #[cfg(test)]
@@ -3266,12 +3415,7 @@ fn main() {
         tauri_plugin_global_shortcut::Builder::new()
             .with_handler(|app, _shortcut, event| {
                 if event.state() == ShortcutState::Pressed {
-                    if let Err(error) = app.emit(
-                        DICTATION_HOTKEY_EVENT,
-                        DictationHotkeyEventPayload { pressed: true },
-                    ) {
-                        log::warn!("Failed to emit dictation hotkey event: {error}");
-                    }
+                    dispatch_backend_hotkey_action(app, BackendHotkeyAction::Toggle);
                 }
             })
             .build(),

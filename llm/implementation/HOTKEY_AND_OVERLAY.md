@@ -35,20 +35,20 @@ Out of scope:
 Backend behavior:
 
 - registers global monitor for macOS `flagsChanged`
-- emits `dictation:hotkey-triggered` with `{ pressed }` so `Fn` hold can start on press and stop on release even when the main window is hidden
+- executes global hotkey actions in Rust so start/stop does not depend on the main window webview being awake
+- emits `dictation:state-changed` with backend `session_id` values so late transcripts cannot clear a newer live recording
 - creates native transparent overlay windows per monitor (up to 6)
+- emits `dicktaint://pill-status` directly for listening / processing / idle / error transitions so the overlay stays accurate while the main window is hidden
 - close request on main window hides app instead of quitting
 - macOS reopen event re-shows and focuses main window
 
 Frontend behavior:
 
-- listens for `dictation:hotkey-triggered`
 - fallback focused listeners for `Fn` / `F19`
-- on `Fn` press: start native dictation
-- on `Fn` release: stop native dictation and transcribe
-- on non-`Fn` shortcut press: toggle start/stop
+- only uses focused-window `Fn` listeners when macOS global Input Monitoring is unavailable
+- listens for `dictation:state-changed` and treats `session_id` as the authoritative native session identity
 - release-during-start race handled by deferred stop flag
-- status emits `dicktaint://pill-status` updates for overlay UI
+- status may still emit `dicktaint://pill-status` for setup/onboarding text, but backend owns dictation lifecycle pill updates
 - pill copy reflects the saved hotkey and its mode (`global-hold`, `focused-window-hold`, `global-toggle`)
 - onboarding/settings surface hotkey runtime state plus permission guidance
 - finalized transcript appends locally and can optionally paste into the focused field when setting is enabled and another app is focused

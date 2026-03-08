@@ -99,7 +99,6 @@ let pendingNativeStartTrigger = null;
 let activeNativeSessionId = null;
 let nativeSessionIdToIgnore = null;
 let rejectNextNativeAppend = false;
-let nativeSessionSeq = 0;
 let committedNativeSessionIds = new Set();
 let startNativeDesktopDictationOverride = null;
 
@@ -902,11 +901,6 @@ function pushDictationHistory(chunk, source = 'native') {
   renderDictationHistory();
 }
 
-function nextNativeSessionId() {
-  nativeSessionSeq += 1;
-  return `native-${Date.now()}-${nativeSessionSeq}`;
-}
-
 /**
  * Attempts to record a native session as committed.
  * Returns false when a duplicate session id is detected; null/empty ids return true.
@@ -920,6 +914,12 @@ function tryCommitNativeSession(sessionId) {
     committedNativeSessionIds = new Set(keep);
   }
   return true;
+}
+
+function normalizeNativeSessionId(sessionId) {
+  if (sessionId === null || sessionId === undefined) return null;
+  const normalized = String(sessionId).trim();
+  return normalized || null;
 }
 
 function queueNativeStartAfterCurrentStop(trigger = 'hotkey') {
@@ -1844,7 +1844,7 @@ async function startNativeDesktopDictation(trigger = 'button', shouldRetryOnConf
     syncControls();
     setUiMode('loading');
     setStatus('Opening microphone...', 'working');
-    activeNativeSessionId = nextNativeSessionId();
+    activeNativeSessionId = null;
     await tauriInvoke('start_native_dictation');
     isStartingDictation = false;
     setDictationState(true);
@@ -1975,6 +1975,7 @@ function applyNativeFnHoldState(pressed) {
 
 function handleNativeHoldKeydown(event) {
   if (!isFocusedMacDesktopMode()) return;
+  if (dictationTriggerMode !== 'focused-window-hold') return;
   if (event.repeat) return;
   if (event.metaKey || event.ctrlKey || event.altKey || event.shiftKey) return;
   if (!isNativeHoldHotkeyEvent(event)) return;
@@ -1987,6 +1988,7 @@ function handleNativeHoldKeydown(event) {
 
 function handleNativeHoldKeyup(event) {
   if (!isFocusedMacDesktopMode()) return;
+  if (dictationTriggerMode !== 'focused-window-hold') return;
   if (!isNativeHoldHotkeyEvent(event)) return;
   if (activeHotkeySpec?.ok && activeHotkeySpec.key !== 'Fn') return;
 
@@ -2066,16 +2068,69 @@ function handleDictationHotkeyEvent(event) {
   if (maybeCaptureDictationHotkeyEvent(event)) {
     return;
   }
+}
 
-  if (event.type !== 'keydown') {
+function handleNativeDictationStatePayload(payload) {
+  const s = payload?.state ?? 'idle';
+  const payloadSessionId = normalizeNativeSessionId(payload?.session_id);
+  const sessionMatchesCurrent = !payloadSessionId
+    || !activeNativeSessionId
+    || payloadSessionId === activeNativeSessionId;
+
+  if (s === 'listening') {
+    activeNativeSessionId = payloadSessionId || activeNativeSessionId;
+    isStartingDictation = false;
+    setDictationState(true);
+    setUiMode('listening');
+    setStatus('Listening\u2026 click Stop to transcribe.', 'live');
     return;
   }
 
-  if (!activeHotkeySpec?.ok) return;
-  if (!eventMatchesHotkey(event, activeHotkeySpec)) return;
+  if (s === 'processing') {
+    if (payloadSessionId && !activeNativeSessionId) {
+      activeNativeSessionId = payloadSessionId;
+    }
+    isStartingDictation = false;
+    setUiMode('loading');
+    setStatus('Transcribing captured audio...', 'working');
+    return;
+  }
 
-  event.preventDefault();
-  triggerDictationToggleFromHotkey();
+  if (s === 'idle') {
+    const transcriptSessionId = payloadSessionId || activeNativeSessionId;
+    const didAppendTranscript = nativeStopRequestInFlight
+      ? false
+      : appendTranscriptChunk(payload?.transcript, {
+        source: 'native-event',
+        nativeSessionId: transcriptSessionId
+      });
+
+    if (sessionMatchesCurrent && (isDictating || isStartingDictation || didAppendTranscript)) {
+      isStartingDictation = false;
+      setDictationState(false);
+      setUiMode('idle');
+    }
+    if (sessionMatchesCurrent) {
+      activeNativeSessionId = null;
+    }
+    if (didAppendTranscript && sessionMatchesCurrent) {
+      setStatus('Dictation captured and transcribed.', 'ok');
+    }
+    return;
+  }
+
+  if (s === 'error') {
+    const details = getErrorMessage(payload?.error);
+    if (sessionMatchesCurrent) {
+      activeNativeSessionId = null;
+      nativeStopRequestInFlight = false;
+      isStartingDictation = false;
+      setDictationState(false);
+      setUiMode('error');
+      setStatus(`Could not transcribe dictation: ${details}`, 'error');
+      void maybeStartQueuedNativeDictation();
+    }
+  }
 }
 
 function initDictation() {
@@ -2083,6 +2138,7 @@ function initDictation() {
   if (isNativeDesktopMode() && tauriEventApi?.listen) {
     tauriEventApi.listen(DICTATION_HOTKEY_EVENT, ({ payload }) => {
       if (isCapturingDictationHotkey) return;
+      if (dictationTriggerMode !== 'focused-window-hold') return;
       if (activeHotkeySpec?.ok && activeHotkeySpec.key === 'Fn') {
         applyNativeFnHoldState(payload?.pressed !== false);
         return;
@@ -2095,42 +2151,7 @@ function initDictation() {
     });
 
     tauriEventApi.listen(DICTATION_STATE_EVENT, ({ payload }) => {
-      const s = payload?.state ?? 'idle';
-      if (s === 'listening') {
-        isStartingDictation = false;
-        setDictationState(true);
-        setUiMode('listening');
-        setStatus('Listening\u2026 click Stop to transcribe.', 'live');
-      } else if (s === 'processing') {
-        isStartingDictation = false;
-        setUiMode('loading');
-        setStatus('Transcribing captured audio...', 'working');
-      } else if (s === 'idle') {
-        const didAppendTranscript = nativeStopRequestInFlight
-          ? false
-          : appendTranscriptChunk(payload?.transcript, {
-            source: 'native-event',
-            nativeSessionId: activeNativeSessionId
-          });
-        if (isDictating || isStartingDictation || didAppendTranscript) {
-          isStartingDictation = false;
-          setDictationState(false);
-          setUiMode('idle');
-        }
-        activeNativeSessionId = null;
-        if (didAppendTranscript) {
-          setStatus('Dictation captured and transcribed.', 'ok');
-        }
-      } else if (s === 'error') {
-        const details = getErrorMessage(payload?.error);
-        activeNativeSessionId = null;
-        nativeStopRequestInFlight = false;
-        isStartingDictation = false;
-        setDictationState(false);
-        setUiMode('error');
-        setStatus(`Could not transcribe dictation: ${details}`, 'error');
-        void maybeStartQueuedNativeDictation();
-      }
+      handleNativeDictationStatePayload(payload);
     }).catch(err => {
       console.error('Failed to register DICTATION_STATE_EVENT listener', err);
       setStatus('Could not register dictation state listener.', 'error');
@@ -2446,6 +2467,7 @@ function getDictationTestState() {
     pendingNativeStartAfterStop,
     pendingNativeStartTrigger,
     nativeStopRequestInFlight,
+    activeNativeSessionId,
     isDictating,
     isStartingDictation,
     dictationTriggerMode,
@@ -2467,7 +2489,6 @@ function resetDictationStateForTests() {
   activeNativeSessionId = null;
   nativeSessionIdToIgnore = null;
   rejectNextNativeAppend = false;
-  nativeSessionSeq = 0;
   committedNativeSessionIds = new Set();
   startNativeDesktopDictationOverride = null;
   dictationTriggerMode = 'disabled';
@@ -2493,6 +2514,7 @@ if (typeof globalThis !== 'undefined' && globalThis.__DICKTAINT_EXPOSE_TEST_API_
     setDraftTranscriptText,
     applyDictationHotkeyPayload,
     summarizeHotkeyPillStatus,
+    handleNativeDictationStatePayload,
     getState: getDictationTestState,
     resetState: resetDictationStateForTests,
     setNativeFlags(next = {}) {
