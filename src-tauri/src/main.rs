@@ -44,10 +44,10 @@ const PILL_STATUS_EVENT: &str = "dicktaint://pill-status";
 const WHISPER_CPP_SETUP_URL: &str = "https://github.com/ggml-org/whisper.cpp#quick-start";
 const START_HIDDEN_ENV: &str = "DICKTAINT_START_HIDDEN";
 const PILL_WINDOW_LABEL_PREFIX: &str = "pill";
-const PILL_WINDOW_BASE_WIDTH: f64 = 278.0;
-const PILL_WINDOW_MIN_WIDTH: f64 = 220.0;
-const PILL_WINDOW_HEIGHT: f64 = 40.0;
-const PILL_WINDOW_BOTTOM_MARGIN: i32 = 18;
+const PILL_WINDOW_BASE_WIDTH: f64 = 246.0;
+const PILL_WINDOW_MIN_WIDTH: f64 = 194.0;
+const PILL_WINDOW_HEIGHT: f64 = 34.0;
+const PILL_WINDOW_BOTTOM_MARGIN: i32 = 16;
 const MAX_PILL_WINDOWS: usize = 6;
 
 #[derive(Clone, Serialize)]
