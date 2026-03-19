@@ -57,8 +57,8 @@ Model resolution order:
 
 Local persistence:
 
-- settings path: `$HOME/.dicktaint/dictation-settings.json`
-- model directory: `$HOME/.dicktaint/whisper-models/`
+- settings path: `$HOME/Library/Application Support/com.plebdev.dicktaint/.dicktaint/dictation-settings.json`
+- model directory: `$HOME/Library/Application Support/com.plebdev.dicktaint/.dicktaint/whisper-models/`
 - settings include model selection, dictation trigger config, and `focused_field_insert_enabled`
 
 ## Verification

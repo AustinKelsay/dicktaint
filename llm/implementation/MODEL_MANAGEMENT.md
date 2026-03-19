@@ -57,8 +57,8 @@ Delete flow (`delete_dictation_model`):
 
 Persistence paths:
 
-- settings: `$HOME/.dicktaint/dictation-settings.json`
-- models: `$HOME/.dicktaint/whisper-models/`
+- settings: `$HOME/Library/Application Support/com.plebdev.dicktaint/.dicktaint/dictation-settings.json`
+- models: `$HOME/Library/Application Support/com.plebdev.dicktaint/.dicktaint/whisper-models/`
 
 Write safety:
 
