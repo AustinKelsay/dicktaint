@@ -1,6 +1,6 @@
 {
   "name": "dicktaint",
-  "version": "0.1.9",
+  "version": "0.1.10",
   "private": true,
   "description": "Local dictation app with native Whisper CLI transcription and local model management",
   "scripts": {

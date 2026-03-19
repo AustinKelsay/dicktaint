@@ -144,22 +144,31 @@ This repo now includes a GitHub Actions workflow at `.github/workflows/release-m
 What it does:
 - runs on tag push (`v*`)
 - builds Tauri macOS bundles for both Apple Silicon and Intel (`.dmg` + `.app.tar.gz`)
+- passes Apple signing/notarization credentials through to the Tauri build
+- validates the built `.app` signature before publishing artifacts
 - creates a GitHub Release and uploads artifacts + `SHA256SUMS.txt`
 
 How to release:
 
 1. Make sure `main` is green and pushed.
-2. Bump the version in `package.json`, `src-tauri/Cargo.toml`, and `src-tauri/tauri.conf.json`.
-3. Add or update the top changelog entry in `CHANGELOG.md`, including the private API disclosure if overlay behavior still depends on it.
-4. Create and push a version tag:
+2. Make sure GitHub Actions has the Apple signing secrets configured:
+   - `APPLE_CERTIFICATE`
+   - `APPLE_CERTIFICATE_PASSWORD`
+   - either `APPLE_ID` + `APPLE_PASSWORD` + `APPLE_TEAM_ID`, or `APPLE_API_KEY` + `APPLE_API_ISSUER` + `APPLE_API_KEY_CONTENT`
+3. Bump the version in `package.json`, `src-tauri/Cargo.toml`, and `src-tauri/tauri.conf.json`.
+4. Add or update the top changelog entry in `CHANGELOG.md`, including the private API disclosure if overlay behavior still depends on it.
+5. Create and push a version tag:
    ```bash
    git checkout main
    git pull
-   git tag v0.1.9
-   git push origin v0.1.9
+   git tag v0.1.10
+   git push origin v0.1.10
    ```
-5. Wait for the `Release macOS App` workflow to finish.
-6. Open GitHub Releases, verify the generated notes/artifacts, and share the uploaded `.dmg` with users.
+6. Wait for the `Release macOS App` workflow to finish.
+7. Open GitHub Releases, verify the generated notes/artifacts, and share the uploaded `.dmg` with users.
+
+Important:
+- the workflow now fails instead of publishing ad hoc macOS apps when signing/notarization inputs are missing or the built bundle fails `codesign --verify --deep --strict`
 
 User install flow:
 - download `.dmg` from Releases

@@ -1,5 +1,18 @@
 # Changelog
 
+## v0.1.10 - 2026-03-19
+
+### Highlights
+
+- fixed the macOS release workflow so Apple signing and notarization credentials are forwarded into the Tauri build
+- added release-time validation that fails the workflow if the built `.app` bundle does not pass `codesign --verify --deep --strict`
+- tightened the release runbook so unsigned ad hoc desktop artifacts stop shipping as if they were production-ready
+
+### Release Notes
+
+- macOS desktop remains the primary release target for this build
+- `macOSPrivateApi` remains enabled to support the transparent overlay behavior, so this release is intended for direct distribution rather than Mac App Store submission
+
 ## v0.1.9 - 2026-03-19
 
 ### Highlights

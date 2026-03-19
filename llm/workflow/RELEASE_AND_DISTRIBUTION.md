@@ -44,13 +44,17 @@ Tag-and-publish path:
 
 1. release from `main`
 2. push `v*` tag after version/docs are merged
-3. confirm the `Release macOS App` workflow publishes both architectures
-4. review generated GitHub release notes and replace them with the curated changelog summary if needed
+3. confirm GitHub Actions signing/notarization secrets are populated before tagging
+4. confirm the `Release macOS App` workflow publishes both architectures
+5. confirm the workflow validates the built app bundle with `codesign --verify --deep --strict`
+6. review generated GitHub release notes and replace them with the curated changelog summary if needed
+7. run a clean-machine launch + dictation smoke when the signed artifacts are available
 
 Packaging requirement:
 
 - `bundle.externalBin` is configured for `binaries/whisper-cli`
 - target platform sidecar binaries must be available for intended targets
+- release automation must fail if signing/notarization credentials are missing rather than publishing ad hoc app bundles
 
 Direct macOS distribution requirements:
 
