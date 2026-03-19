@@ -89,7 +89,8 @@ Notes:
 - MVP hold-to-talk hotkey (macOS): hold `fn` (or fallback `F19`) to record, then release to stop and transcribe, even while the app window is hidden.
 - Global hotkeys are now executed in the Rust backend instead of relying on the main window webview, so hidden/background dictation keeps working even when the renderer is suspended.
 - The onboarding/settings flow now shows per-machine setup + permission guidance (microphone, Input Monitoring, Accessibility) so Intel and Apple silicon Macs surface the same runtime expectations.
-- A small bottom-center hotkey pill now renders as a native macOS transparent overlay window (outside the main app window), with rounded edges and quick dictation state feedback that follows the active hotkey mode (`Fn` hold vs custom toggle shortcut).
+- The settings screen groups models, hotkeys, insertion, and permissions into separate sections so the same options are easier to scan and maintain.
+- A small bottom-center hotkey pill now renders as a native macOS transparent overlay window (outside the main app window), with rounded edges, a slimmer footprint, and quick dictation state feedback that follows the active hotkey mode (`Fn` hold vs custom toggle shortcut).
 - If hold-to-talk hotkey capture does not fire, allow Input Monitoring/Accessibility for the app (or Terminal during `tauri:dev`) and relaunch.
 - Desktop onboarding is local-first and model-first: verify `whisper-cli`, inspect hardware, then download/select one local Whisper model per device.
 - Packaged desktop builds are expected to provide `whisper-cli` as a bundled sidecar.
@@ -146,15 +147,17 @@ What it does:
 How to release:
 
 1. Make sure `main` is green and pushed.
-2. Create and push a version tag:
+2. Bump the version in `package.json`, `src-tauri/Cargo.toml`, and `src-tauri/tauri.conf.json`.
+3. Add or update the top changelog entry in `CHANGELOG.md`, including the private API disclosure if overlay behavior still depends on it.
+4. Create and push a version tag:
    ```bash
    git checkout main
    git pull
-   git tag v0.1.1
-   git push origin v0.1.1
+   git tag v0.1.8
+   git push origin v0.1.8
    ```
-3. Wait for the `Release macOS App` workflow to finish.
-4. Open GitHub Releases and share the uploaded `.dmg` with users.
+5. Wait for the `Release macOS App` workflow to finish.
+6. Open GitHub Releases, verify the generated notes/artifacts, and share the uploaded `.dmg` with users.
 
 User install flow:
 - download `.dmg` from Releases
