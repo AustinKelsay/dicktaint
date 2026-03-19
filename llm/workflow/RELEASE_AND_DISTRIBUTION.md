@@ -2,7 +2,7 @@
 
 ## Status Snapshot
 
-- Date: 2026-02-17
+- Date: 2026-03-19
 - desktop release posture is direct macOS distribution while private API mode is enabled
 
 ## Purpose
@@ -32,11 +32,20 @@ Out of scope:
 
 Pre-release gates:
 
-1. `bun run test:all`
-2. `bun run docs:verify`
-3. run manual smoke checklist from `SMOKE_TESTS.md`
-4. verify sidecar binaries required for target distribution are present
-5. verify private API setting matches release channel policy
+1. sync release version across `package.json`, `src-tauri/Cargo.toml`, and `src-tauri/tauri.conf.json`
+2. update top release notes entry in `CHANGELOG.md`
+3. `bun run test:all`
+4. `bun run docs:verify`
+5. run manual smoke checklist from `SMOKE_TESTS.md`
+6. verify sidecar binaries required for target distribution are present
+7. verify private API setting matches release channel policy
+
+Tag-and-publish path:
+
+1. release from `main`
+2. push `v*` tag after version/docs are merged
+3. confirm the `Release macOS App` workflow publishes both architectures
+4. review generated GitHub release notes and replace them with the curated changelog summary if needed
 
 Packaging requirement:
 
