@@ -1,7 +1,7 @@
 {
   "$schema": "https://schema.tauri.app/config/2",
   "productName": "dicktaint",
-  "version": "0.1.8",
+  "version": "0.1.9",
   "identifier": "com.plebdev.dicktaint",
   "build": {
     "beforeDevCommand": "HOST=${HOST:-127.0.0.1} PORT=43210 bun run start",

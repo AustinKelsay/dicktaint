@@ -3,11 +3,9 @@ use cpal::{SampleFormat, Stream};
 #[cfg(target_os = "macos")]
 use objc2::rc::Retained;
 #[cfg(target_os = "macos")]
-use objc2::runtime::ProtocolObject;
+use objc2_app_kit::{NSPasteboard, NSPasteboardTypeString};
 #[cfg(target_os = "macos")]
-use objc2_app_kit::{NSPasteboard, NSPasteboardItem, NSPasteboardWriting};
-#[cfg(target_os = "macos")]
-use objc2_foundation::{NSArray, NSString};
+use objc2_foundation::NSString;
 use serde::{Deserialize, Serialize};
 use std::collections::HashSet;
 #[cfg(target_os = "macos")]
@@ -21,7 +19,7 @@ use std::process::{Command, Output};
 use std::str::FromStr;
 use std::sync::atomic::{AtomicU64, Ordering};
 #[cfg(target_os = "macos")]
-use std::sync::atomic::AtomicBool;
+use std::sync::atomic::{AtomicBool, AtomicPtr};
 use std::sync::{mpsc, Arc, Mutex};
 use std::thread;
 use std::time::{Duration, SystemTime, UNIX_EPOCH};
@@ -313,6 +311,10 @@ const CG_EVENT_TAP_PLACEMENT_HEAD_INSERT: u32 = 0;
 const CG_EVENT_TAP_OPTION_LISTEN_ONLY: u32 = 1;
 #[cfg(target_os = "macos")]
 const CG_EVENT_TYPE_FLAGS_CHANGED: u32 = 12;
+#[cfg(target_os = "macos")]
+const CG_EVENT_TYPE_TAP_DISABLED_BY_TIMEOUT: u32 = 0xFFFF_FFFE;
+#[cfg(target_os = "macos")]
+const CG_EVENT_TYPE_TAP_DISABLED_BY_USER_INPUT: u32 = 0xFFFF_FFFF;
 
 #[cfg(target_os = "macos")]
 const MACOS_COMMAND_FLAG_MASK: CGEventFlags = 1 << 20;
@@ -380,6 +382,7 @@ struct MacFnCallbackContext {
     app: tauri::AppHandle,
     enabled: AtomicBool,
     fn_down: AtomicBool,
+    tap: AtomicPtr<c_void>,
 }
 
 #[cfg(target_os = "macos")]
@@ -402,6 +405,7 @@ impl MacFnGlobalListener {
             app: app.clone(),
             enabled: AtomicBool::new(false),
             fn_down: AtomicBool::new(false),
+            tap: AtomicPtr::new(std::ptr::null_mut()),
         });
         let callback_ctx_raw = Arc::into_raw(Arc::clone(&callback_ctx));
 
@@ -422,6 +426,10 @@ impl MacFnGlobalListener {
             }
             return Err("Global Fn listener unavailable. macOS may be blocking event taps. Allow Input Monitoring for this app/terminal in System Settings > Privacy & Security > Input Monitoring.".to_string());
         }
+
+        callback_ctx
+            .tap
+            .store(tap.cast::<c_void>(), Ordering::SeqCst);
 
         let source = unsafe { CFMachPortCreateRunLoopSource(kCFAllocatorDefault, tap, 0) };
         if source.is_null() {
@@ -480,11 +488,26 @@ unsafe extern "C" fn macos_fn_event_tap_callback(
     event: CGEventRef,
     user_info: *mut c_void,
 ) -> CGEventRef {
-    if event.is_null() || user_info.is_null() || event_type != CG_EVENT_TYPE_FLAGS_CHANGED {
+    if user_info.is_null() {
         return event;
     }
 
     let callback_ctx = &*(user_info as *const MacFnCallbackContext);
+    if event_type == CG_EVENT_TYPE_TAP_DISABLED_BY_TIMEOUT
+        || event_type == CG_EVENT_TYPE_TAP_DISABLED_BY_USER_INPUT
+    {
+        let tap = callback_ctx.tap.load(Ordering::Relaxed);
+        if !tap.is_null() {
+            CGEventTapEnable(tap.cast::<c_void>(), true);
+        }
+        callback_ctx.fn_down.store(false, Ordering::Relaxed);
+        return event;
+    }
+
+    if event.is_null() || event_type != CG_EVENT_TYPE_FLAGS_CHANGED {
+        return event;
+    }
+
     if !callback_ctx.enabled.load(Ordering::Relaxed) {
         return event;
     }
@@ -1166,6 +1189,35 @@ fn runtime_details_for_trigger(
         },
         _ => TriggerRuntimeDetails::default(),
     }
+}
+
+fn onboarding_runtime_details(
+    trigger: Option<&str>,
+    registered_trigger: Option<&str>,
+    registered_runtime: Option<&TriggerRuntimeDetails>,
+) -> TriggerRuntimeDetails {
+    let normalized = trigger.map(str::trim).filter(|value| !value.is_empty());
+    if normalized.is_none() {
+        return TriggerRuntimeDetails::default();
+    }
+
+    if normalized == registered_trigger {
+        if let Some(runtime) = registered_runtime {
+            return runtime.clone();
+        }
+    }
+
+    #[cfg(target_os = "macos")]
+    let mode = if normalized == Some("Fn") {
+        HotkeyDeliveryMode::FocusedWindowHold
+    } else {
+        HotkeyDeliveryMode::GlobalToggle
+    };
+
+    #[cfg(not(target_os = "macos"))]
+    let mode = HotkeyDeliveryMode::GlobalToggle;
+
+    runtime_details_for_trigger(normalized, mode)
 }
 
 fn dictation_trigger_payload(
@@ -2182,6 +2234,7 @@ fn download_whisper_model(model_spec: WhisperModelSpec, target_path: &Path) -> R
 fn build_onboarding_payload(
     config: &AppConfig,
     model_state: &LocalModelState,
+    hotkey_state: &GlobalHotkeyState,
 ) -> Result<DictationOnboardingPayload, String> {
     let device = build_device_profile();
     let settings = model_state
@@ -2220,21 +2273,13 @@ fn build_onboarding_payload(
         settings.selected_model_id.clone()
     };
     let dictation_trigger = resolve_effective_dictation_trigger(&settings);
-    let trigger_runtime = if let Some(trigger) = dictation_trigger.as_deref() {
-        #[cfg(target_os = "macos")]
-        let mode = if trigger == "Fn" {
-            HotkeyDeliveryMode::FocusedWindowHold
-        } else {
-            HotkeyDeliveryMode::GlobalToggle
-        };
-
-        #[cfg(not(target_os = "macos"))]
-        let mode = HotkeyDeliveryMode::GlobalToggle;
-
-        runtime_details_for_trigger(Some(trigger), mode)
-    } else {
-        TriggerRuntimeDetails::default()
-    };
+    let registered_trigger = current_registered_hotkey(hotkey_state).ok().flatten();
+    let registered_runtime = current_trigger_runtime_details(hotkey_state).ok();
+    let trigger_runtime = onboarding_runtime_details(
+        dictation_trigger.as_deref(),
+        registered_trigger.as_deref(),
+        registered_runtime.as_ref(),
+    );
     let list_selected_model_id = if override_model_path.is_some() {
         None
     } else {
@@ -2688,7 +2733,8 @@ fn get_dictation_onboarding(
     model_state: State<'_, LocalModelState>,
     hotkey_state: State<'_, GlobalHotkeyState>,
 ) -> Result<DictationOnboardingPayload, String> {
-    let mut payload = build_onboarding_payload(config.inner(), model_state.inner())?;
+    let mut payload =
+        build_onboarding_payload(config.inner(), model_state.inner(), hotkey_state.inner())?;
     match apply_registered_hotkey(
         &app,
         hotkey_state.inner(),
@@ -2833,22 +2879,14 @@ fn set_focused_field_insert_enabled(
 #[cfg(target_os = "macos")]
 fn write_text_to_general_pasteboard(
     text: &str,
-) -> Result<
-    (
-        Retained<NSPasteboard>,
-        Option<Vec<Retained<NSPasteboardItem>>>,
-    ),
-    String,
-> {
+) -> Result<(Retained<NSPasteboard>, Option<String>), String> {
     let pasteboard = NSPasteboard::generalPasteboard();
-    let snapshot = pasteboard.pasteboardItems().map(|items| items.to_vec());
-
-    let ns_text = NSString::from_str(text);
-    let object = ProtocolObject::from_ref(&*ns_text);
-    let objects = NSArray::from_slice(&[object]);
+    let snapshot =
+        unsafe { pasteboard.stringForType(NSPasteboardTypeString) }.map(|value| value.to_string());
 
     let _ = pasteboard.clearContents();
-    if !pasteboard.writeObjects(&objects) {
+    let ns_text = NSString::from_str(text);
+    if !unsafe { pasteboard.setString_forType(&ns_text, NSPasteboardTypeString) } {
         return Err("Failed to place dictated text on the macOS pasteboard.".to_string());
     }
 
@@ -2858,26 +2896,17 @@ fn write_text_to_general_pasteboard(
 #[cfg(target_os = "macos")]
 fn restore_general_pasteboard(
     pasteboard: &NSPasteboard,
-    snapshot: Option<Vec<Retained<NSPasteboardItem>>>,
+    snapshot: Option<String>,
 ) -> Result<(), String> {
-    let _ = pasteboard.clearContents();
-
-    let Some(items) = snapshot else {
+    let Some(previous_text) = snapshot else {
         return Ok(());
     };
 
-    if items.is_empty() {
-        return Ok(());
-    }
-
-    let objects: Vec<&ProtocolObject<dyn NSPasteboardWriting>> = items
-        .iter()
-        .map(|item| ProtocolObject::from_ref(&**item))
-        .collect();
-    let object_array = NSArray::from_slice(&objects);
-    if !pasteboard.writeObjects(&object_array) {
+    let _ = pasteboard.clearContents();
+    let ns_text = NSString::from_str(previous_text.as_str());
+    if !unsafe { pasteboard.setString_forType(&ns_text, NSPasteboardTypeString) } {
         return Err(
-            "Failed to restore the previous macOS pasteboard contents after dictation paste."
+            "Failed to restore the previous macOS pasteboard text after dictation paste."
                 .to_string(),
         );
     }
@@ -3275,9 +3304,9 @@ fn cancel_native_dictation(app: tauri::AppHandle) -> Result<(), String> {
 mod tests {
     use super::{
         default_dictation_trigger, focused_field_insert_enabled, normalize_dictation_trigger,
-        preferred_whisper_cli_names, resample_linear, resolve_effective_dictation_trigger,
-        runtime_details_for_trigger, whisper_help_text_looks_valid, HotkeyDeliveryMode,
-        LocalSettings,
+        onboarding_runtime_details, preferred_whisper_cli_names, resample_linear,
+        resolve_effective_dictation_trigger, runtime_details_for_trigger,
+        whisper_help_text_looks_valid, HotkeyDeliveryMode, LocalSettings,
     };
 
     #[test]
@@ -3390,6 +3419,24 @@ mod tests {
     fn runtime_details_report_fn_permission_fallback() {
         let runtime =
             runtime_details_for_trigger(Some("Fn"), HotkeyDeliveryMode::FocusedWindowHold);
+        assert_eq!(runtime.mode.as_str(), "focused-window-hold");
+        assert!(runtime.status.contains("focused"));
+        assert!(runtime.permission_hint.is_some());
+    }
+
+    #[test]
+    fn onboarding_runtime_prefers_registered_global_fn_state() {
+        let registered_runtime =
+            runtime_details_for_trigger(Some("Fn"), HotkeyDeliveryMode::GlobalHold);
+        let runtime =
+            onboarding_runtime_details(Some("Fn"), Some("Fn"), Some(&registered_runtime));
+        assert_eq!(runtime.mode.as_str(), "global-hold");
+        assert!(runtime.status.contains("anywhere"));
+    }
+
+    #[test]
+    fn onboarding_runtime_falls_back_when_fn_runtime_is_unknown() {
+        let runtime = onboarding_runtime_details(Some("Fn"), None, None);
         assert_eq!(runtime.mode.as_str(), "focused-window-hold");
         assert!(runtime.status.contains("focused"));
         assert!(runtime.permission_hint.is_some());

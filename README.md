@@ -91,15 +91,17 @@ Notes:
 - The onboarding/settings flow now shows per-machine setup + permission guidance (microphone, Input Monitoring, Accessibility) so Intel and Apple silicon Macs surface the same runtime expectations.
 - The settings screen groups models, hotkeys, insertion, and permissions into separate sections so the same options are easier to scan and maintain.
 - A small bottom-center hotkey pill now renders as a native macOS transparent overlay window (outside the main app window), with rounded edges, a slimmer footprint, and quick dictation state feedback that follows the active hotkey mode (`Fn` hold vs custom toggle shortcut).
+- The macOS `Fn` listener now recovers more gracefully if the system temporarily disables its event tap, which reduces the “Fn stopped working until relaunch” failure mode.
 - If hold-to-talk hotkey capture does not fire, allow Input Monitoring/Accessibility for the app (or Terminal during `tauri:dev`) and relaunch.
 - Desktop onboarding is local-first and model-first: verify `whisper-cli`, inspect hardware, then download/select one local Whisper model per device.
 - Packaged desktop builds are expected to provide `whisper-cli` as a bundled sidecar.
 - `tauri:dev` resolves `whisper-cli` from sidecar candidates, `WHISPER_CLI_PATH`, or system `PATH`.
 - Onboarding marks one best-fit recommended model for the current machine (and still shows the full model list).
 - Dictation start is blocked until both prerequisites are met on that device: `whisper-cli` present and a local model selected.
-- Selected dictation model state and optional dictation hotkey are saved at `$HOME/.dicktaint/dictation-settings.json`, and model files are stored under `$HOME/.dicktaint/whisper-models/`.
+- Selected dictation model state and optional dictation hotkey are saved at `$HOME/Library/Application Support/com.plebdev.dicktaint/.dicktaint/dictation-settings.json`, and model files are stored under `$HOME/Library/Application Support/com.plebdev.dicktaint/.dicktaint/whisper-models/`.
 - The saved dictation hotkey is registered as a desktop global shortcut (system-wide while app is running). On macOS, `Fn` uses a native global listener when permitted; if blocked by permissions it falls back to in-app handling.
 - Dictation state events now include a backend session id so a completed older transcript cannot incorrectly clear a newer live recording in the UI.
+- Focused-field insertion now restores prior clipboard text through a safer path to avoid pasteboard crashes after a successful paste.
 - Desktop bundle config uses a `whisper-cli` sidecar (`src-tauri/tauri.conf.json` `externalBin`) so packaged app users do not need a separate CLI install.
 - In setup UI, use `Refresh Setup` to re-run checks and `Delete Local Model` to remove a downloaded model file.
 - If `WHISPER_MODEL_PATH` is set, it overrides onboarding selection for desktop dictation.
@@ -123,7 +125,7 @@ Hotkey setup (desktop):
 - The saved combo is registered as a global hotkey while the desktop app is running. On macOS, `Fn` is global when Input Monitoring permissions allow it, and otherwise the UI now calls out that it has fallen back to focused-window behavior until that permission is granted.
 - `Reset Default` sets `Fn` on macOS and `CmdOrCtrl+Shift+D` on other desktop platforms.
 - `Disable Hotkey` removes the shortcut.
-- Hotkey config is per-device and persisted in `$HOME/.dicktaint/dictation-settings.json`.
+- Hotkey config is per-device and persisted in `$HOME/Library/Application Support/com.plebdev.dicktaint/.dicktaint/dictation-settings.json`.
 
 Desktop build (local/manual):
 
@@ -153,8 +155,8 @@ How to release:
    ```bash
    git checkout main
    git pull
-   git tag v0.1.8
-   git push origin v0.1.8
+   git tag v0.1.9
+   git push origin v0.1.9
    ```
 5. Wait for the `Release macOS App` workflow to finish.
 6. Open GitHub Releases, verify the generated notes/artifacts, and share the uploaded `.dmg` with users.
@@ -243,8 +245,8 @@ Desktop path resolution order:
 - local dev sidecar candidates under `src-tauri/binaries/`
 
 Local storage paths (desktop):
-- settings: `$HOME/.dicktaint/dictation-settings.json`
-- models: `$HOME/.dicktaint/whisper-models/`
+- settings: `$HOME/Library/Application Support/com.plebdev.dicktaint/.dicktaint/dictation-settings.json`
+- models: `$HOME/Library/Application Support/com.plebdev.dicktaint/.dicktaint/whisper-models/`
 
 Example:
 

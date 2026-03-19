@@ -23,7 +23,7 @@ Model onboarding path:
 2. App profiles local hardware (RAM + CPU basics).
 3. App shows the full Whisper model list with fit labels and one best-fit recommendation.
 4. User downloads one model locally for this device.
-5. Selected model and optional dictation hotkey are persisted in `$HOME/.dicktaint/dictation-settings.json`.
+5. Selected model and optional dictation hotkey are persisted in `$HOME/Library/Application Support/com.plebdev.dicktaint/.dicktaint/dictation-settings.json`.
 6. Start Dictation stays blocked until both `whisper-cli` and a local model are ready.
 
 ## Requirements
@@ -129,7 +129,7 @@ Supported combo format:
 - Use one modifier (`CmdOrCtrl`, `Cmd`, `Ctrl`, `Alt`, `Shift`, or `Super`) plus one main key, or use `Fn` by itself on macOS.
 - Main key options: `Fn` (macOS only), `A-Z`, `0-9`, `F1-F24`, arrows, and common navigation keys (`Enter`, `Tab`, `Escape`, `Delete`, etc.)
 
-State is persisted at `$HOME/.dicktaint/dictation-settings.json` under local settings for that device.
+State is persisted at `$HOME/Library/Application Support/com.plebdev.dicktaint/.dicktaint/dictation-settings.json` under local settings for that device.
 
 If hotkey save fails:
 
@@ -195,7 +195,7 @@ And with a known sample WAV:
 
 ```bash
 whisper-cli \
-  -m "$HOME/.dicktaint/whisper-models/ggml-base.en.bin" \
+  -m "$HOME/Library/Application Support/com.plebdev.dicktaint/.dicktaint/whisper-models/ggml-base.en.bin" \
   -f /opt/homebrew/opt/whisper-cpp/share/whisper-cpp/jfk.wav \
   -l en \
   -otxt \
