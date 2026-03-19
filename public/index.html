@@ -42,20 +42,36 @@
         </article>
 
         <section id="dictationModelCard" class="panel model-onboarding" hidden>
-          <label for="dictationModelSelect">Local Speech Model</label>
-          <div class="inline-actions">
-            <select id="dictationModelSelect"></select>
-            <button id="installDictationModel" class="secondary" type="button">Download + Use</button>
+          <div class="settings-intro">
+            <p class="section-kicker">Device Settings</p>
+            <h3>Everything for this machine, grouped in one place.</h3>
+            <p class="hint">Models, hotkeys, insertion behavior, and permissions live in separate blocks so you can scan faster.</p>
           </div>
-          <p id="dictationModelMeta" class="hint model-meta"></p>
-          <div class="dictation-setup-actions">
-            <button id="deleteDictationModel" class="ghost danger-btn" type="button">Delete Local Model</button>
-            <button id="retryWhisperCheck" class="ghost" type="button">Refresh Setup</button>
-            <button id="openWhisperSetup" class="ghost quiet" type="button" hidden>Open CLI Setup (dev)</button>
-          </div>
-          <section id="dictationHotkeyCard" class="hotkey-card" hidden>
-            <label for="dictationHotkeyInput">Dictation Hotkey</label>
-            <p class="hint">Use a preset, record one, or type your own combo.</p>
+
+          <section class="settings-section">
+            <div class="section-heading">
+              <p class="section-kicker">Model</p>
+              <label for="dictationModelSelect">Local Speech Model</label>
+            </div>
+            <p class="hint section-copy">Choose which on-device Whisper model this Mac should use for dictation.</p>
+            <div class="inline-actions">
+              <select id="dictationModelSelect"></select>
+              <button id="installDictationModel" class="secondary" type="button">Download + Use</button>
+            </div>
+            <p id="dictationModelMeta" class="hint model-meta"></p>
+            <div class="dictation-setup-actions">
+              <button id="deleteDictationModel" class="ghost danger-btn" type="button">Delete Local Model</button>
+              <button id="retryWhisperCheck" class="ghost" type="button">Refresh Setup</button>
+              <button id="openWhisperSetup" class="ghost quiet" type="button" hidden>Open CLI Setup (dev)</button>
+            </div>
+          </section>
+
+          <section id="dictationHotkeyCard" class="hotkey-card settings-section" hidden>
+            <div class="section-heading">
+              <p class="section-kicker">Trigger</p>
+              <label for="dictationHotkeyInput">Dictation Hotkey</label>
+            </div>
+            <p class="hint section-copy">Use a preset, record one, or type your own combo.</p>
             <div class="hotkey-editor">
               <input id="dictationHotkeyInput" type="text" spellcheck="false" autocapitalize="off" autocomplete="off" placeholder="CmdOrCtrl+Shift+D" />
               <button id="recordDictationHotkey" class="secondary" type="button">Record</button>
@@ -68,20 +84,29 @@
             </div>
             <p id="dictationHotkeyStatus" class="hint">No hotkey configured yet.</p>
           </section>
-          <section id="focusedFieldInsertCard" class="hotkey-card" hidden>
-            <label for="focusedFieldInsertToggle">Dictate Into Focused Field</label>
-            <p class="hint">When enabled, finished transcripts are pasted into the currently focused field.</p>
+
+          <section id="focusedFieldInsertCard" class="hotkey-card settings-section" hidden>
+            <div class="section-heading">
+              <p class="section-kicker">Insertion</p>
+              <label for="focusedFieldInsertToggle">Dictate Into Focused Field</label>
+            </div>
+            <p class="hint section-copy">When enabled, finished transcripts are pasted into the currently focused field.</p>
             <label class="toggle-row" for="focusedFieldInsertToggle">
               <input id="focusedFieldInsertToggle" type="checkbox" />
               <span>Enable focused-field insertion</span>
             </label>
             <p id="focusedFieldInsertStatus" class="hint">Focused-field insertion is disabled.</p>
           </section>
-          <section id="dictationPermissionsCard" class="hotkey-card" hidden>
-            <label>Permissions</label>
-            <p id="dictationPermissionSummary" class="hint">Microphone access is requested when you first start dictation.</p>
+
+          <section id="dictationPermissionsCard" class="hotkey-card settings-section" hidden>
+            <div class="section-heading">
+              <p class="section-kicker">Permissions</p>
+              <label>Desktop Access</label>
+            </div>
+            <p id="dictationPermissionSummary" class="hint section-copy">Microphone access is requested when you first start dictation.</p>
             <ul id="dictationPermissionList" class="permission-list"></ul>
           </section>
+
           <p id="dictationModelBusy" class="hint busy-note" hidden></p>
           <p id="dictationModelStatus" class="hint"></p>
           <p class="hint setup-note">
