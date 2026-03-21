@@ -1,5 +1,18 @@
 # Changelog
 
+## v0.1.12 - 2026-03-21
+
+### Highlights
+
+- tightened the floating macOS dictation pill again so it sits lighter at the bottom of the screen
+- removed all text from the pill so the overlay is just a mic glyph plus live recording animation
+- kept the signed macOS release pipeline aligned with the GitHub `prod` environment while retrying notarized distribution
+
+### Release Notes
+
+- macOS desktop remains the primary release target for this build
+- `macOSPrivateApi` remains enabled to support the transparent overlay behavior, so this release is intended for direct distribution rather than Mac App Store submission
+
 ## v0.1.11 - 2026-03-21
 
 ### Highlights
