@@ -56,6 +56,7 @@ Packaging requirement:
 - `bundle.externalBin` is configured for `binaries/whisper-cli`
 - target platform sidecar binaries must be available for intended targets
 - release automation must fail if signing/notarization credentials are missing rather than publishing ad hoc app bundles
+- current CI path publishes a notarized Apple Silicon `.dmg` and notarized `.app.tar.gz` archives for both architectures; Intel DMG generation is temporarily skipped in CI because that bundler path is unstable on the GitHub Intel runner
 
 Direct macOS distribution requirements:
 

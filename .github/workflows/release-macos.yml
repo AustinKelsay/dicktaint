@@ -16,8 +16,10 @@ jobs:
         include:
           - runner: macos-14
             target: aarch64-apple-darwin
+            bundles: app,dmg
           - runner: macos-15-intel
             target: x86_64-apple-darwin
+            bundles: app
     runs-on: ${{ matrix.runner }}
     environment: prod
     env:
@@ -92,7 +94,7 @@ jobs:
           file "$sidecar" | grep -qi "Mach-O"
 
       - name: Build Tauri bundles
-        run: bun run tauri:build -- --bundles app,dmg
+        run: bun run tauri:build -- --bundles ${{ matrix.bundles }}
 
       - name: Validate macOS app bundle signature
         run: |
@@ -115,14 +117,15 @@ jobs:
           target="${{ matrix.target }}"
 
           dmg_files=(src-tauri/target/release/bundle/dmg/*.dmg)
-          if [ "${#dmg_files[@]}" -eq 0 ]; then
+          if [ "${#dmg_files[@]}" -gt 0 ]; then
+            for dmg in "${dmg_files[@]}"; do
+              base="$(basename "$dmg" .dmg)"
+              cp "$dmg" "dist/${base}-${target}.dmg"
+            done
+          elif [[ "${{ matrix.bundles }}" == *"dmg"* ]]; then
             echo "No .dmg files produced."
             exit 1
           fi
-          for dmg in "${dmg_files[@]}"; do
-            base="$(basename "$dmg" .dmg)"
-            cp "$dmg" "dist/${base}-${target}.dmg"
-          done
 
           app_archives=(src-tauri/target/release/bundle/macos/*.app.tar.gz)
           if [ "${#app_archives[@]}" -gt 0 ]; then
