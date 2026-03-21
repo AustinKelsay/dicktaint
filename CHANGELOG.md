@@ -1,5 +1,19 @@
 # Changelog
 
+## v0.1.13 - 2026-03-21
+
+### Highlights
+
+- kept the new icon-only compact dictation pill from `v0.1.12`
+- unblocked signed macOS releases by skipping the flaky Intel DMG packaging path while still publishing the notarized Intel app archive
+- preserved the notarized Apple Silicon DMG path for the primary macOS release install flow
+
+### Release Notes
+
+- macOS desktop remains the primary release target for this build
+- Apple Silicon publishes both `.dmg` and `.app.tar.gz`, while Intel currently publishes a notarized `.app.tar.gz`
+- `macOSPrivateApi` remains enabled to support the transparent overlay behavior, so this release is intended for direct distribution rather than Mac App Store submission
+
 ## v0.1.12 - 2026-03-21
 
 ### Highlights

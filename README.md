@@ -143,7 +143,7 @@ This repo now includes a GitHub Actions workflow at `.github/workflows/release-m
 
 What it does:
 - runs on tag push (`v*`)
-- builds Tauri macOS bundles for both Apple Silicon and Intel (`.dmg` + `.app.tar.gz`)
+- builds notarized Tauri macOS bundles for Apple Silicon and Intel, with `.dmg` kept on Apple Silicon and `.app.tar.gz` published for both architectures
 - passes Apple signing/notarization credentials through to the Tauri build
 - validates the built `.app` signature before publishing artifacts
 - creates a GitHub Release and uploads artifacts + `SHA256SUMS.txt`
@@ -170,6 +170,7 @@ How to release:
 
 Important:
 - the workflow now fails instead of publishing ad hoc macOS apps when signing/notarization inputs are missing or the built bundle fails `codesign --verify --deep --strict`
+- Intel release automation currently publishes a notarized `.app.tar.gz` instead of a `.dmg` because the GitHub Intel runner DMG bundling path is still unstable
 
 User install flow:
 - download `.dmg` from Releases
