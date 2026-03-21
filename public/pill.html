@@ -16,17 +16,17 @@
 
     .pill {
       position: fixed;
-      inset: 4px;
+      inset: 3px;
       border-radius: 999px;
       background: rgba(18, 18, 20, 0.9);
       display: flex;
       align-items: center;
       justify-content: center;
-      gap: 4px;
+      gap: 3px;
       cursor: pointer;
       overflow: hidden;
       box-shadow:
-        0 10px 22px rgba(0, 0, 0, 0.24),
+        0 8px 18px rgba(0, 0, 0, 0.22),
         inset 0 1px 0 rgba(255, 255, 255, 0.08);
       transition: box-shadow 0.18s ease, background 0.18s ease, transform 0.18s ease;
     }
@@ -35,11 +35,18 @@
       background: rgba(27, 19, 9, 0.92);
       box-shadow:
         0 0 0 1px rgba(255, 140, 0, 0.72),
-        0 8px 18px rgba(255, 140, 0, 0.16),
+        0 7px 14px rgba(255, 140, 0, 0.14),
         inset 0 1px 0 rgba(255, 210, 148, 0.1);
     }
 
     .pill[data-state="processing"] { cursor: default; }
+    .pill[data-state="error"] {
+      background: rgba(41, 14, 14, 0.94);
+      box-shadow:
+        0 0 0 1px rgba(255, 98, 98, 0.58),
+        0 8px 16px rgba(132, 20, 20, 0.18),
+        inset 0 1px 0 rgba(255, 214, 214, 0.08);
+    }
 
     .drag {
       position: absolute;
@@ -56,23 +63,25 @@
     }
     .pill[data-state="processing"] .click { pointer-events: none; }
 
-    .icon-mic, .icon-stop {
+    .icon-mic {
       pointer-events: none;
       position: relative;
       z-index: 3;
       flex-shrink: 0;
+      opacity: 0.84;
     }
-    .icon-stop { display: none; }
-    .pill[data-state="listening"]  .icon-mic  { display: none; }
-    .pill[data-state="listening"]  .icon-stop { display: block; }
-    .pill[data-state="processing"] .icon-mic  { display: none; }
-    .pill[data-state="processing"] .icon-stop { display: none; }
+    .pill[data-state="listening"] .icon-mic {
+      opacity: 1;
+      filter: drop-shadow(0 0 5px rgba(255, 140, 0, 0.22));
+    }
+    .pill[data-state="processing"] .icon-mic { opacity: 0.44; }
+    .pill[data-state="error"] .icon-mic { opacity: 0.68; }
 
     .waveform {
       display: none;
       align-items: center;
       gap: 2px;
-      height: 10px;
+      height: 9px;
       pointer-events: none;
       position: relative;
       z-index: 3;
@@ -87,9 +96,8 @@
     }
     .waveform span:nth-child(1) { height: 3px; animation-delay: 0s; }
     .waveform span:nth-child(2) { height: 6px; animation-delay: 0.11s; }
-    .waveform span:nth-child(3) { height: 9px; animation-delay: 0.22s; }
+    .waveform span:nth-child(3) { height: 8px; animation-delay: 0.22s; }
     .waveform span:nth-child(4) { height: 6px; animation-delay: 0.33s; }
-    .waveform span:nth-child(5) { height: 3px; animation-delay: 0.44s; }
     @keyframes wave {
       0%, 100% { transform: scaleY(1); }
       50%       { transform: scaleY(1.8); }
@@ -97,8 +105,8 @@
 
     .spinner {
       display: none;
-      width: 10px;
-      height: 10px;
+      width: 9px;
+      height: 9px;
       border: 1.5px solid rgba(255,255,255,0.12);
       border-top-color: rgba(255,255,255,0.72);
       border-radius: 50%;
@@ -110,20 +118,6 @@
     }
     .pill[data-state="processing"] .spinner { display: block; }
     @keyframes spin { to { transform: rotate(360deg); } }
-
-    .label {
-      font-family: -apple-system, BlinkMacSystemFont, "SF Pro Text", sans-serif;
-      font-size: 10px;
-      font-weight: 500;
-      letter-spacing: 0.01em;
-      color: rgba(255, 255, 255, 0.76);
-      white-space: nowrap;
-      pointer-events: none;
-      position: relative;
-      z-index: 3;
-    }
-    .pill[data-state="listening"]  .label { color: rgba(255, 165, 38, 0.95); }
-    .pill[data-state="processing"] .label { color: rgba(255, 255, 255, 0.38); }
   </style>
 </head>
 <body>
@@ -131,7 +125,7 @@
     <div class="drag" data-tauri-drag-region="true"></div>
     <div class="click" id="click"></div>
 
-    <svg class="icon-mic" width="9" height="9" viewBox="0 0 24 24" fill="none"
+    <svg class="icon-mic" width="8" height="8" viewBox="0 0 24 24" fill="none"
          stroke="rgba(255,255,255,0.76)" stroke-width="2.2" stroke-linecap="round" stroke-linejoin="round">
       <rect x="9" y="2" width="6" height="12" rx="3"/>
       <path d="M5 10a7 7 0 0 0 14 0"/>
@@ -139,37 +133,34 @@
       <line x1="9" y1="22" x2="15" y2="22"/>
     </svg>
 
-    <svg class="icon-stop" width="8" height="8" viewBox="0 0 24 24" fill="rgb(255,138,0)" stroke="none">
-      <rect x="5" y="5" width="14" height="14" rx="3"/>
-    </svg>
-
     <div class="waveform" aria-hidden="true">
-      <span></span><span></span><span></span><span></span><span></span>
+      <span></span><span></span><span></span><span></span>
     </div>
 
     <div class="spinner" aria-hidden="true"></div>
-
-    <span class="label" id="label">Dictate</span>
   </div>
 
   <script>
     (function () {
       const pill  = document.getElementById('pill');
-      const label = document.getElementById('label');
       const click = document.getElementById('click');
 
       let state = 'idle';
 
       function setState(s) {
         if (s === 'error') {
-          label.textContent = 'Error';
-          pill.setAttribute('data-state', 'idle');
-          setTimeout(() => { state = 'idle'; label.textContent = 'Dictate'; }, 1400);
+          state = 'error';
+          pill.setAttribute('data-state', 'error');
+          setTimeout(() => {
+            if (state === 'error') {
+              state = 'idle';
+              pill.setAttribute('data-state', 'idle');
+            }
+          }, 1400);
           return;
         }
         state = s;
         pill.setAttribute('data-state', s);
-        label.textContent = s === 'listening' ? 'Listening…' : s === 'processing' ? 'Processing…' : 'Dictate';
       }
 
       function getInvoke() {

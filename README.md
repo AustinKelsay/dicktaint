@@ -90,7 +90,7 @@ Notes:
 - Global hotkeys are now executed in the Rust backend instead of relying on the main window webview, so hidden/background dictation keeps working even when the renderer is suspended.
 - The onboarding/settings flow now shows per-machine setup + permission guidance (microphone, Input Monitoring, Accessibility) so Intel and Apple silicon Macs surface the same runtime expectations.
 - The settings screen groups models, hotkeys, insertion, and permissions into separate sections so the same options are easier to scan and maintain.
-- A small bottom-center hotkey pill now renders as a native macOS transparent overlay window (outside the main app window), with rounded edges, a slimmer footprint, and quick dictation state feedback that follows the active hotkey mode (`Fn` hold vs custom toggle shortcut).
+- A small bottom-center hotkey pill now renders as a native macOS transparent overlay window (outside the main app window), with an extra-compact icon-only footprint and quick dictation state feedback that follows the active hotkey mode (`Fn` hold vs custom toggle shortcut).
 - The macOS `Fn` listener now recovers more gracefully if the system temporarily disables its event tap, which reduces the “Fn stopped working until relaunch” failure mode.
 - If hold-to-talk hotkey capture does not fire, allow Input Monitoring/Accessibility for the app (or Terminal during `tauri:dev`) and relaunch.
 - Desktop onboarding is local-first and model-first: verify `whisper-cli`, inspect hardware, then download/select one local Whisper model per device.
@@ -162,8 +162,8 @@ How to release:
    ```bash
    git checkout main
    git pull
-   git tag v0.1.10
-   git push origin v0.1.10
+   git tag v0.1.12
+   git push origin v0.1.12
    ```
 6. Wait for the `Release macOS App` workflow to finish.
 7. Open GitHub Releases, verify the generated notes/artifacts, and share the uploaded `.dmg` with users.

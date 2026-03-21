@@ -2,7 +2,7 @@
 
 ## Status Snapshot
 
-- Date: 2026-03-19
+- Date: 2026-03-21
 - desktop release posture is direct macOS distribution while private API mode is enabled
 
 ## Purpose
@@ -45,7 +45,7 @@ Tag-and-publish path:
 1. release from `main`
 2. push `v*` tag after version/docs are merged
 3. confirm GitHub Actions signing/notarization secrets are populated before tagging
-4. if those secrets are environment-scoped, confirm the release job targets that environment
+4. if those secrets are environment-scoped, confirm the release job targets that environment before tagging
 5. confirm the `Release macOS App` workflow publishes both architectures
 6. confirm the workflow validates the built app bundle with `codesign --verify --deep --strict`
 7. review generated GitHub release notes and replace them with the curated changelog summary if needed
