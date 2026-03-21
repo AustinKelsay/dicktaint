@@ -22,7 +22,7 @@ use std::sync::atomic::{AtomicU64, Ordering};
 use std::sync::atomic::{AtomicBool, AtomicPtr};
 use std::sync::{mpsc, Arc, Mutex};
 use std::thread;
-use std::time::{Duration, SystemTime, UNIX_EPOCH};
+use std::time::{Duration, Instant, SystemTime, UNIX_EPOCH};
 use tauri::{Emitter, Manager, State};
 #[cfg(not(any(target_os = "android", target_os = "ios")))]
 use tauri_plugin_global_shortcut::{GlobalShortcutExt, Shortcut, ShortcutState};
@@ -38,6 +38,7 @@ const DEFAULT_DICTATION_TRIGGER: &str = "Fn";
 const DEFAULT_DICTATION_TRIGGER: &str = "CmdOrCtrl+Shift+D";
 const MAX_DICTATION_TRIGGER_LENGTH: usize = 64;
 const DICTATION_STATE_EVENT: &str = "dictation:state-changed";
+const DICTATION_AUDIO_LEVEL_EVENT: &str = "dictation:audio-level";
 const PILL_STATUS_EVENT: &str = "dicktaint://pill-status";
 const WHISPER_CPP_SETUP_URL: &str = "https://github.com/ggml-org/whisper.cpp#quick-start";
 const START_HIDDEN_ENV: &str = "DICKTAINT_START_HIDDEN";
@@ -47,6 +48,12 @@ const PILL_WINDOW_MIN_WIDTH: f64 = 92.0;
 const PILL_WINDOW_HEIGHT: f64 = 26.0;
 const PILL_WINDOW_BOTTOM_MARGIN: i32 = 14;
 const MAX_PILL_WINDOWS: usize = 6;
+const MIN_TRANSCRIPTION_AUDIO_PEAK: f32 = 0.008;
+const MIN_TRANSCRIPTION_AUDIO_RMS: f32 = 0.0008;
+const TARGET_TRANSCRIPTION_AUDIO_PEAK: f32 = 0.85;
+const MAX_TRANSCRIPTION_AUDIO_GAIN: f32 = 16.0;
+const LIVE_AUDIO_BAR_COUNT: usize = 12;
+const LIVE_AUDIO_EMIT_INTERVAL_MS: u64 = 45;
 
 #[derive(Clone, Serialize)]
 struct DictationStatePayload {
@@ -54,6 +61,15 @@ struct DictationStatePayload {
     error: Option<String>,
     transcript: Option<String>,
     session_id: Option<u64>,
+}
+
+#[derive(Clone, Serialize)]
+struct DictationAudioLevelPayload {
+    session_id: u64,
+    peak_abs: f32,
+    rms: f32,
+    level: f32,
+    bars: Vec<f32>,
 }
 
 #[derive(Clone, Serialize)]
@@ -611,6 +627,20 @@ struct DictationModelDeletion {
     deleted_model_id: String,
     selected_model_id: Option<String>,
     selected_model_path: Option<String>,
+}
+
+#[derive(Clone, Copy, Debug)]
+struct AudioSignalStats {
+    peak_abs: f32,
+    rms: f32,
+    duration_secs: f32,
+}
+
+#[derive(Clone)]
+struct LiveAudioMeter {
+    app: tauri::AppHandle,
+    session_id: u64,
+    last_emitted_at: Arc<Mutex<Option<Instant>>>,
 }
 
 struct ActiveRecording {
@@ -2356,13 +2386,13 @@ fn open_whisper_setup_page() -> Result<(), String> {
     Ok(())
 }
 
-fn push_downmixed<T, F>(data: &[T], channels: usize, target: &Arc<Mutex<Vec<f32>>>, to_f32: F)
+fn downmix_samples<T, F>(data: &[T], channels: usize, to_f32: F) -> Vec<f32>
 where
     T: Copy,
     F: Fn(T) -> f32,
 {
     if channels == 0 || data.is_empty() {
-        return;
+        return Vec::new();
     }
 
     let mut mono = Vec::with_capacity(data.len() / channels.max(1));
@@ -2371,9 +2401,108 @@ where
         mono.push(sum / frame.len() as f32);
     }
 
-    if let Ok(mut guard) = target.lock() {
-        guard.extend(mono);
+    mono
+}
+
+fn store_captured_samples(target: &Arc<Mutex<Vec<f32>>>, samples: &[f32]) {
+    if samples.is_empty() {
+        return;
     }
+
+    if let Ok(mut guard) = target.lock() {
+        guard.extend_from_slice(samples);
+    }
+}
+
+fn audio_level_from_stats(stats: AudioSignalStats) -> f32 {
+    let peak = (stats.peak_abs / 0.18).clamp(0.0, 1.0);
+    let rms = (stats.rms / 0.06).clamp(0.0, 1.0);
+    ((peak * 0.68) + (rms * 0.32)).clamp(0.0, 1.0)
+}
+
+fn waveform_bins_from_samples(samples: &[f32], count: usize) -> Vec<f32> {
+    if count == 0 {
+        return Vec::new();
+    }
+    if samples.is_empty() {
+        return vec![0.0; count];
+    }
+
+    let chunk_len = (samples.len() / count).max(1);
+    let mut bins = Vec::with_capacity(count);
+    for index in 0..count {
+        let start = index * chunk_len;
+        let end = ((index + 1) * chunk_len).min(samples.len());
+        let slice = if start < samples.len() {
+            &samples[start..end.max(start + 1).min(samples.len())]
+        } else {
+            &samples[samples.len().saturating_sub(1)..]
+        };
+        let peak = slice
+            .iter()
+            .map(|sample| sample.abs())
+            .fold(0.0_f32, f32::max);
+        let normalized = (peak / 0.18).sqrt().clamp(0.0, 1.0);
+        bins.push(normalized);
+    }
+
+    bins
+}
+
+impl LiveAudioMeter {
+    fn emit_samples(&self, samples: &[f32], sample_rate: u32) {
+        if samples.is_empty() || sample_rate == 0 {
+            return;
+        }
+
+        let now = Instant::now();
+        let should_emit = if let Ok(mut guard) = self.last_emitted_at.lock() {
+            match *guard {
+                Some(last) if now.duration_since(last) < Duration::from_millis(LIVE_AUDIO_EMIT_INTERVAL_MS) => false,
+                _ => {
+                    *guard = Some(now);
+                    true
+                }
+            }
+        } else {
+            false
+        };
+
+        if !should_emit {
+            return;
+        }
+
+        let stats = analyze_audio_signal(samples, sample_rate);
+        let payload = DictationAudioLevelPayload {
+            session_id: self.session_id,
+            peak_abs: stats.peak_abs,
+            rms: stats.rms,
+            level: audio_level_from_stats(stats),
+            bars: waveform_bins_from_samples(samples, LIVE_AUDIO_BAR_COUNT),
+        };
+        self.app.emit(DICTATION_AUDIO_LEVEL_EVENT, payload).ok();
+    }
+}
+
+fn handle_input_chunk<T, F>(
+    data: &[T],
+    channels: usize,
+    target: &Arc<Mutex<Vec<f32>>>,
+    sample_rate: u32,
+    meter: &LiveAudioMeter,
+    to_f32: F,
+)
+where
+    T: Copy,
+    F: Fn(T) -> f32,
+{
+    let mono = downmix_samples(data, channels, to_f32);
+    if mono.is_empty() {
+        return;
+    }
+
+    store_captured_samples(target, &mono);
+    meter.emit_samples(&mono, sample_rate);
 }
 
 fn sample_format_rank(sample_format: SampleFormat) -> u8 {
@@ -2423,6 +2552,7 @@ fn choose_input_config(device: &cpal::Device) -> Result<cpal::SupportedStreamCon
 fn create_input_stream_for_device(
     device: &cpal::Device,
     samples: Arc<Mutex<Vec<f32>>>,
+    meter: LiveAudioMeter,
 ) -> Result<(Stream, u32), String> {
     let supported_config = device
         .default_input_config()
@@ -2438,11 +2568,12 @@ fn create_input_stream_for_device(
     let stream = match supported_config.sample_format() {
         SampleFormat::F32 => {
             let sink = Arc::clone(&samples);
+            let live_meter = meter.clone();
             device
                 .build_input_stream(
                     &config,
                     move |data: &[f32], _| {
-                        push_downmixed(data, channels, &sink, |v| v);
+                        handle_input_chunk(data, channels, &sink, sample_rate, &live_meter, |v| v);
                     },
                     err_fn,
                     None,
@@ -2451,11 +2582,19 @@ fn create_input_stream_for_device(
         }
         SampleFormat::I16 => {
             let sink = Arc::clone(&samples);
+            let live_meter = meter.clone();
             device
                 .build_input_stream(
                     &config,
                     move |data: &[i16], _| {
-                        push_downmixed(data, channels, &sink, |v| v as f32 / i16::MAX as f32);
+                        handle_input_chunk(
+                            data,
+                            channels,
+                            &sink,
+                            sample_rate,
+                            &live_meter,
+                            |v| v as f32 / i16::MAX as f32,
+                        );
                     },
                     err_fn,
                     None,
@@ -2464,11 +2603,12 @@ fn create_input_stream_for_device(
         }
         SampleFormat::U16 => {
             let sink = Arc::clone(&samples);
+            let live_meter = meter.clone();
             device
                 .build_input_stream(
                     &config,
                     move |data: &[u16], _| {
-                        push_downmixed(data, channels, &sink, |v| {
+                        handle_input_chunk(data, channels, &sink, sample_rate, &live_meter, |v| {
                             (v as f32 / u16::MAX as f32) * 2.0 - 1.0
                         });
                     },
@@ -2487,7 +2627,10 @@ fn create_input_stream_for_device(
     Ok((stream, sample_rate))
 }
 
-fn create_input_stream(samples: Arc<Mutex<Vec<f32>>>) -> Result<(Stream, u32), String> {
+fn create_input_stream(
+    samples: Arc<Mutex<Vec<f32>>>,
+    meter: LiveAudioMeter,
+) -> Result<(Stream, u32), String> {
     let host = cpal::default_host();
     let mut candidate_devices: Vec<cpal::Device> = Vec::new();
     let mut seen_names: HashSet<String> = HashSet::new();
@@ -2524,7 +2667,7 @@ fn create_input_stream(samples: Arc<Mutex<Vec<f32>>>) -> Result<(Stream, u32), S
             .name()
             .unwrap_or_else(|_| "unknown input".to_string());
 
-        match create_input_stream_for_device(&device, Arc::clone(&samples)) {
+        match create_input_stream_for_device(&device, Arc::clone(&samples), meter.clone()) {
             Ok(result) => return Ok(result),
             Err(err) => attempts.push(format!("{name}: {err}")),
         }
@@ -2539,13 +2682,20 @@ In macOS Settings > Privacy & Security > Microphone, allow this app/terminal, th
 
 fn spawn_recording_thread(
     samples: Arc<Mutex<Vec<f32>>>,
+    app: tauri::AppHandle,
+    session_id: u64,
 ) -> Result<(mpsc::Sender<()>, thread::JoinHandle<()>, u32), String> {
     let (stop_tx, stop_rx) = mpsc::channel::<()>();
     let (init_tx, init_rx) = mpsc::channel::<Result<u32, String>>();
     let capture_samples = Arc::clone(&samples);
+    let meter = LiveAudioMeter {
+        app,
+        session_id,
+        last_emitted_at: Arc::new(Mutex::new(None)),
+    };
 
     let handle = thread::spawn(move || {
-        let stream_result = create_input_stream(capture_samples);
+        let stream_result = create_input_stream(capture_samples, meter);
         match stream_result {
             Ok((stream, sample_rate)) => match stream.play() {
                 Ok(()) => {
@@ -2628,6 +2778,59 @@ fn write_wav(path: &PathBuf, samples: &[f32], sample_rate: u32) -> Result<(), St
     Ok(())
 }
 
+fn analyze_audio_signal(samples: &[f32], sample_rate: u32) -> AudioSignalStats {
+    if samples.is_empty() || sample_rate == 0 {
+        return AudioSignalStats {
+            peak_abs: 0.0,
+            rms: 0.0,
+            duration_secs: 0.0,
+        };
+    }
+
+    let mut peak_abs = 0.0_f32;
+    let mut energy = 0.0_f64;
+    for sample in samples {
+        let abs = sample.abs();
+        if abs > peak_abs {
+            peak_abs = abs;
+        }
+        energy += f64::from(*sample) * f64::from(*sample);
+    }
+
+    AudioSignalStats {
+        peak_abs,
+        rms: (energy / samples.len() as f64).sqrt() as f32,
+        duration_secs: samples.len() as f32 / sample_rate as f32,
+    }
+}
+
+fn audio_signal_is_too_quiet(stats: AudioSignalStats) -> bool {
+    stats.peak_abs < MIN_TRANSCRIPTION_AUDIO_PEAK && stats.rms < MIN_TRANSCRIPTION_AUDIO_RMS
+}
+
+fn normalize_audio_gain(samples: Vec<f32>, stats: AudioSignalStats) -> Vec<f32> {
+    if stats.peak_abs <= 0.0 {
+        return samples;
+    }
+
+    let gain = (TARGET_TRANSCRIPTION_AUDIO_PEAK / stats.peak_abs).min(MAX_TRANSCRIPTION_AUDIO_GAIN);
+    if gain <= 1.0 {
+        return samples;
+    }
+
+    samples
+        .into_iter()
+        .map(|sample| (sample * gain).clamp(-1.0, 1.0))
+        .collect()
+}
+
+fn quiet_audio_error(stats: AudioSignalStats) -> String {
+    format!(
+        "Captured audio was too quiet to transcribe (peak {:.4}, rms {:.4}, {:.1}s). Check macOS Sound > Input and the microphone level, then retry.",
+        stats.peak_abs, stats.rms, stats.duration_secs
+    )
+}
+
 fn is_transcript_artifact_token(token: &str) -> bool {
     let normalized = token.trim_matches(|ch: char| !ch.is_ascii_alphanumeric() && ch != '_');
     let upper = normalized.to_ascii_uppercase();
@@ -2659,6 +2862,12 @@ fn transcribe_samples(
     if prepared.is_empty() {
         return Err("No audio captured. Check microphone input and try again.".to_string());
     }
+
+    let signal = analyze_audio_signal(&prepared, WHISPER_SAMPLE_RATE);
+    if audio_signal_is_too_quiet(signal) {
+        return Err(quiet_audio_error(signal));
+    }
+    let prepared = normalize_audio_gain(prepared, signal);
 
     let tick = SystemTime::now()
         .duration_since(UNIX_EPOCH)
@@ -3172,7 +3381,8 @@ fn start_native_dictation_inner(app: &tauri::AppHandle) -> Result<u64, String> {
 
     let session_id = dictation.next_session_id.fetch_add(1, Ordering::SeqCst);
     let samples = Arc::new(Mutex::new(Vec::<f32>::new()));
-    let (stop_tx, thread_handle, sample_rate) = spawn_recording_thread(Arc::clone(&samples))?;
+    let (stop_tx, thread_handle, sample_rate) =
+        spawn_recording_thread(Arc::clone(&samples), app.clone(), session_id)?;
     *guard = Some(ActiveRecording {
         session_id,
         stop_tx,
@@ -3303,9 +3513,10 @@ fn cancel_native_dictation(app: tauri::AppHandle) -> Result<(), String> {
 #[cfg(test)]
 mod tests {
     use super::{
-        default_dictation_trigger, focused_field_insert_enabled, normalize_dictation_trigger,
-        onboarding_runtime_details, preferred_whisper_cli_names, resample_linear,
-        resolve_effective_dictation_trigger, runtime_details_for_trigger,
+        analyze_audio_signal, audio_signal_is_too_quiet, default_dictation_trigger,
+        focused_field_insert_enabled, normalize_audio_gain, normalize_dictation_trigger,
+        onboarding_runtime_details, preferred_whisper_cli_names, quiet_audio_error,
+        resample_linear, resolve_effective_dictation_trigger, runtime_details_for_trigger,
         whisper_help_text_looks_valid, HotkeyDeliveryMode, LocalSettings,
     };
 
@@ -3322,6 +3533,35 @@ mod tests {
         let out = resample_linear(&source, 8_000, 16_000);
         assert!(out.len() > source.len());
         assert!(out.iter().all(|sample| sample.is_finite()));
+    }
+
+    #[test]
+    fn analyze_audio_signal_reports_peak_rms_and_duration() {
+        let samples = vec![0.0_f32, 0.25, -0.5, 0.5];
+        let stats = analyze_audio_signal(&samples, 8_000);
+        assert!((stats.peak_abs - 0.5).abs() < 0.0001);
+        assert!(stats.rms > 0.0);
+        assert!(stats.duration_secs > 0.0);
+    }
+
+    #[test]
+    fn quiet_audio_detection_flags_near_silent_capture() {
+        let samples = vec![0.0002_f32; 16_000];
+        let stats = analyze_audio_signal(&samples, 16_000);
+        assert!(audio_signal_is_too_quiet(stats));
+        assert!(quiet_audio_error(stats).contains("too quiet"));
+    }
+
+    #[test]
+    fn normalize_audio_gain_boosts_quiet_but_valid_audio() {
+        let samples = vec![0.01_f32, -0.02, 0.03, -0.04];
+        let stats = analyze_audio_signal(&samples, 16_000);
+        assert!(!audio_signal_is_too_quiet(stats));
+        let boosted = normalize_audio_gain(samples.clone(), stats);
+        let boosted_peak = boosted.iter().map(|sample| sample.abs()).fold(0.0_f32, f32::max);
+        let original_peak = samples.iter().map(|sample| sample.abs()).fold(0.0_f32, f32::max);
+        assert!(boosted_peak > original_peak);
+        assert!(boosted_peak <= 0.85);
     }
 
     #[test]

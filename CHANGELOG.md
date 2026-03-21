@@ -1,5 +1,19 @@
 # Changelog
 
+## v0.2.0 - 2026-03-21
+
+### Highlights
+
+- added live mic-level feedback to native desktop dictation so the in-app waveform and floating pill now react to real captured audio instead of placeholder loops
+- hardened low-signal handling so near-silent recordings fail with a clear microphone/input-level error instead of hallucinated one-word transcripts like `"you"`
+- simplified the setup flow by removing the extra back control and turning the shared footer action into a clearer `Done` path while in settings
+
+### Release Notes
+
+- macOS desktop remains the primary release target for this build
+- Apple Silicon publishes both `.dmg` and `.app.tar.gz`, while Intel currently publishes a notarized `.app.tar.gz`
+- `macOSPrivateApi` remains enabled to support the transparent overlay behavior, so this release is intended for direct distribution rather than Mac App Store submission
+
 ## v0.1.13 - 2026-03-21
 
 ### Highlights

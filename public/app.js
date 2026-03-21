@@ -3,7 +3,6 @@ const onboardingScreen = document.getElementById('onboardingScreen');
 const dictationScreen = document.getElementById('dictationScreen');
 const onboardingContinueBtn = document.getElementById('onboardingContinue');
 const openSettingsBtn = document.getElementById('openSettings');
-const backToDictationBtn = document.getElementById('backToDictation');
 const setupModeChipEl = document.getElementById('setupModeChip');
 const setupTitleEl = document.getElementById('setupTitle');
 const setupLeadEl = document.getElementById('setupLead');
@@ -12,6 +11,8 @@ const startDictationBtn = document.getElementById('startDictation');
 const stopDictationBtn = document.getElementById('stopDictation');
 const clearTranscriptBtn = document.getElementById('clearTranscript');
 const transcriptInput = document.getElementById('transcriptInput');
+const dictationWaveformEl = document.getElementById('dictationWaveform');
+const dictationWaveformLevelEl = document.getElementById('dictationWaveformLevel');
 const dictationHistorySection = document.getElementById('dictationHistorySection');
 const dictationHistoryListEl = document.getElementById('dictationHistoryList');
 const dictationHistoryEmptyEl = document.getElementById('dictationHistoryEmpty');
@@ -44,16 +45,19 @@ const dictationPermissionsCardEl = document.getElementById('dictationPermissions
 const dictationPermissionSummaryEl = document.getElementById('dictationPermissionSummary');
 const dictationPermissionListEl = document.getElementById('dictationPermissionList');
 const quickDictationFab = document.getElementById('quickDictationFab');
+const dictationWaveformBars = Array.from({ length: 12 }, (_, index) => document.getElementById(`dictationWaveBar${index}`)).filter(Boolean);
 
 const SpeechRecognitionApi = window.SpeechRecognition || window.webkitSpeechRecognition || null;
 const DEFAULT_DICTATION_HOTKEY = isMacPlatform() ? 'Fn' : 'CmdOrCtrl+Shift+D';
 const HOTKEY_MODIFIER_ORDER = ['CmdOrCtrl', 'Cmd', 'Ctrl', 'Alt', 'Shift', 'Super'];
 const DICTATION_HOTKEY_EVENT = 'dictation:hotkey-triggered';
 const DICTATION_STATE_EVENT = 'dictation:state-changed';
+const DICTATION_AUDIO_LEVEL_EVENT = 'dictation:audio-level';
 const NATIVE_HOLD_HOTKEYS = new Set(['Fn', 'F19']);
 const MAC_DESKTOP_ONLY_MESSAGE = 'Desktop MVP currently supports macOS only. Current mobile focus is iPhone (iOS).';
 const PILL_STATUS_EVENT = 'dicktaint://pill-status';
 const DICTATION_HISTORY_LIMIT = 10;
+const DICTATION_WAVEFORM_BAR_COUNT = 12;
 const HOTKEY_PRESET_OPTIONS = [
   { value: 'Fn', label: 'Hold Fn' },
   { value: 'CmdOrCtrl+Shift+D', label: 'Cmd/Ctrl+Shift+D' },
@@ -101,9 +105,91 @@ let nativeSessionIdToIgnore = null;
 let rejectNextNativeAppend = false;
 let committedNativeSessionIds = new Set();
 let startNativeDesktopDictationOverride = null;
+let liveAudioLevel = 0;
+let liveAudioBars = defaultLiveAudioBars();
 
 function modelDisplayName(model) {
   return String(model?.display_name || '').replace(/\s+\(Selected\)$/u, '').trim();
+}
+
+function clampAudioLevel(value) {
+  const numeric = Number(value);
+  if (!Number.isFinite(numeric)) return 0;
+  return Math.max(0, Math.min(1, numeric));
+}
+
+function defaultLiveAudioBars(count = DICTATION_WAVEFORM_BAR_COUNT) {
+  return Array.from({ length: count }, (_, index) => {
+    const distance = Math.abs(index - ((count - 1) / 2));
+    return Math.max(0.08, 0.18 - (distance * 0.016));
+  });
+}
+
+function fallbackLiveAudioBars(level, count = DICTATION_WAVEFORM_BAR_COUNT) {
+  const normalized = clampAudioLevel(level);
+  return Array.from({ length: count }, (_, index) => {
+    const phase = ((index % 4) + 1) / 4;
+    return Math.max(0.08, Math.min(1, (normalized * phase * 0.9) + 0.08));
+  });
+}
+
+function normalizeLiveAudioBars(rawBars, level, count = DICTATION_WAVEFORM_BAR_COUNT) {
+  const source = Array.isArray(rawBars) ? rawBars : [];
+  if (!source.length) return fallbackLiveAudioBars(level, count);
+
+  const normalized = [];
+  for (let index = 0; index < count; index += 1) {
+    const sourceIndex = Math.floor((index * source.length) / count);
+    normalized.push(clampAudioLevel(source[sourceIndex]));
+  }
+  return normalized;
+}
+
+function audioStateForLevel(level, mode = document.body?.dataset?.mode || 'idle') {
+  if (mode !== 'listening') return mode === 'error' ? 'error' : 'idle';
+  if (level < 0.18) return 'low';
+  if (level > 0.92) return 'hot';
+  return 'ready';
+}
+
+function setInlineStyleProperty(target, property, value) {
+  if (!target?.style) return;
+  if (typeof target.style.setProperty === 'function') {
+    target.style.setProperty(property, value);
+    return;
+  }
+  target.style[property] = value;
+}
+
+function updateDictationWaveform(level = 0, bars = defaultLiveAudioBars(), mode = document.body?.dataset?.mode || 'idle') {
+  liveAudioLevel = clampAudioLevel(level);
+  liveAudioBars = normalizeLiveAudioBars(bars, liveAudioLevel, DICTATION_WAVEFORM_BAR_COUNT);
+
+  if (dictationWaveformEl) {
+    dictationWaveformEl.dataset.audioState = audioStateForLevel(liveAudioLevel, mode);
+    setInlineStyleProperty(dictationWaveformEl, '--live-level', liveAudioLevel.toFixed(3));
+  }
+
+  for (let index = 0; index < dictationWaveformBars.length; index += 1) {
+    const value = liveAudioBars[index] ?? 0.08;
+    setInlineStyleProperty(dictationWaveformBars[index], '--bar-level', value.toFixed(3));
+  }
+
+  if (dictationWaveformLevelEl) {
+    const state = audioStateForLevel(liveAudioLevel, mode);
+    dictationWaveformLevelEl.dataset.audioState = state;
+    dictationWaveformLevelEl.textContent = state === 'idle'
+      ? 'Mic level: waiting...'
+      : (state === 'error'
+        ? 'Mic level unavailable.'
+        : (state === 'low'
+          ? 'Mic level: low'
+          : (state === 'hot' ? 'Mic level: hot' : 'Mic level: good')));
+  }
+}
+
+function resetDictationWaveform(mode = document.body?.dataset?.mode || 'idle') {
+  updateDictationWaveform(0, defaultLiveAudioBars(), mode);
 }
 
 function isMacPlatform() {
@@ -531,6 +617,11 @@ function shouldUseTauriCommands() {
 
 function setUiMode(mode) {
   document.body.dataset.mode = mode;
+  if (mode === 'listening') {
+    updateDictationWaveform(liveAudioLevel, liveAudioBars, mode);
+  } else {
+    resetDictationWaveform(mode);
+  }
 }
 
 function setStatus(message, tone = 'neutral') {
@@ -617,8 +708,6 @@ function setSetupScreenMode(mode) {
       : 'Everything runs on-device. Pick a model, download it once, and this machine is ready.';
   }
   if (setupStepsEl) setupStepsEl.hidden = settingsMode;
-  if (backToDictationBtn) backToDictationBtn.hidden = !settingsMode;
-  if (onboardingContinueBtn) onboardingContinueBtn.hidden = settingsMode;
 }
 
 function syncFlowForSetupReadiness() {
@@ -819,14 +908,13 @@ function syncControls() {
     dictationModelSelect.disabled = lockControls;
   }
   if (onboardingContinueBtn) {
-    onboardingContinueBtn.disabled = lockControls || !setupReady;
-    onboardingContinueBtn.textContent = setupReady ? 'Start Dictation' : 'Complete Setup to Continue';
+    onboardingContinueBtn.disabled = lockControls || (setupScreenMode === 'onboarding' && !setupReady);
+    onboardingContinueBtn.textContent = setupScreenMode === 'settings'
+      ? 'Done'
+      : (setupReady ? 'Start Dictation' : 'Complete Setup to Continue');
   }
   if (openSettingsBtn) {
     openSettingsBtn.disabled = lockControls || !isFocusedMacDesktopMode();
-  }
-  if (backToDictationBtn) {
-    backToDictationBtn.disabled = lockControls;
   }
   if (recordDictationHotkeyBtn) {
     recordDictationHotkeyBtn.disabled = hotkeyDisabled;
@@ -2133,6 +2221,17 @@ function handleNativeDictationStatePayload(payload) {
   }
 }
 
+function handleNativeDictationAudioLevelPayload(payload) {
+  const payloadSessionId = normalizeNativeSessionId(payload?.session_id);
+  if (payloadSessionId && activeNativeSessionId && payloadSessionId !== activeNativeSessionId) {
+    return;
+  }
+
+  const level = clampAudioLevel(payload?.level);
+  const bars = normalizeLiveAudioBars(payload?.bars, level, DICTATION_WAVEFORM_BAR_COUNT);
+  updateDictationWaveform(level, bars, 'listening');
+}
+
 function initDictation() {
   const tauriEventApi = window.__TAURI__?.event || null;
   if (isNativeDesktopMode() && tauriEventApi?.listen) {
@@ -2155,6 +2254,12 @@ function initDictation() {
     }).catch(err => {
       console.error('Failed to register DICTATION_STATE_EVENT listener', err);
       setStatus('Could not register dictation state listener.', 'error');
+    });
+
+    tauriEventApi.listen(DICTATION_AUDIO_LEVEL_EVENT, ({ payload }) => {
+      handleNativeDictationAudioLevelPayload(payload);
+    }).catch(err => {
+      console.error('Failed to register DICTATION_AUDIO_LEVEL_EVENT listener', err);
     });
   }
 
@@ -2221,12 +2326,12 @@ function initDictation() {
 
   if (onboardingContinueBtn) {
     onboardingContinueBtn.addEventListener('click', () => {
-      if (isFocusedMacDesktopMode() && !nativeDictationModelReady) {
+      if (setupScreenMode === 'onboarding' && isFocusedMacDesktopMode() && !nativeDictationModelReady) {
         setStatus('Complete setup first, then start dictation.', 'neutral');
         return;
       }
       setAppScreen('dictation');
-      setStatus('Dictation ready.', 'ok');
+      setStatus(setupScreenMode === 'settings' ? 'Settings closed.' : 'Dictation ready.', 'ok');
     });
   }
 
@@ -2235,13 +2340,6 @@ function initDictation() {
       setSetupScreenMode('settings');
       setAppScreen('onboarding');
       setStatus('Settings opened. Manage local model setup here.', 'neutral');
-    });
-  }
-
-  if (backToDictationBtn) {
-    backToDictationBtn.addEventListener('click', () => {
-      setAppScreen('dictation');
-      setStatus('Back to dictation.', 'neutral');
     });
   }
 
@@ -2464,6 +2562,9 @@ function getDictationTestState() {
   return {
     currentDraftText,
     dictationHistory: dictationHistory.map((entry) => ({ ...entry })),
+    liveAudioLevel,
+    liveAudioBars: [...liveAudioBars],
+    waveformAudioState: dictationWaveformEl?.dataset?.audioState || 'idle',
     pendingNativeStartAfterStop,
     pendingNativeStartTrigger,
     nativeStopRequestInFlight,
@@ -2500,8 +2601,11 @@ function resetDictationStateForTests() {
   pendingDictationHotkey = '';
   activeHotkeySpec = null;
   currentDeviceProfile = { os: 'macos', architecture: 'aarch64' };
+  liveAudioLevel = 0;
+  liveAudioBars = defaultLiveAudioBars();
   setDraftTranscriptText('');
   renderDictationHistory();
+  resetDictationWaveform('idle');
   syncControls();
 }
 
@@ -2515,6 +2619,7 @@ if (typeof globalThis !== 'undefined' && globalThis.__DICKTAINT_EXPOSE_TEST_API_
     applyDictationHotkeyPayload,
     summarizeHotkeyPillStatus,
     handleNativeDictationStatePayload,
+    handleNativeDictationAudioLevelPayload,
     getState: getDictationTestState,
     resetState: resetDictationStateForTests,
     setNativeFlags(next = {}) {

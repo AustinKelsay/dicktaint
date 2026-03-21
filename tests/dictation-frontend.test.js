@@ -11,7 +11,14 @@ class MockElement {
     this.checked = false;
     this.placeholder = '';
     this.dataset = {};
-    this.style = {};
+    this.style = {
+      setProperty(name, value) {
+        this[name] = String(value);
+      },
+      getPropertyValue(name) {
+        return this[name] || '';
+      }
+    };
     this.attributes = {};
     this.children = [];
     this.parentNode = null;
@@ -111,7 +118,6 @@ function createMockDom({ nativeDesktop = false, onboardingPayload = null } = {})
     'dictationScreen',
     'onboardingContinue',
     'openSettings',
-    'backToDictation',
     'setupModeChip',
     'setupTitle',
     'setupLead',
@@ -119,6 +125,20 @@ function createMockDom({ nativeDesktop = false, onboardingPayload = null } = {})
     'startDictation',
     'stopDictation',
     'clearTranscript',
+    'dictationWaveform',
+    'dictationWaveformLevel',
+    'dictationWaveBar0',
+    'dictationWaveBar1',
+    'dictationWaveBar2',
+    'dictationWaveBar3',
+    'dictationWaveBar4',
+    'dictationWaveBar5',
+    'dictationWaveBar6',
+    'dictationWaveBar7',
+    'dictationWaveBar8',
+    'dictationWaveBar9',
+    'dictationWaveBar10',
+    'dictationWaveBar11',
     'transcriptInput',
     'dictationHistorySection',
     'dictationHistoryList',
@@ -480,5 +500,30 @@ describe('dictation frontend hotkey polish', () => {
     expect(state.isDictating).toBe(true);
     expect(state.activeNativeSessionId).toBe('2');
     expect(state.currentDraftText).toBe('first session');
+  });
+
+  it('renders live mic levels from native audio payloads and ignores stale sessions', () => {
+    api.handleNativeDictationStatePayload({
+      state: 'listening',
+      session_id: 4
+    });
+
+    api.handleNativeDictationAudioLevelPayload({
+      session_id: 4,
+      level: 0.52,
+      bars: [0.1, 0.18, 0.26, 0.34, 0.42, 0.5, 0.58, 0.66, 0.74, 0.82, 0.9, 1]
+    });
+    api.handleNativeDictationAudioLevelPayload({
+      session_id: 3,
+      level: 1,
+      bars: Array.from({ length: 12 }, () => 1)
+    });
+
+    const state = api.getState();
+    expect(state.liveAudioLevel).toBe(0.52);
+    expect(state.waveformAudioState).toBe('ready');
+    expect(state.liveAudioBars[11]).toBe(1);
+    expect(document.getElementById('dictationWaveformLevel').textContent).toBe('Mic level: good');
+    expect(document.getElementById('dictationWaveBar11').style.getPropertyValue('--bar-level')).toBe('1.000');
   });
 });

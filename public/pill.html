@@ -17,6 +17,7 @@
     .pill {
       position: fixed;
       inset: 3px;
+      --live-level: 0;
       border-radius: 999px;
       background: rgba(18, 18, 20, 0.9);
       display: flex;
@@ -37,6 +38,30 @@
         0 0 0 1px rgba(255, 140, 0, 0.72),
         0 7px 14px rgba(255, 140, 0, 0.14),
         inset 0 1px 0 rgba(255, 210, 148, 0.1);
+    }
+
+    .pill[data-state="listening"][data-audio-state="ready"] {
+      background: rgba(10, 28, 24, 0.94);
+      box-shadow:
+        0 0 0 1px rgba(47, 192, 163, 0.74),
+        0 8px calc(20px + (10px * var(--live-level))) rgba(47, 192, 163, 0.18),
+        inset 0 1px 0 rgba(192, 255, 243, 0.1);
+    }
+
+    .pill[data-state="listening"][data-audio-state="low"] {
+      background: rgba(34, 22, 8, 0.94);
+      box-shadow:
+        0 0 0 1px rgba(255, 169, 84, 0.74),
+        0 7px calc(16px + (8px * var(--live-level))) rgba(255, 169, 84, 0.14),
+        inset 0 1px 0 rgba(255, 226, 186, 0.1);
+    }
+
+    .pill[data-state="listening"][data-audio-state="hot"] {
+      background: rgba(40, 18, 12, 0.95);
+      box-shadow:
+        0 0 0 1px rgba(255, 118, 82, 0.8),
+        0 8px calc(20px + (12px * var(--live-level))) rgba(255, 118, 82, 0.18),
+        inset 0 1px 0 rgba(255, 220, 211, 0.12);
     }
 
     .pill[data-state="processing"] { cursor: default; }
@@ -81,7 +106,7 @@
       display: none;
       align-items: center;
       gap: 2px;
-      height: 9px;
+      height: 11px;
       pointer-events: none;
       position: relative;
       z-index: 3;
@@ -92,15 +117,20 @@
       width: 1.5px;
       border-radius: 1px;
       background: rgb(255, 138, 0);
-      animation: wave 0.85s ease-in-out infinite;
+      height: calc(2px + (var(--bar-level, 0.08) * 10px));
+      transition: height 80ms ease, background-color 120ms ease, opacity 120ms ease;
     }
-    .waveform span:nth-child(1) { height: 3px; animation-delay: 0s; }
-    .waveform span:nth-child(2) { height: 6px; animation-delay: 0.11s; }
-    .waveform span:nth-child(3) { height: 8px; animation-delay: 0.22s; }
-    .waveform span:nth-child(4) { height: 6px; animation-delay: 0.33s; }
-    @keyframes wave {
-      0%, 100% { transform: scaleY(1); }
-      50%       { transform: scaleY(1.8); }
+
+    .pill[data-state="listening"][data-audio-state="ready"] .waveform span {
+      background: rgb(47, 192, 163);
+    }
+
+    .pill[data-state="listening"][data-audio-state="low"] .waveform span {
+      background: rgb(255, 176, 92);
+    }
+
+    .pill[data-state="listening"][data-audio-state="hot"] .waveform span {
+      background: rgb(255, 122, 89);
     }
 
     .spinner {
@@ -144,23 +174,85 @@
     (function () {
       const pill  = document.getElementById('pill');
       const click = document.getElementById('click');
+      const waveformBars = Array.from(document.querySelectorAll('.waveform span'));
+      const DICTATION_AUDIO_LEVEL_EVENT = 'dictation:audio-level';
 
       let state = 'idle';
+      let currentSessionId = null;
+
+      function clampLevel(value) {
+        const numeric = Number(value);
+        if (!Number.isFinite(numeric)) return 0;
+        return Math.max(0, Math.min(1, numeric));
+      }
+
+      function compressBars(source, count) {
+        const values = Array.isArray(source) ? source : [];
+        if (!values.length) {
+          return Array.from({ length: count }, (_, index) => 0.08 + ((index % 2) * 0.08));
+        }
+
+        const bars = [];
+        for (let index = 0; index < count; index += 1) {
+          const start = Math.floor((index * values.length) / count);
+          const end = Math.max(start + 1, Math.floor(((index + 1) * values.length) / count));
+          let peak = 0;
+          for (let sourceIndex = start; sourceIndex < end && sourceIndex < values.length; sourceIndex += 1) {
+            peak = Math.max(peak, clampLevel(values[sourceIndex]));
+          }
+          bars.push(peak);
+        }
+        return bars;
+      }
+
+      function audioStateForLevel(level) {
+        if (state !== 'listening') return 'idle';
+        if (level < 0.18) return 'low';
+        if (level > 0.92) return 'hot';
+        return 'ready';
+      }
+
+      function resetMeter() {
+        pill.dataset.audioState = state === 'error' ? 'error' : 'idle';
+        pill.style.setProperty('--live-level', '0');
+        for (const bar of waveformBars) {
+          bar.style.setProperty('--bar-level', '0.080');
+        }
+      }
+
+      function setMeter(level, bars) {
+        const normalizedLevel = clampLevel(level);
+        pill.dataset.audioState = audioStateForLevel(normalizedLevel);
+        pill.style.setProperty('--live-level', normalizedLevel.toFixed(3));
+        const normalizedBars = compressBars(bars, waveformBars.length);
+        for (let index = 0; index < waveformBars.length; index += 1) {
+          waveformBars[index].style.setProperty('--bar-level', normalizedBars[index].toFixed(3));
+        }
+      }
 
       function setState(s) {
         if (s === 'error') {
           state = 'error';
           pill.setAttribute('data-state', 'error');
+          resetMeter();
           setTimeout(() => {
             if (state === 'error') {
               state = 'idle';
               pill.setAttribute('data-state', 'idle');
+              currentSessionId = null;
+              resetMeter();
             }
           }, 1400);
           return;
         }
         state = s;
         pill.setAttribute('data-state', s);
+        if (state !== 'listening') {
+          currentSessionId = state === 'processing' ? currentSessionId : null;
+          resetMeter();
+        } else {
+          setMeter(0, []);
+        }
       }
 
       function getInvoke() {
@@ -183,9 +275,24 @@
 
       const ev = window.__TAURI__?.event;
       if (ev?.listen) {
-        ev.listen('dictation:state-changed', ({ payload }) => setState(payload?.state ?? 'idle')).catch(() => {});
+        ev.listen('dictation:state-changed', ({ payload }) => {
+          if (payload?.session_id !== null && payload?.session_id !== undefined) {
+            currentSessionId = String(payload.session_id);
+          }
+          setState(payload?.state ?? 'idle');
+        }).catch(() => {});
+        ev.listen(DICTATION_AUDIO_LEVEL_EVENT, ({ payload }) => {
+          const payloadSessionId = payload?.session_id === null || payload?.session_id === undefined
+            ? null
+            : String(payload.session_id);
+          if (payloadSessionId && currentSessionId && payloadSessionId !== currentSessionId) return;
+          if (state !== 'listening') return;
+          setMeter(payload?.level, payload?.bars);
+        }).catch(() => {});
         ev.listen('dictation:hotkey-triggered', () => { if (state !== 'processing') click.click(); }).catch(() => {});
       }
+
+      resetMeter();
     })();
   </script>
 </body>

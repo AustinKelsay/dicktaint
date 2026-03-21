@@ -23,7 +23,6 @@
         <article class="panel intro-card">
           <div class="setup-header">
             <p id="setupModeChip" class="chip">ONBOARDING</p>
-            <button id="backToDictation" class="ghost" type="button" hidden>Back to Dictation</button>
           </div>
           <h2 id="setupTitle">Set up local speech-to-text</h2>
           <p id="setupLead" class="hint">
@@ -133,20 +132,21 @@
             <button id="stopDictation" class="secondary" type="button" disabled>Stop</button>
             <button id="clearTranscript" class="ghost" type="button">Clear</button>
           </div>
-          <div class="waveform" aria-hidden="true">
-            <span class="waveform-bar" style="--i:0"></span>
-            <span class="waveform-bar" style="--i:1"></span>
-            <span class="waveform-bar" style="--i:2"></span>
-            <span class="waveform-bar" style="--i:3"></span>
-            <span class="waveform-bar" style="--i:4"></span>
-            <span class="waveform-bar" style="--i:5"></span>
-            <span class="waveform-bar" style="--i:6"></span>
-            <span class="waveform-bar" style="--i:7"></span>
-            <span class="waveform-bar" style="--i:8"></span>
-            <span class="waveform-bar" style="--i:9"></span>
-            <span class="waveform-bar" style="--i:10"></span>
-            <span class="waveform-bar" style="--i:11"></span>
+          <div id="dictationWaveform" class="waveform" data-audio-state="idle" aria-hidden="true">
+            <span id="dictationWaveBar0" class="waveform-bar" style="--i:0"></span>
+            <span id="dictationWaveBar1" class="waveform-bar" style="--i:1"></span>
+            <span id="dictationWaveBar2" class="waveform-bar" style="--i:2"></span>
+            <span id="dictationWaveBar3" class="waveform-bar" style="--i:3"></span>
+            <span id="dictationWaveBar4" class="waveform-bar" style="--i:4"></span>
+            <span id="dictationWaveBar5" class="waveform-bar" style="--i:5"></span>
+            <span id="dictationWaveBar6" class="waveform-bar" style="--i:6"></span>
+            <span id="dictationWaveBar7" class="waveform-bar" style="--i:7"></span>
+            <span id="dictationWaveBar8" class="waveform-bar" style="--i:8"></span>
+            <span id="dictationWaveBar9" class="waveform-bar" style="--i:9"></span>
+            <span id="dictationWaveBar10" class="waveform-bar" style="--i:10"></span>
+            <span id="dictationWaveBar11" class="waveform-bar" style="--i:11"></span>
           </div>
+          <p id="dictationWaveformLevel" class="waveform-level" aria-live="polite">Mic level: waiting...</p>
           <label for="transcriptInput">Transcript</label>
           <textarea id="transcriptInput" rows="10" placeholder="Your dictated text appears here..."></textarea>
           <section id="dictationHistorySection" class="dictation-history" aria-label="Recent Dictations">

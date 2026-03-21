@@ -428,10 +428,12 @@ body[data-screen="dictation"] .app-shell {
   align-items: center;
   justify-content: center;
   gap: 3px;
+  min-height: 0;
   height: 0;
   opacity: 0;
   overflow: hidden;
-  transition: height 240ms ease, opacity 240ms ease;
+  --live-level: 0;
+  transition: height 240ms ease, opacity 240ms ease, filter 160ms ease;
 }
 
 body[data-mode="listening"] .waveform {
@@ -443,14 +445,55 @@ body[data-mode="listening"] .waveform {
   display: block;
   width: 3px;
   border-radius: 999px;
-  background: var(--muted);
-  height: 6px;
-  animation: waveform-bounce 900ms ease-in-out calc(var(--i) * 60ms) alternate infinite;
+  background: rgba(143, 164, 194, 0.7);
+  height: calc(6px + (var(--bar-level, 0.08) * 26px));
+  transition: height 80ms ease, background-color 140ms ease, opacity 140ms ease, box-shadow 140ms ease;
 }
 
 /* Center bars (children 6–9, i.e. --i:5–8) get accent color */
 .waveform-bar:nth-child(n+6):nth-child(-n+9) {
   background: var(--accent);
+}
+
+.waveform[data-audio-state="low"] {
+  filter: saturate(0.9);
+}
+
+.waveform[data-audio-state="low"] .waveform-bar {
+  background: rgba(255, 166, 77, 0.82);
+}
+
+.waveform[data-audio-state="ready"] .waveform-bar {
+  background: rgba(47, 192, 163, 0.8);
+  box-shadow: 0 0 calc(8px * var(--live-level, 0)) rgba(47, 192, 163, 0.16);
+}
+
+.waveform[data-audio-state="hot"] .waveform-bar {
+  background: rgba(255, 122, 89, 0.92);
+  box-shadow: 0 0 calc(10px * var(--live-level, 0)) rgba(255, 122, 89, 0.22);
+}
+
+.waveform-level {
+  margin: -0.1rem 0 0.4rem;
+  min-height: 1.1rem;
+  font-size: 0.8rem;
+  font-weight: 600;
+  letter-spacing: 0.04em;
+  text-transform: uppercase;
+  color: var(--muted);
+  transition: color 140ms ease;
+}
+
+.waveform-level[data-audio-state="low"] {
+  color: #ffb970;
+}
+
+.waveform-level[data-audio-state="ready"] {
+  color: #7ce0c8;
+}
+
+.waveform-level[data-audio-state="hot"] {
+  color: #ff9f85;
 }
 
 /* ── Form elements ────────────────────────────────────────── */
