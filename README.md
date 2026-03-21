@@ -152,6 +152,7 @@ How to release:
 
 1. Make sure `main` is green and pushed.
 2. Make sure GitHub Actions has the Apple signing secrets configured:
+   - if they are stored as environment secrets, the release job must target that environment
    - `APPLE_CERTIFICATE`
    - `APPLE_CERTIFICATE_PASSWORD`
    - either `APPLE_ID` + `APPLE_PASSWORD` + `APPLE_TEAM_ID`, or `APPLE_API_KEY` + `APPLE_API_ISSUER` + `APPLE_API_KEY_CONTENT`

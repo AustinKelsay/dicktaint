@@ -1,5 +1,17 @@
 # Changelog
 
+## v0.1.11 - 2026-03-21
+
+### Highlights
+
+- connected the macOS release job to the GitHub `prod` environment so environment-scoped Apple signing secrets are actually available during release builds
+- kept the strict signing gate in place so releases still fail fast if the certificate or notarization credentials are missing
+
+### Release Notes
+
+- macOS desktop remains the primary release target for this build
+- `macOSPrivateApi` remains enabled to support the transparent overlay behavior, so this release is intended for direct distribution rather than Mac App Store submission
+
 ## v0.1.10 - 2026-03-19
 
 ### Highlights
