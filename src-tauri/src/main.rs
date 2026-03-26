@@ -1,9 +1,13 @@
+#[cfg(target_os = "macos")]
+use block2::RcBlock;
 use cpal::traits::{DeviceTrait, HostTrait, StreamTrait};
 use cpal::{SampleFormat, Stream};
 #[cfg(target_os = "macos")]
 use objc2::rc::Retained;
 #[cfg(target_os = "macos")]
 use objc2_app_kit::{NSPasteboard, NSPasteboardTypeString};
+#[cfg(target_os = "macos")]
+use objc2_av_foundation::{AVAuthorizationStatus, AVCaptureDevice, AVMediaTypeAudio};
 #[cfg(target_os = "macos")]
 use objc2_foundation::NSString;
 use serde::{Deserialize, Serialize};
@@ -54,7 +58,7 @@ const TARGET_TRANSCRIPTION_AUDIO_PEAK: f32 = 0.85;
 const MAX_TRANSCRIPTION_AUDIO_GAIN: f32 = 16.0;
 const LIVE_AUDIO_BAR_COUNT: usize = 12;
 const LIVE_AUDIO_EMIT_INTERVAL_MS: u64 = 45;
-const INPUT_STREAM_PROBE_TIMEOUT_MS: u64 = 600;
+const INPUT_STREAM_PROBE_TIMEOUT_MS: u64 = 1_500;
 const INPUT_STREAM_PROBE_POLL_INTERVAL_MS: u64 = 40;
 const INPUT_STREAM_PROBE_MIN_DURATION_MS: u32 = 120;
 
@@ -2708,6 +2712,7 @@ fn wait_for_non_silent_input(
     let min_samples =
         ((sample_rate as u64 * INPUT_STREAM_PROBE_MIN_DURATION_MS as u64) / 1000).max(32) as usize;
     let deadline = Instant::now() + Duration::from_millis(INPUT_STREAM_PROBE_TIMEOUT_MS);
+    let mut saw_any_frames = false;
 
     loop {
         let observed = if let Ok(guard) = samples.lock() {
@@ -2725,6 +2730,7 @@ fn wait_for_non_silent_input(
         };
 
         if let Some((captured_len, peak_abs)) = observed {
+            saw_any_frames = true;
             if peak_abs > 0.0 {
                 return Ok(());
             }
@@ -2737,11 +2743,83 @@ fn wait_for_non_silent_input(
         }
 
         if Instant::now() >= deadline {
-            return Ok(());
+            if !saw_any_frames {
+                return Err(format!(
+                    "Microphone '{}' did not deliver any audio frames after opening. In macOS Settings > Privacy & Security > Microphone, allow this app and retry.",
+                    device_name
+                ));
+            }
+            return Err(format!(
+                "Microphone '{}' opened but only produced silent audio frames. On macOS this usually means microphone access is blocked or the input route is stale. In Privacy & Security > Microphone, allow this app, then check Sound > Input and retry.",
+                device_name
+            ));
         }
 
         thread::sleep(Duration::from_millis(INPUT_STREAM_PROBE_POLL_INTERVAL_MS));
     }
+}
+
+#[cfg(target_os = "macos")]
+fn microphone_media_type() -> Result<&'static objc2_av_foundation::AVMediaType, String> {
+    unsafe {
+        AVMediaTypeAudio.ok_or_else(|| {
+            "AVFoundation did not expose AVMediaTypeAudio on this macOS build.".to_string()
+        })
+    }
+}
+
+#[cfg(target_os = "macos")]
+fn microphone_permission_denied_error() -> String {
+    "Microphone permission is denied for this app. In macOS Settings > Privacy & Security > Microphone, allow dicktaint and relaunch the app.".to_string()
+}
+
+#[cfg(target_os = "macos")]
+fn microphone_permission_restricted_error() -> String {
+    "Microphone access is restricted by macOS for this app. Check Privacy & Security > Microphone or system policy restrictions and retry.".to_string()
+}
+
+#[cfg(target_os = "macos")]
+fn ensure_microphone_access_authorized() -> Result<(), String> {
+    let media_type = microphone_media_type()?;
+    let status = unsafe { AVCaptureDevice::authorizationStatusForMediaType(media_type) };
+
+    if status == AVAuthorizationStatus::Authorized {
+        return Ok(());
+    }
+    if status == AVAuthorizationStatus::Denied {
+        return Err(microphone_permission_denied_error());
+    }
+    if status == AVAuthorizationStatus::Restricted {
+        return Err(microphone_permission_restricted_error());
+    }
+    if status != AVAuthorizationStatus::NotDetermined {
+        return Err(format!(
+            "Microphone access returned an unknown AVFoundation authorization state ({}).",
+            status.0
+        ));
+    }
+
+    let (tx, rx) = mpsc::channel::<bool>();
+    let handler = RcBlock::new(move |granted| {
+        let _ = tx.send(bool::from(granted));
+    });
+    unsafe {
+        AVCaptureDevice::requestAccessForMediaType_completionHandler(media_type, &handler);
+    }
+
+    match rx.recv_timeout(Duration::from_secs(15)) {
+        Ok(true) => Ok(()),
+        Ok(false) => Err(microphone_permission_denied_error()),
+        Err(_) => Err(
+            "Timed out waiting for macOS microphone permission. Approve access in Privacy & Security > Microphone, then retry."
+                .to_string(),
+        ),
+    }
+}
+
+#[cfg(not(target_os = "macos"))]
+fn ensure_microphone_access_authorized() -> Result<(), String> {
+    Ok(())
 }
 
 fn create_input_stream(
@@ -3531,6 +3609,7 @@ fn start_native_dictation_inner(app: &tauri::AppHandle) -> Result<u64, String> {
     let model_state = app.state::<LocalModelState>();
     let dictation = app.state::<DictationState>();
 
+    ensure_microphone_access_authorized()?;
     resolve_active_model_path(config.inner(), model_state.inner())?;
     let configured_whisper_cli_path = resolve_whisper_cli_path(
         config.whisper_cli_path_override.as_deref(),

@@ -1,5 +1,18 @@
 # Changelog
 
+## v0.3.2 - 2026-03-26
+
+### Highlights
+
+- fixed the macOS microphone permission path so native dictation now checks AVFoundation authorization before capture starts instead of falling through into silent zeroed recordings
+- tightened startup validation again so native capture now fails immediately when a stream never delivers any audio frames after opening
+- improved zero-audio error handling for built-in microphones as well as Bluetooth routes by separating permission failures from stale-input routing failures
+
+### Release Notes
+
+- this patch corrects a gap in `v0.3.1`, where the changelog referenced microphone preflight behavior but the packaged app still did not perform an explicit AVFoundation mic authorization request before capture
+- packaged `dicktaint.app` remains the preferred validation path on macOS because TCC permission state is app-bundle specific
+
 ## v0.3.1 - 2026-03-26
 
 ### Highlights
