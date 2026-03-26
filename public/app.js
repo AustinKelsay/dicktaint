@@ -1255,6 +1255,7 @@ function isFatalSpeechError(errorCode) {
 }
 
 async function ensureMicrophoneAccess() {
+  if (isFocusedMacDesktopMode()) return;
   if (!navigator.mediaDevices?.getUserMedia) return;
 
   const stream = await navigator.mediaDevices.getUserMedia({ audio: true });

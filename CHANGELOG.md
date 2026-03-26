@@ -1,5 +1,18 @@
 # Changelog
 
+## v0.3.4 - 2026-03-26
+
+### Highlights
+
+- fixed a frontend regression where the native macOS desktop dictation flow still called browser `getUserMedia()` before invoking the Tauri backend
+- removed the web-only microphone preflight from focused native macOS so packaged desktop builds now rely solely on the native permission and capture path
+- corrected the startup path behind the “request is not allowed by the user agent or the platform” error that could appear even after macOS microphone permission was granted
+
+### Release Notes
+
+- this patch targets the desktop startup bug discovered after `v0.3.3`: the app bundle was entering the web/browser capture flow instead of staying on the native Tauri dictation path
+- packaged `dicktaint.app` remains the correct validation path for this fix
+
 ## v0.3.3 - 2026-03-26
 
 ### Highlights
