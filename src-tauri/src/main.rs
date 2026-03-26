@@ -2779,46 +2779,72 @@ fn microphone_permission_restricted_error() -> String {
 }
 
 #[cfg(target_os = "macos")]
-fn ensure_microphone_access_authorized() -> Result<(), String> {
-    let media_type = microphone_media_type()?;
-    let status = unsafe { AVCaptureDevice::authorizationStatusForMediaType(media_type) };
+fn ensure_microphone_access_authorized(app: &tauri::AppHandle) -> Result<(), String> {
+    let (tx, rx) = mpsc::channel::<Result<(), String>>();
+    let tx_main = tx.clone();
+    let app_handle = app.clone();
 
-    if status == AVAuthorizationStatus::Authorized {
-        return Ok(());
-    }
-    if status == AVAuthorizationStatus::Denied {
-        return Err(microphone_permission_denied_error());
-    }
-    if status == AVAuthorizationStatus::Restricted {
-        return Err(microphone_permission_restricted_error());
-    }
-    if status != AVAuthorizationStatus::NotDetermined {
-        return Err(format!(
-            "Microphone access returned an unknown AVFoundation authorization state ({}).",
-            status.0
-        ));
-    }
+    app.run_on_main_thread(move || {
+        let media_type = match microphone_media_type() {
+            Ok(value) => value,
+            Err(error) => {
+                let _ = tx_main.send(Err(error));
+                return;
+            }
+        };
 
-    let (tx, rx) = mpsc::channel::<bool>();
-    let handler = RcBlock::new(move |granted| {
-        let _ = tx.send(bool::from(granted));
-    });
-    unsafe {
-        AVCaptureDevice::requestAccessForMediaType_completionHandler(media_type, &handler);
-    }
+        if let Some(window) = app_handle.get_webview_window("main") {
+            let _ = window.show();
+            let _ = window.unminimize();
+            let _ = window.set_focus();
+        }
+
+        let status = unsafe { AVCaptureDevice::authorizationStatusForMediaType(media_type) };
+        if status == AVAuthorizationStatus::Authorized {
+            let _ = tx_main.send(Ok(()));
+            return;
+        }
+        if status == AVAuthorizationStatus::Denied {
+            let _ = tx_main.send(Err(microphone_permission_denied_error()));
+            return;
+        }
+        if status == AVAuthorizationStatus::Restricted {
+            let _ = tx_main.send(Err(microphone_permission_restricted_error()));
+            return;
+        }
+        if status != AVAuthorizationStatus::NotDetermined {
+            let _ = tx_main.send(Err(format!(
+                "Microphone access returned an unknown AVFoundation authorization state ({}).",
+                status.0
+            )));
+            return;
+        }
+
+        let tx_request = tx_main.clone();
+        let handler = RcBlock::new(move |granted| {
+            let _ = tx_request.send(if bool::from(granted) {
+                Ok(())
+            } else {
+                Err(microphone_permission_denied_error())
+            });
+        });
+        unsafe {
+            AVCaptureDevice::requestAccessForMediaType_completionHandler(media_type, &handler);
+        }
+    })
+    .map_err(|e| format!("Failed to request microphone access on the macOS main thread: {e}"))?;
 
     match rx.recv_timeout(Duration::from_secs(15)) {
-        Ok(true) => Ok(()),
-        Ok(false) => Err(microphone_permission_denied_error()),
+        Ok(result) => result,
         Err(_) => Err(
-            "Timed out waiting for macOS microphone permission. Approve access in Privacy & Security > Microphone, then retry."
+            "Timed out waiting for macOS microphone permission. Bring dicktaint to the foreground, approve access in Privacy & Security > Microphone, then retry."
                 .to_string(),
         ),
     }
 }
 
 #[cfg(not(target_os = "macos"))]
-fn ensure_microphone_access_authorized() -> Result<(), String> {
+fn ensure_microphone_access_authorized(_app: &tauri::AppHandle) -> Result<(), String> {
     Ok(())
 }
 
@@ -3609,7 +3635,7 @@ fn start_native_dictation_inner(app: &tauri::AppHandle) -> Result<u64, String> {
     let model_state = app.state::<LocalModelState>();
     let dictation = app.state::<DictationState>();
 
-    ensure_microphone_access_authorized()?;
+    ensure_microphone_access_authorized(app)?;
     resolve_active_model_path(config.inner(), model_state.inner())?;
     let configured_whisper_cli_path = resolve_whisper_cli_path(
         config.whisper_cli_path_override.as_deref(),

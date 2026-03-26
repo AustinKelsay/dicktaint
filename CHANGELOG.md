@@ -1,5 +1,18 @@
 # Changelog
 
+## v0.3.3 - 2026-03-26
+
+### Highlights
+
+- moved the macOS microphone authorization request onto the Tauri main thread and foregrounded the main app window before requesting access
+- fixed a permission-prompt failure mode where `dicktaint` could report microphone denial without surfacing a fresh macOS TCC prompt after reset/reinstall
+- kept the native zero-audio startup guards from `v0.3.2` while tightening the prompt path for first-run and post-reset permission recovery
+
+### Release Notes
+
+- this patch specifically targets the remaining macOS permission regression seen in `v0.3.2`, where the installed app bundle was valid but microphone authorization could still fail without presenting the expected system prompt
+- packaged `dicktaint.app` remains the required validation path; test by launching from `/Applications` and starting dictation in the foreground
+
 ## v0.3.2 - 2026-03-26
 
 ### Highlights
