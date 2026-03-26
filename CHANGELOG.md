@@ -1,5 +1,19 @@
 # Changelog
 
+## v0.3.0 - 2026-03-26
+
+### Highlights
+
+- added explicit native microphone selection so desktop dictation can target the intended macOS input device instead of relying on implicit backend device ordering
+- added a microphone permission preflight before native desktop capture starts so packaged builds can prompt earlier and fail less opaquely
+- refreshed the application icon set and bundled release assets for the next macOS release
+
+### Release Notes
+
+- packaged `dicktaint.app` is now the preferred macOS validation path for microphone capture because it has its own TCC identity instead of inheriting Terminal permissions from `tauri:dev`
+- macOS desktop remains the primary release target for this build
+- `macOSPrivateApi` remains enabled to support the transparent overlay behavior, so this release is intended for direct distribution rather than Mac App Store submission
+
 ## v0.2.0 - 2026-03-21
 
 ### Highlights

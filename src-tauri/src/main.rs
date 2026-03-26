@@ -17,9 +17,9 @@ use std::os::unix::fs::PermissionsExt;
 use std::path::{Path, PathBuf};
 use std::process::{Command, Output};
 use std::str::FromStr;
-use std::sync::atomic::{AtomicU64, Ordering};
 #[cfg(target_os = "macos")]
 use std::sync::atomic::{AtomicBool, AtomicPtr};
+use std::sync::atomic::{AtomicU64, Ordering};
 use std::sync::{mpsc, Arc, Mutex};
 use std::thread;
 use std::time::{Duration, Instant, SystemTime, UNIX_EPOCH};
@@ -252,6 +252,7 @@ const WHISPER_MODEL_CATALOG: [WhisperModelSpec; 12] = [
 struct LocalSettings {
     selected_model_id: Option<String>,
     selected_model_path: Option<String>,
+    preferred_input_device: Option<String>,
     dictation_trigger: Option<String>,
     dictation_trigger_enabled: Option<bool>,
     focused_field_insert_enabled: Option<bool>,
@@ -578,6 +579,8 @@ struct DictationOnboardingPayload {
     selected_model_id: Option<String>,
     selected_model_path: Option<String>,
     selected_model_exists: bool,
+    available_input_devices: Vec<DictationInputDevice>,
+    preferred_input_device: Option<String>,
     dictation_trigger: Option<String>,
     default_dictation_trigger: String,
     dictation_trigger_mode: String,
@@ -615,6 +618,12 @@ struct FocusedFieldInsertPermissionStatus {
     status: String,
 }
 
+#[derive(Clone, Serialize)]
+struct DictationInputDevice {
+    name: String,
+    is_default: bool,
+}
+
 #[derive(Serialize)]
 struct DictationModelSelection {
     selected_model_id: String,
@@ -645,6 +654,7 @@ struct LiveAudioMeter {
 
 struct ActiveRecording {
     session_id: u64,
+    input_device_name: String,
     stop_tx: mpsc::Sender<()>,
     thread_handle: thread::JoinHandle<()>,
     samples: Arc<Mutex<Vec<f32>>>,
@@ -720,11 +730,7 @@ fn emit_pill_status(
     .ok();
 }
 
-fn sync_pill_for_dictation_state(
-    app: &tauri::AppHandle,
-    state: &str,
-    error: Option<&str>,
-) {
+fn sync_pill_for_dictation_state(app: &tauri::AppHandle, state: &str, error: Option<&str>) {
     let hotkey_state = app.state::<GlobalHotkeyState>();
     let runtime = current_trigger_runtime_details(hotkey_state.inner()).unwrap_or_default();
     let label = active_hotkey_label(app);
@@ -805,7 +811,9 @@ fn dispatch_backend_hotkey_action(app: &tauri::AppHandle, action: BackendHotkeyA
     tauri::async_runtime::spawn(async move {
         let result: Result<(), String> = match action {
             BackendHotkeyAction::Toggle => match dictation_is_running(&handle) {
-                Ok(true) => stop_native_dictation_inner(handle.clone()).await.map(|_| ()),
+                Ok(true) => stop_native_dictation_inner(handle.clone())
+                    .await
+                    .map(|_| ()),
                 Ok(false) => start_native_dictation_inner(&handle).map(|_| ()),
                 Err(error) => Err(error),
             },
@@ -815,7 +823,9 @@ fn dispatch_backend_hotkey_action(app: &tauri::AppHandle, action: BackendHotkeyA
                 Err(error) => Err(error),
             },
             BackendHotkeyAction::HoldStop => match dictation_is_running(&handle) {
-                Ok(true) => stop_native_dictation_inner(handle.clone()).await.map(|_| ()),
+                Ok(true) => stop_native_dictation_inner(handle.clone())
+                    .await
+                    .map(|_| ()),
                 Ok(false) => Ok(()),
                 Err(error) => Err(error),
             },
@@ -823,7 +833,8 @@ fn dispatch_backend_hotkey_action(app: &tauri::AppHandle, action: BackendHotkeyA
 
         if let Err(error) = result {
             let trimmed = error.trim();
-            let benign = trimmed == "Dictation already running." || trimmed == "Dictation is not running.";
+            let benign =
+                trimmed == "Dictation already running." || trimmed == "Dictation is not running.";
             if !benign {
                 log::warn!("Global hotkey action failed: {error}");
                 emit_dictation_state(&handle, "error", Some(error), None, None);
@@ -2329,12 +2340,15 @@ fn build_onboarding_payload(
     let onboarding_required = !selected_model_exists || !whisper_cli_available;
     let focused_field_permission =
         focused_field_insert_permission_status(focused_field_insert_enabled(&settings), false);
+    let available_input_devices = list_input_devices();
 
     Ok(DictationOnboardingPayload {
         onboarding_required,
         selected_model_id,
         selected_model_path,
         selected_model_exists,
+        available_input_devices,
+        preferred_input_device: settings.preferred_input_device.clone(),
         dictation_trigger,
         default_dictation_trigger: default_dictation_trigger(),
         dictation_trigger_mode: trigger_runtime.mode.as_str().to_string(),
@@ -2458,7 +2472,12 @@ impl LiveAudioMeter {
         let now = Instant::now();
         let should_emit = if let Ok(mut guard) = self.last_emitted_at.lock() {
             match *guard {
-                Some(last) if now.duration_since(last) < Duration::from_millis(LIVE_AUDIO_EMIT_INTERVAL_MS) => false,
+                Some(last)
+                    if now.duration_since(last)
+                        < Duration::from_millis(LIVE_AUDIO_EMIT_INTERVAL_MS) =>
+                {
+                    false
+                }
                 _ => {
                     *guard = Some(now);
                     true
@@ -2491,8 +2510,7 @@ fn handle_input_chunk<T, F>(
     sample_rate: u32,
     meter: &LiveAudioMeter,
     to_f32: F,
-)
-where
+) where
     T: Copy,
     F: Fn(T) -> f32,
 {
@@ -2549,6 +2567,42 @@ fn choose_input_config(device: &cpal::Device) -> Result<cpal::SupportedStreamCon
     })
 }
 
+fn device_name(device: &cpal::Device, fallback: &str) -> String {
+    device.name().unwrap_or_else(|_| fallback.to_string())
+}
+
+fn list_input_devices() -> Vec<DictationInputDevice> {
+    let host = cpal::default_host();
+    let default_name = host
+        .default_input_device()
+        .map(|device| device_name(&device, "default input"));
+    let mut devices = Vec::<DictationInputDevice>::new();
+    let mut seen_names = HashSet::<String>::new();
+
+    if let Some(name) = default_name.clone() {
+        seen_names.insert(name.clone());
+        devices.push(DictationInputDevice {
+            is_default: true,
+            name,
+        });
+    }
+
+    if let Ok(inputs) = host.input_devices() {
+        for device in inputs {
+            let name = device_name(&device, "unknown input");
+            if !seen_names.insert(name.clone()) {
+                continue;
+            }
+            devices.push(DictationInputDevice {
+                is_default: default_name.as_deref() == Some(name.as_str()),
+                name,
+            });
+        }
+    }
+
+    devices
+}
+
 fn create_input_stream_for_device(
     device: &cpal::Device,
     samples: Arc<Mutex<Vec<f32>>>,
@@ -2587,14 +2641,9 @@ fn create_input_stream_for_device(
                 .build_input_stream(
                     &config,
                     move |data: &[i16], _| {
-                        handle_input_chunk(
-                            data,
-                            channels,
-                            &sink,
-                            sample_rate,
-                            &live_meter,
-                            |v| v as f32 / i16::MAX as f32,
-                        );
+                        handle_input_chunk(data, channels, &sink, sample_rate, &live_meter, |v| {
+                            v as f32 / i16::MAX as f32
+                        });
                     },
                     err_fn,
                     None,
@@ -2630,26 +2679,47 @@ fn create_input_stream_for_device(
 fn create_input_stream(
     samples: Arc<Mutex<Vec<f32>>>,
     meter: LiveAudioMeter,
-) -> Result<(Stream, u32), String> {
+) -> Result<(Stream, u32, String), String> {
     let host = cpal::default_host();
-    let mut candidate_devices: Vec<cpal::Device> = Vec::new();
+    let preferred_input_name = meter
+        .app
+        .state::<LocalModelState>()
+        .settings
+        .lock()
+        .map_err(|_| "Failed to lock local model settings".to_string())?
+        .preferred_input_device
+        .clone();
+    let mut candidate_devices: Vec<(String, cpal::Device)> = Vec::new();
     let mut seen_names: HashSet<String> = HashSet::new();
 
+    let default_name = host
+        .default_input_device()
+        .map(|device| device_name(&device, "default input"));
+
+    if let Some(preferred_name) = preferred_input_name.as_deref() {
+        if let Ok(devices) = host.input_devices() {
+            for device in devices {
+                let name = device_name(&device, "unknown input");
+                if name == preferred_name && seen_names.insert(name.clone()) {
+                    candidate_devices.push((name, device));
+                    break;
+                }
+            }
+        }
+    }
+
     if let Some(default_device) = host.default_input_device() {
-        let name = default_device
-            .name()
-            .unwrap_or_else(|_| "default input".to_string());
-        seen_names.insert(name);
-        candidate_devices.push(default_device);
+        let name = device_name(&default_device, "default input");
+        if seen_names.insert(name.clone()) {
+            candidate_devices.push((name, default_device));
+        }
     }
 
     if let Ok(devices) = host.input_devices() {
         for device in devices {
-            let name = device
-                .name()
-                .unwrap_or_else(|_| "unknown input".to_string());
+            let name = device_name(&device, "unknown input");
             if seen_names.insert(name) {
-                candidate_devices.push(device);
+                candidate_devices.push((device_name(&device, "unknown input"), device));
             }
         }
     }
@@ -2662,21 +2732,28 @@ fn create_input_stream(
     }
 
     let mut attempts: Vec<String> = Vec::new();
-    for device in candidate_devices {
-        let name = device
-            .name()
-            .unwrap_or_else(|_| "unknown input".to_string());
-
+    for (name, device) in candidate_devices {
         match create_input_stream_for_device(&device, Arc::clone(&samples), meter.clone()) {
-            Ok(result) => return Ok(result),
+            Ok((stream, sample_rate)) => return Ok((stream, sample_rate, name)),
             Err(err) => attempts.push(format!("{name}: {err}")),
         }
     }
 
+    let preferred_detail = preferred_input_name
+        .as_deref()
+        .map(|name| format!(" Preferred input: {name}."))
+        .unwrap_or_default();
+    let default_detail = default_name
+        .as_deref()
+        .map(|name| format!(" Default input: {name}."))
+        .unwrap_or_default();
+
     Err(format!(
         "Could not open microphone input on this machine. Tried: {}. \
-In macOS Settings > Privacy & Security > Microphone, allow this app/terminal, then pick an input device in Settings > Sound > Input and retry.",
-        attempts.join(" | ")
+In macOS Settings > Privacy & Security > Microphone, allow this app/terminal, then pick an input device in Settings > Sound > Input and retry.{}{}",
+        attempts.join(" | "),
+        preferred_detail,
+        default_detail
     ))
 }
 
@@ -2684,9 +2761,9 @@ fn spawn_recording_thread(
     samples: Arc<Mutex<Vec<f32>>>,
     app: tauri::AppHandle,
     session_id: u64,
-) -> Result<(mpsc::Sender<()>, thread::JoinHandle<()>, u32), String> {
+) -> Result<(mpsc::Sender<()>, thread::JoinHandle<()>, u32, String), String> {
     let (stop_tx, stop_rx) = mpsc::channel::<()>();
-    let (init_tx, init_rx) = mpsc::channel::<Result<u32, String>>();
+    let (init_tx, init_rx) = mpsc::channel::<Result<(u32, String), String>>();
     let capture_samples = Arc::clone(&samples);
     let meter = LiveAudioMeter {
         app,
@@ -2697,9 +2774,9 @@ fn spawn_recording_thread(
     let handle = thread::spawn(move || {
         let stream_result = create_input_stream(capture_samples, meter);
         match stream_result {
-            Ok((stream, sample_rate)) => match stream.play() {
+            Ok((stream, sample_rate, input_device_name)) => match stream.play() {
                 Ok(()) => {
-                    let _ = init_tx.send(Ok(sample_rate));
+                    let _ = init_tx.send(Ok((sample_rate, input_device_name)));
                     let _ = stop_rx.recv();
                     drop(stream);
                 }
@@ -2713,8 +2790,8 @@ fn spawn_recording_thread(
         }
     });
 
-    let sample_rate = match init_rx.recv_timeout(Duration::from_secs(5)) {
-        Ok(Ok(rate)) => rate,
+    let (sample_rate, input_device_name) = match init_rx.recv_timeout(Duration::from_secs(5)) {
+        Ok(Ok(value)) => value,
         Ok(Err(e)) => {
             let _ = handle.join();
             return Err(e);
@@ -2726,7 +2803,7 @@ fn spawn_recording_thread(
         }
     };
 
-    Ok((stop_tx, handle, sample_rate))
+    Ok((stop_tx, handle, sample_rate, input_device_name))
 }
 
 fn resample_linear(samples: &[f32], source_rate: u32, target_rate: u32) -> Vec<f32> {
@@ -2824,10 +2901,10 @@ fn normalize_audio_gain(samples: Vec<f32>, stats: AudioSignalStats) -> Vec<f32> 
         .collect()
 }
 
-fn quiet_audio_error(stats: AudioSignalStats) -> String {
+fn quiet_audio_error(stats: AudioSignalStats, input_device_name: &str) -> String {
     format!(
-        "Captured audio was too quiet to transcribe (peak {:.4}, rms {:.4}, {:.1}s). Check macOS Sound > Input and the microphone level, then retry.",
-        stats.peak_abs, stats.rms, stats.duration_secs
+        "Captured audio from '{}' was too quiet to transcribe (peak {:.4}, rms {:.4}, {:.1}s). Check macOS Sound > Input, confirm the selected microphone, and retry.",
+        input_device_name, stats.peak_abs, stats.rms, stats.duration_secs
     )
 }
 
@@ -2852,6 +2929,7 @@ fn transcribe_samples(
     whisper_cli_path: String,
     samples: Vec<f32>,
     sample_rate: u32,
+    input_device_name: String,
 ) -> Result<String, String> {
     let prepared = if sample_rate == WHISPER_SAMPLE_RATE {
         samples
@@ -2865,7 +2943,7 @@ fn transcribe_samples(
 
     let signal = analyze_audio_signal(&prepared, WHISPER_SAMPLE_RATE);
     if audio_signal_is_too_quiet(signal) {
-        return Err(quiet_audio_error(signal));
+        return Err(quiet_audio_error(signal, &input_device_name));
     }
     let prepared = normalize_audio_gain(prepared, signal);
 
@@ -3083,6 +3161,41 @@ fn set_focused_field_insert_enabled(
         permission_granted: permission.granted,
         permission_status: permission.status,
     })
+}
+
+#[tauri::command]
+fn set_preferred_input_device(
+    device_name: Option<String>,
+    model_state: State<'_, LocalModelState>,
+) -> Result<Option<String>, String> {
+    let normalized = device_name
+        .as_deref()
+        .map(str::trim)
+        .filter(|value| !value.is_empty())
+        .map(|value| value.to_string());
+    let available_devices = list_input_devices();
+    if let Some(name) = normalized.as_deref() {
+        if !available_devices.iter().any(|device| device.name == name) {
+            return Err(format!(
+                "Microphone '{}' is not currently available on this machine.",
+                name
+            ));
+        }
+    }
+
+    let settings_path = model_state.settings_path.clone();
+    let mut settings = model_state
+        .settings
+        .lock()
+        .map_err(|_| "Failed to lock local model settings".to_string())?;
+    let previous = settings.preferred_input_device.clone();
+    settings.preferred_input_device = normalized.clone();
+    if let Err(error) = save_local_settings(&settings_path, &settings) {
+        settings.preferred_input_device = previous;
+        return Err(error);
+    }
+
+    Ok(settings.preferred_input_device.clone())
 }
 
 #[cfg(target_os = "macos")]
@@ -3381,10 +3494,11 @@ fn start_native_dictation_inner(app: &tauri::AppHandle) -> Result<u64, String> {
 
     let session_id = dictation.next_session_id.fetch_add(1, Ordering::SeqCst);
     let samples = Arc::new(Mutex::new(Vec::<f32>::new()));
-    let (stop_tx, thread_handle, sample_rate) =
+    let (stop_tx, thread_handle, sample_rate, input_device_name) =
         spawn_recording_thread(Arc::clone(&samples), app.clone(), session_id)?;
     *guard = Some(ActiveRecording {
         session_id,
+        input_device_name,
         stop_tx,
         thread_handle,
         samples,
@@ -3449,6 +3563,7 @@ async fn stop_native_dictation_inner(app: tauri::AppHandle) -> Result<String, St
             whisper_cli_path,
             captured_samples,
             recording.sample_rate,
+            recording.input_device_name,
         )
     })
     .await
@@ -3549,7 +3664,7 @@ mod tests {
         let samples = vec![0.0002_f32; 16_000];
         let stats = analyze_audio_signal(&samples, 16_000);
         assert!(audio_signal_is_too_quiet(stats));
-        assert!(quiet_audio_error(stats).contains("too quiet"));
+        assert!(quiet_audio_error(stats, "MacBook Pro Microphone").contains("too quiet"));
     }
 
     #[test]
@@ -3558,8 +3673,14 @@ mod tests {
         let stats = analyze_audio_signal(&samples, 16_000);
         assert!(!audio_signal_is_too_quiet(stats));
         let boosted = normalize_audio_gain(samples.clone(), stats);
-        let boosted_peak = boosted.iter().map(|sample| sample.abs()).fold(0.0_f32, f32::max);
-        let original_peak = samples.iter().map(|sample| sample.abs()).fold(0.0_f32, f32::max);
+        let boosted_peak = boosted
+            .iter()
+            .map(|sample| sample.abs())
+            .fold(0.0_f32, f32::max);
+        let original_peak = samples
+            .iter()
+            .map(|sample| sample.abs())
+            .fold(0.0_f32, f32::max);
         assert!(boosted_peak > original_peak);
         assert!(boosted_peak <= 0.85);
     }
@@ -3668,8 +3789,7 @@ mod tests {
     fn onboarding_runtime_prefers_registered_global_fn_state() {
         let registered_runtime =
             runtime_details_for_trigger(Some("Fn"), HotkeyDeliveryMode::GlobalHold);
-        let runtime =
-            onboarding_runtime_details(Some("Fn"), Some("Fn"), Some(&registered_runtime));
+        let runtime = onboarding_runtime_details(Some("Fn"), Some("Fn"), Some(&registered_runtime));
         assert_eq!(runtime.mode.as_str(), "global-hold");
         assert!(runtime.status.contains("anywhere"));
     }
@@ -3772,6 +3892,7 @@ fn main() {
             get_dictation_trigger,
             set_dictation_trigger,
             clear_dictation_trigger,
+            set_preferred_input_device,
             set_focused_field_insert_enabled,
             open_whisper_setup_page,
             insert_text_into_focused_field,

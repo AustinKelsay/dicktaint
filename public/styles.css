@@ -642,6 +642,14 @@ code {
   border-color: #3e756a;
 }
 
+#dictationInputStatus[data-tone="error"] {
+  color: #f4a18f;
+}
+
+#dictationInputStatus[data-tone="ok"] {
+  color: #91e1d0;
+}
+
 .model-meta {
   min-height: 1.35em;
   color: #a7bbd7;
