@@ -1,5 +1,18 @@
 # Changelog
 
+## v0.3.1 - 2026-03-26
+
+### Highlights
+
+- fixed a macOS native capture regression where some microphones, especially Bluetooth/AirPods routes, could open successfully but deliver only silent zeroed frames
+- added an input-stream startup probe so dictation rejects stale or muted routes earlier instead of recording silence and failing only at transcription time
+- stopped collapsing native capture candidates by display name so same-named CoreAudio input routes can still be tried individually
+
+### Release Notes
+
+- this patch specifically targets the native desktop microphone path introduced in `v0.3.0`
+- packaged `dicktaint.app` remains the preferred macOS validation path for microphone capture because it has its own TCC identity instead of inheriting Terminal permissions from `tauri:dev`
+
 ## v0.3.0 - 2026-03-26
 
 ### Highlights

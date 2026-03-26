@@ -54,6 +54,9 @@ const TARGET_TRANSCRIPTION_AUDIO_PEAK: f32 = 0.85;
 const MAX_TRANSCRIPTION_AUDIO_GAIN: f32 = 16.0;
 const LIVE_AUDIO_BAR_COUNT: usize = 12;
 const LIVE_AUDIO_EMIT_INTERVAL_MS: u64 = 45;
+const INPUT_STREAM_PROBE_TIMEOUT_MS: u64 = 600;
+const INPUT_STREAM_PROBE_POLL_INTERVAL_MS: u64 = 40;
+const INPUT_STREAM_PROBE_MIN_DURATION_MS: u32 = 120;
 
 #[derive(Clone, Serialize)]
 struct DictationStatePayload {
@@ -2605,6 +2608,7 @@ fn list_input_devices() -> Vec<DictationInputDevice> {
 
 fn create_input_stream_for_device(
     device: &cpal::Device,
+    device_name: &str,
     samples: Arc<Mutex<Vec<f32>>>,
     meter: LiveAudioMeter,
 ) -> Result<(Stream, u32), String> {
@@ -2615,6 +2619,7 @@ fn create_input_stream_for_device(
     let sample_rate = supported_config.sample_rate().0;
     let channels = supported_config.channels() as usize;
     let config: cpal::StreamConfig = supported_config.clone().into();
+    let probe_start_len = samples.lock().map(|guard| guard.len()).unwrap_or(0);
     let err_fn = |err| {
         eprintln!("microphone stream error: {err}");
     };
@@ -2673,7 +2678,70 @@ fn create_input_stream_for_device(
         }
     };
 
+    stream
+        .play()
+        .map_err(|e| format!("Failed to start microphone stream: {e}"))?;
+
+    if let Err(error) =
+        wait_for_non_silent_input(&samples, probe_start_len, sample_rate, device_name)
+    {
+        if let Ok(mut guard) = samples.lock() {
+            guard.truncate(probe_start_len);
+        }
+        drop(stream);
+        return Err(error);
+    }
+
     Ok((stream, sample_rate))
+}
+
+fn wait_for_non_silent_input(
+    samples: &Arc<Mutex<Vec<f32>>>,
+    start_len: usize,
+    sample_rate: u32,
+    device_name: &str,
+) -> Result<(), String> {
+    if sample_rate == 0 {
+        return Ok(());
+    }
+
+    let min_samples =
+        ((sample_rate as u64 * INPUT_STREAM_PROBE_MIN_DURATION_MS as u64) / 1000).max(32) as usize;
+    let deadline = Instant::now() + Duration::from_millis(INPUT_STREAM_PROBE_TIMEOUT_MS);
+
+    loop {
+        let observed = if let Ok(guard) = samples.lock() {
+            if guard.len() <= start_len {
+                None
+            } else {
+                let captured = &guard[start_len..];
+                Some((
+                    captured.len(),
+                    analyze_audio_signal(captured, sample_rate).peak_abs,
+                ))
+            }
+        } else {
+            None
+        };
+
+        if let Some((captured_len, peak_abs)) = observed {
+            if peak_abs > 0.0 {
+                return Ok(());
+            }
+            if captured_len >= min_samples {
+                return Err(format!(
+                    "Microphone '{}' opened but only produced silent audio frames. On macOS this usually means the selected input route is stale or muted. In Sound > Input, switch to another microphone and back, or choose System Default and retry.",
+                    device_name
+                ));
+            }
+        }
+
+        if Instant::now() >= deadline {
+            return Ok(());
+        }
+
+        thread::sleep(Duration::from_millis(INPUT_STREAM_PROBE_POLL_INTERVAL_MS));
+    }
 }
 
 fn create_input_stream(
@@ -2690,7 +2758,6 @@ fn create_input_stream(
         .preferred_input_device
         .clone();
     let mut candidate_devices: Vec<(String, cpal::Device)> = Vec::new();
-    let mut seen_names: HashSet<String> = HashSet::new();
 
     let default_name = host
         .default_input_device()
@@ -2700,9 +2767,8 @@ fn create_input_stream(
         if let Ok(devices) = host.input_devices() {
             for device in devices {
                 let name = device_name(&device, "unknown input");
-                if name == preferred_name && seen_names.insert(name.clone()) {
+                if name == preferred_name {
                     candidate_devices.push((name, device));
-                    break;
                 }
             }
         }
@@ -2710,17 +2776,12 @@ fn create_input_stream(
 
     if let Some(default_device) = host.default_input_device() {
         let name = device_name(&default_device, "default input");
-        if seen_names.insert(name.clone()) {
-            candidate_devices.push((name, default_device));
-        }
+        candidate_devices.push((name, default_device));
     }
 
     if let Ok(devices) = host.input_devices() {
         for device in devices {
-            let name = device_name(&device, "unknown input");
-            if seen_names.insert(name) {
-                candidate_devices.push((device_name(&device, "unknown input"), device));
-            }
+            candidate_devices.push((device_name(&device, "unknown input"), device));
         }
     }
 
@@ -2733,7 +2794,7 @@ fn create_input_stream(
 
     let mut attempts: Vec<String> = Vec::new();
     for (name, device) in candidate_devices {
-        match create_input_stream_for_device(&device, Arc::clone(&samples), meter.clone()) {
+        match create_input_stream_for_device(&device, &name, Arc::clone(&samples), meter.clone()) {
             Ok((stream, sample_rate)) => return Ok((stream, sample_rate, name)),
             Err(err) => attempts.push(format!("{name}: {err}")),
         }
@@ -2774,16 +2835,11 @@ fn spawn_recording_thread(
     let handle = thread::spawn(move || {
         let stream_result = create_input_stream(capture_samples, meter);
         match stream_result {
-            Ok((stream, sample_rate, input_device_name)) => match stream.play() {
-                Ok(()) => {
-                    let _ = init_tx.send(Ok((sample_rate, input_device_name)));
-                    let _ = stop_rx.recv();
-                    drop(stream);
-                }
-                Err(e) => {
-                    let _ = init_tx.send(Err(format!("Failed to start microphone stream: {e}")));
-                }
-            },
+            Ok((stream, sample_rate, input_device_name)) => {
+                let _ = init_tx.send(Ok((sample_rate, input_device_name)));
+                let _ = stop_rx.recv();
+                drop(stream);
+            }
             Err(e) => {
                 let _ = init_tx.send(Err(e));
             }
@@ -3632,8 +3688,10 @@ mod tests {
         focused_field_insert_enabled, normalize_audio_gain, normalize_dictation_trigger,
         onboarding_runtime_details, preferred_whisper_cli_names, quiet_audio_error,
         resample_linear, resolve_effective_dictation_trigger, runtime_details_for_trigger,
-        whisper_help_text_looks_valid, HotkeyDeliveryMode, LocalSettings,
+        wait_for_non_silent_input, whisper_help_text_looks_valid, HotkeyDeliveryMode,
+        LocalSettings,
     };
+    use std::sync::{Arc, Mutex};
 
     #[test]
     fn resample_linear_returns_same_when_rate_matches() {
@@ -3683,6 +3741,19 @@ mod tests {
             .fold(0.0_f32, f32::max);
         assert!(boosted_peak > original_peak);
         assert!(boosted_peak <= 0.85);
+    }
+
+    #[test]
+    fn silent_stream_probe_rejects_zeroed_frames() {
+        let samples = Arc::new(Mutex::new(vec![0.0_f32; 4096]));
+        let error = wait_for_non_silent_input(&samples, 0, 16_000, "Austin's AirPods").unwrap_err();
+        assert!(error.contains("silent audio frames"));
+    }
+
+    #[test]
+    fn silent_stream_probe_accepts_nonzero_frames() {
+        let samples = Arc::new(Mutex::new(vec![0.0_f32, 0.02, -0.01, 0.0]));
+        wait_for_non_silent_input(&samples, 0, 16_000, "MacBook Pro Microphone").unwrap();
     }
 
     #[test]
