@@ -1,5 +1,18 @@
 # Changelog
 
+## v0.3.5 - 2026-03-27
+
+### Highlights
+
+- fixed a macOS desktop regression where native hotkey dictation could still foreground the main app window on start even when microphone permission was already granted
+- restored the close-to-background pill sync so hiding the main window keeps the idle overlay visible for the next hotkey interaction
+- clarified hotkey/runtime docs so `Fn` fallback and explicit hotkey disable behavior are easier to diagnose
+
+### Release Notes
+
+- this patch targets the background dictation flow after `v0.3.4`, specifically the cases where `Fn` could steal focus away from another app field and the floating pill could disappear after closing the main window
+- macOS desktop remains the required validation path for this fix because the behavior depends on native Tauri windowing, Input Monitoring, and focused-field insertion timing
+
 ## v0.3.4 - 2026-03-26
 
 ### Highlights

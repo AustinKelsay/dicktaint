@@ -56,6 +56,12 @@ Out of scope:
 2. relaunch runtime
 3. verify focused fallback key path
 
+4a) `Fn` fires but brings dicktaint to the front:
+
+1. open Settings and inspect the runtime hotkey mode
+2. if it says `focused-window-hold`, grant Input Monitoring and relaunch
+3. if it says `global-hold`, treat it as a regression in the start/focus path
+
 5) no transcript after stop:
 
 1. verify mic levels and input route

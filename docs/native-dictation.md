@@ -121,6 +121,7 @@ Desktop settings includes a configurable hotkey for dictation start/stop.
 - Default combo: `Fn` on macOS, `CmdOrCtrl+Shift+D` on other desktop platforms
 - Set custom combo: `Settings` -> `Dictation Hotkey` -> `Record` -> press combo -> `Save Hotkey`
 - Saved combos are registered as global desktop shortcuts while the app is running. On macOS, `Fn` uses a native global listener when Input Monitoring allows it; otherwise it falls back to in-app behavior.
+- If no explicit combo has been saved yet, the app still falls back to the platform default hotkey until you click `Disable Hotkey`.
 - Reset default: click `Reset Default`
 - Disable: click `Disable Hotkey`
 
@@ -176,6 +177,11 @@ You can use this to validate pipeline wiring quickly. Accuracy is low.
 
 `Failed to start microphone stream`
 - Mic permissions likely blocked, or input device is unavailable.
+
+`Fn` starts dictation but also brings the app to the front
+- Check the runtime hotkey mode in Settings.
+- If it says `focused-window-hold`, grant Input Monitoring for the app (or Terminal in `tauri:dev`) and relaunch.
+- If it still happens while the runtime says `global-hold`, that is a bug/regression rather than expected fallback behavior.
 
 `No audio captured` or `No speech detected`
 - Speak longer/louder, check selected input device and input level.

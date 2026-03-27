@@ -694,6 +694,15 @@ fn show_main_window(app: &tauri::AppHandle) {
     }
 }
 
+fn sync_pill_after_main_window_hide(app: &tauri::AppHandle) {
+    let state = if dictation_is_running(app).unwrap_or(false) {
+        "listening"
+    } else {
+        "idle"
+    };
+    sync_pill_for_dictation_state(app, state, None);
+}
+
 fn active_hotkey_label(app: &tauri::AppHandle) -> String {
     let hotkey_state = app.state::<GlobalHotkeyState>();
     let trigger = current_registered_hotkey(hotkey_state.inner())
@@ -2779,6 +2788,11 @@ fn microphone_permission_restricted_error() -> String {
 }
 
 #[cfg(target_os = "macos")]
+fn should_focus_main_window_for_microphone_prompt(status: AVAuthorizationStatus) -> bool {
+    status == AVAuthorizationStatus::NotDetermined
+}
+
+#[cfg(target_os = "macos")]
 fn ensure_microphone_access_authorized(app: &tauri::AppHandle) -> Result<(), String> {
     let (tx, rx) = mpsc::channel::<Result<(), String>>();
     let tx_main = tx.clone();
@@ -2793,12 +2807,6 @@ fn ensure_microphone_access_authorized(app: &tauri::AppHandle) -> Result<(), Str
             }
         };
 
-        if let Some(window) = app_handle.get_webview_window("main") {
-            let _ = window.show();
-            let _ = window.unminimize();
-            let _ = window.set_focus();
-        }
-
         let status = unsafe { AVCaptureDevice::authorizationStatusForMediaType(media_type) };
         if status == AVAuthorizationStatus::Authorized {
             let _ = tx_main.send(Ok(()));
@@ -2812,13 +2820,15 @@ fn ensure_microphone_access_authorized(app: &tauri::AppHandle) -> Result<(), Str
             let _ = tx_main.send(Err(microphone_permission_restricted_error()));
             return;
         }
-        if status != AVAuthorizationStatus::NotDetermined {
+        if !should_focus_main_window_for_microphone_prompt(status) {
             let _ = tx_main.send(Err(format!(
                 "Microphone access returned an unknown AVFoundation authorization state ({}).",
                 status.0
             )));
             return;
         }
+
+        show_main_window(&app_handle);
 
         let tx_request = tx_main.clone();
         let handler = RcBlock::new(move |granted| {
@@ -3798,6 +3808,11 @@ mod tests {
     };
     use std::sync::{Arc, Mutex};
 
+    #[cfg(target_os = "macos")]
+    use super::should_focus_main_window_for_microphone_prompt;
+    #[cfg(target_os = "macos")]
+    use objc2_av_foundation::AVAuthorizationStatus;
+
     #[test]
     fn resample_linear_returns_same_when_rate_matches() {
         let source = vec![0.0_f32, 0.5, -0.5, 1.0];
@@ -3978,6 +3993,23 @@ mod tests {
         assert!(runtime.permission_hint.is_some());
     }
 
+    #[cfg(target_os = "macos")]
+    #[test]
+    fn microphone_permission_prompt_only_focuses_for_not_determined_status() {
+        assert!(should_focus_main_window_for_microphone_prompt(
+            AVAuthorizationStatus::NotDetermined
+        ));
+        assert!(!should_focus_main_window_for_microphone_prompt(
+            AVAuthorizationStatus::Authorized
+        ));
+        assert!(!should_focus_main_window_for_microphone_prompt(
+            AVAuthorizationStatus::Denied
+        ));
+        assert!(!should_focus_main_window_for_microphone_prompt(
+            AVAuthorizationStatus::Restricted
+        ));
+    }
+
     #[test]
     fn preferred_whisper_cli_names_include_generic_fallback() {
         let names = preferred_whisper_cli_names();
@@ -4060,6 +4092,7 @@ fn main() {
             }
             if let tauri::WindowEvent::CloseRequested { api, .. } = event {
                 api.prevent_close();
+                sync_pill_after_main_window_hide(window.app_handle());
                 let _ = window.hide();
             }
         })

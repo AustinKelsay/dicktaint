@@ -93,6 +93,7 @@ Notes:
 - A small bottom-center hotkey pill now renders as a native macOS transparent overlay window (outside the main app window), with an extra-compact icon-only footprint and quick dictation state feedback that follows the active hotkey mode (`Fn` hold vs custom toggle shortcut).
 - The macOS `Fn` listener now recovers more gracefully if the system temporarily disables its event tap, which reduces the “Fn stopped working until relaunch” failure mode.
 - If hold-to-talk hotkey capture does not fire, allow Input Monitoring/Accessibility for the app (or Terminal during `tauri:dev`) and relaunch.
+- If `Fn` starts dictation but also brings the app forward, check the hotkey runtime text in Settings. `focused-window-hold` means macOS is still blocking global `Fn` capture until Input Monitoring is granted and dicktaint is relaunched.
 - Desktop onboarding is local-first and model-first: verify `whisper-cli`, inspect hardware, then download/select one local Whisper model per device.
 - Packaged desktop builds are expected to provide `whisper-cli` as a bundled sidecar.
 - `tauri:dev` resolves `whisper-cli` from sidecar candidates, `WHISPER_CLI_PATH`, or system `PATH`.
@@ -100,6 +101,7 @@ Notes:
 - Dictation start is blocked until both prerequisites are met on that device: `whisper-cli` present and a local model selected.
 - Selected dictation model state and optional dictation hotkey are saved at `$HOME/Library/Application Support/com.plebdev.dicktaint/.dicktaint/dictation-settings.json`, and model files are stored under `$HOME/Library/Application Support/com.plebdev.dicktaint/.dicktaint/whisper-models/`.
 - The saved dictation hotkey is registered as a desktop global shortcut (system-wide while app is running). On macOS, `Fn` uses a native global listener when permitted; if blocked by permissions it falls back to in-app handling.
+- If no explicit hotkey has been saved yet, dicktaint falls back to the platform default hotkey (`Fn` on macOS, `CmdOrCtrl+Shift+D` elsewhere) until you click `Disable Hotkey`.
 - Dictation state events now include a backend session id so a completed older transcript cannot incorrectly clear a newer live recording in the UI.
 - Focused-field insertion now restores prior clipboard text through a safer path to avoid pasteboard crashes after a successful paste.
 - Desktop bundle config uses a `whisper-cli` sidecar (`src-tauri/tauri.conf.json` `externalBin`) so packaged app users do not need a separate CLI install.
@@ -125,6 +127,7 @@ Hotkey setup (desktop):
 - The saved combo is registered as a global hotkey while the desktop app is running. On macOS, `Fn` is global when Input Monitoring permissions allow it, and otherwise the UI now calls out that it has fallen back to focused-window behavior until that permission is granted.
 - `Reset Default` sets `Fn` on macOS and `CmdOrCtrl+Shift+D` on other desktop platforms.
 - `Disable Hotkey` removes the shortcut.
+- If no combo is saved yet, the default hotkey is still active until you explicitly disable it.
 - Hotkey config is per-device and persisted in `$HOME/Library/Application Support/com.plebdev.dicktaint/.dicktaint/dictation-settings.json`.
 
 Desktop build (local/manual):
