@@ -109,6 +109,20 @@ jobs:
             codesign --verify --deep --strict "$app"
           done
 
+      - name: Validate microphone entitlement
+        run: |
+          set -euo pipefail
+          shopt -s nullglob
+          app_bundles=(src-tauri/target/release/bundle/macos/*.app)
+          if [ "${#app_bundles[@]}" -eq 0 ]; then
+            echo "No macOS .app bundle produced."
+            exit 1
+          fi
+          for app in "${app_bundles[@]}"; do
+            entitlements="$(codesign -d --entitlements :- "$app" 2>&1)"
+            printf '%s\n' "$entitlements" | grep -q '<key>com.apple.security.device.audio-input</key>'
+          done
+
       - name: Collect artifacts
         run: |
           set -euo pipefail

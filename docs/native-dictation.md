@@ -178,6 +178,11 @@ You can use this to validate pipeline wiring quickly. Accuracy is low.
 `Failed to start microphone stream`
 - Mic permissions likely blocked, or input device is unavailable.
 
+`Microphone permission is denied for this app`, but dicktaint never appears in the Microphone settings list
+- That indicates a broken packaged build rather than a user-toggle issue.
+- The signed app must include the hardened-runtime entitlement `com.apple.security.device.audio-input` or macOS will deny before surfacing the app in System Settings.
+- Install a fixed build and retry from the `/Applications` copy.
+
 `Fn` starts dictation but also brings the app to the front
 - Check the runtime hotkey mode in Settings.
 - If it says `focused-window-hold`, grant Input Monitoring for the app (or Terminal in `tauri:dev`) and relaunch.

@@ -1,5 +1,19 @@
 # Changelog
 
+## v0.3.6 - 2026-03-27
+
+### Highlights
+
+- fixed the packaged macOS app so hardened-runtime releases now include the `com.apple.security.device.audio-input` entitlement required for microphone prompting
+- corrected the release packaging configuration so notarized builds can appear in macOS Microphone settings instead of being denied before the prompt stage
+- added release-time verification for the microphone entitlement so future signed builds fail fast if it is missing
+
+### Release Notes
+
+- this patch fixes a packaging regression in `v0.3.5`: the shipped app was properly signed and notarized, but macOS TCC still denied microphone access because the bundle lacked the audio-input entitlement
+- affected symptom: dicktaint reported microphone denial while never appearing in System Settings > Privacy & Security > Microphone
+- reinstall `v0.3.6` and retry from the `/Applications` copy
+
 ## v0.3.5 - 2026-03-27
 
 ### Highlights

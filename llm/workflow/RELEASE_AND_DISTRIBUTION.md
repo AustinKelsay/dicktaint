@@ -39,6 +39,7 @@ Pre-release gates:
 5. run manual smoke checklist from `SMOKE_TESTS.md`
 6. verify sidecar binaries required for target distribution are present
 7. verify private API setting matches release channel policy
+8. verify the signed macOS app bundle includes `com.apple.security.device.audio-input`
 
 Tag-and-publish path:
 
@@ -57,6 +58,7 @@ Packaging requirement:
 - target platform sidecar binaries must be available for intended targets
 - release automation must fail if signing/notarization credentials are missing rather than publishing ad hoc app bundles
 - current CI path publishes a notarized Apple Silicon `.dmg` and notarized `.app.tar.gz` archives for both architectures; Intel DMG generation is temporarily skipped in CI because that bundler path is unstable on the GitHub Intel runner
+- hardened-runtime macOS releases must include the audio-input entitlement or TCC will deny microphone access before the app can appear in the Microphone settings pane
 
 Direct macOS distribution requirements:
 
