@@ -1,5 +1,19 @@
 # Changelog
 
+## v0.3.8 - 2026-03-30
+
+### Highlights
+
+- fixed a native macOS dictation teardown bug where the microphone capture stream could stay live after `Fn` hold-to-talk stopped, leaving the system privacy mic indicator stuck on
+- added a real macOS menu bar item with backend-driven status, start/stop controls, force-stop, and quit actions so background dictation no longer relies on the floating pill alone
+- added Background UI settings for menu bar mode, close-button behavior, and floating pill visibility so Mac users can choose how the app behaves while hidden
+
+### Release Notes
+
+- this patch specifically targets the background dictation lifecycle after `v0.3.7`, especially the cases where the real macOS microphone indicator could remain active even while dicktaint appeared idle
+- default Mac behavior is now: menu bar icon on, close button hides to the menu bar, floating pill only while active
+- existing installs migrate automatically because the new background UI preferences are defaulted and normalized in code
+
 ## v0.3.7 - 2026-03-29
 
 ### Highlights

@@ -111,7 +111,7 @@ class MockElement {
   }
 }
 
-function createMockDom({ nativeDesktop = false, onboardingPayload = null } = {}) {
+function createMockDom({ nativeDesktop = false, onboardingPayload = null, invokeHandler = null } = {}) {
   const ids = [
     'status',
     'onboardingScreen',
@@ -167,6 +167,11 @@ function createMockDom({ nativeDesktop = false, onboardingPayload = null } = {})
     'focusedFieldInsertCard',
     'focusedFieldInsertToggle',
     'focusedFieldInsertStatus',
+    'backgroundUiCard',
+    'menuBarModeSelect',
+    'closeActionSelect',
+    'pillVisibilityModeSelect',
+    'backgroundUiStatus',
     'dictationPermissionsCard',
     'dictationPermissionSummary',
     'dictationPermissionList',
@@ -182,6 +187,9 @@ function createMockDom({ nativeDesktop = false, onboardingPayload = null } = {})
   elements.get('dictationModelSelect').tagName = 'SELECT';
   elements.get('dictationHotkeyInput').tagName = 'INPUT';
   elements.get('focusedFieldInsertToggle').tagName = 'INPUT';
+  elements.get('menuBarModeSelect').tagName = 'SELECT';
+  elements.get('closeActionSelect').tagName = 'SELECT';
+  elements.get('pillVisibilityModeSelect').tagName = 'SELECT';
   elements.get('dictationPermissionList').tagName = 'UL';
   elements.get('status').textContent = 'Loading...';
 
@@ -193,6 +201,15 @@ function createMockDom({ nativeDesktop = false, onboardingPayload = null } = {})
 
   const documentListeners = new Map();
   const clipboardCalls = [];
+  const invokeCalls = [];
+  const backgroundPreferences = {
+    pill_visibility_mode: onboardingPayload?.pill_visibility_mode || 'active-only',
+    menu_bar_mode: onboardingPayload?.menu_bar_mode || 'always',
+    close_action: onboardingPayload?.close_action || 'hide-to-tray'
+  };
+  if (backgroundPreferences.menu_bar_mode === 'off') {
+    backgroundPreferences.close_action = 'quit';
+  }
 
   global.Element = MockElement;
   global.navigator = {
@@ -230,9 +247,20 @@ function createMockDom({ nativeDesktop = false, onboardingPayload = null } = {})
   global.window = {
     __TAURI__: nativeDesktop ? {
       core: {
-        invoke: async (command) => {
+        invoke: async (command, args = {}) => {
+          invokeCalls.push({ command, args });
+          if (typeof invokeHandler === 'function') {
+            const handled = await invokeHandler(command, args, { backgroundPreferences, invokeCalls });
+            if (handled !== undefined) return handled;
+          }
           if (command === 'get_dictation_onboarding') {
-            return onboardingPayload || {
+            if (onboardingPayload) {
+              return {
+                ...onboardingPayload,
+                ...backgroundPreferences
+              };
+            }
+            return {
               onboarding_required: false,
               selected_model_id: 'base-en',
               selected_model_path: '/tmp/ggml-base.en.bin',
@@ -242,6 +270,7 @@ function createMockDom({ nativeDesktop = false, onboardingPayload = null } = {})
               dictation_trigger_mode: 'global-hold',
               dictation_trigger_status: 'Hold Fn anywhere to dictate, then release to transcribe.',
               dictation_trigger_permission_hint: null,
+              ...backgroundPreferences,
               focused_field_insert_enabled: false,
               focused_field_insert_permission_granted: true,
               focused_field_insert_permission_status: 'Accessibility permission granted. Finished transcripts can be pasted into the focused field of other apps.',
@@ -268,6 +297,23 @@ function createMockDom({ nativeDesktop = false, onboardingPayload = null } = {})
               ]
             };
           }
+          if (command === 'set_pill_visibility_mode') {
+            backgroundPreferences.pill_visibility_mode = args.mode || 'active-only';
+            return { ...backgroundPreferences };
+          }
+          if (command === 'set_menu_bar_mode') {
+            backgroundPreferences.menu_bar_mode = args.mode || 'always';
+            if (backgroundPreferences.menu_bar_mode === 'off') {
+              backgroundPreferences.close_action = 'quit';
+            }
+            return { ...backgroundPreferences };
+          }
+          if (command === 'set_close_action') {
+            backgroundPreferences.close_action = backgroundPreferences.menu_bar_mode === 'off'
+              ? 'quit'
+              : (args.action || 'hide-to-tray');
+            return { ...backgroundPreferences };
+          }
           throw new Error(`Unhandled Tauri command in test: ${command}`);
         }
       },
@@ -284,7 +330,7 @@ function createMockDom({ nativeDesktop = false, onboardingPayload = null } = {})
     open() {}
   };
 
-  return { clipboardCalls };
+  return { clipboardCalls, invokeCalls };
 }
 
 async function loadAppWithTestApi() {
@@ -525,5 +571,127 @@ describe('dictation frontend hotkey polish', () => {
     expect(state.liveAudioBars[11]).toBe(1);
     expect(document.getElementById('dictationWaveformLevel').textContent).toBe('Mic level: good');
     expect(document.getElementById('dictationWaveBar11').style.getPropertyValue('--bar-level')).toBe('1.000');
+  });
+});
+
+describe('dictation frontend background UI settings', () => {
+  let api;
+  let invokeCalls;
+
+  async function flushUi() {
+    await Promise.resolve();
+    await Promise.resolve();
+  }
+
+  beforeEach(async () => {
+    ({ invokeCalls } = createMockDom({
+      nativeDesktop: true,
+      onboardingPayload: {
+        onboarding_required: false,
+        selected_model_id: 'base-en',
+        selected_model_path: '/tmp/ggml-base.en.bin',
+        selected_model_exists: true,
+        available_input_devices: [],
+        preferred_input_device: null,
+        dictation_trigger: 'Fn',
+        default_dictation_trigger: 'Fn',
+        dictation_trigger_mode: 'global-hold',
+        dictation_trigger_status: 'Hold Fn anywhere to dictate, then release to transcribe.',
+        dictation_trigger_permission_hint: null,
+        pill_visibility_mode: 'always',
+        menu_bar_mode: 'background-only',
+        close_action: 'hide-to-tray',
+        focused_field_insert_enabled: false,
+        focused_field_insert_permission_granted: true,
+        focused_field_insert_permission_status: 'Accessibility permission granted.',
+        whisper_cli_available: true,
+        whisper_cli_path: '/usr/local/bin/whisper-cli',
+        models_dir: '/tmp/models',
+        device: {
+          total_memory_gb: 16,
+          logical_cpu_cores: 8,
+          architecture: 'aarch64',
+          os: 'macos'
+        },
+        models: [
+          {
+            id: 'base-en',
+            display_name: 'Whisper Base (English)',
+            approx_size_gb: 0.15,
+            speed_note: 'Fast',
+            quality_note: 'Balanced',
+            installed: true,
+            recommended: true,
+            likely_runnable: true
+          }
+        ]
+      }
+    }));
+    api = await loadAppWithTestApi();
+    await flushUi();
+  });
+
+  afterEach(() => {
+    delete global.__DICKTAINT_TEST_API__;
+    delete global.__DICKTAINT_EXPOSE_TEST_API__;
+    delete global.window;
+    delete global.document;
+    delete global.navigator;
+    delete global.Element;
+  });
+
+  it('hydrates background UI preferences from onboarding payload', () => {
+    const state = api.getState();
+    expect(state.menuBarMode).toBe('background-only');
+    expect(state.closeAction).toBe('hide-to-tray');
+    expect(state.pillVisibilityMode).toBe('always');
+    expect(document.getElementById('menuBarModeSelect').value).toBe('background-only');
+    expect(document.getElementById('closeActionSelect').value).toBe('hide-to-tray');
+    expect(document.getElementById('pillVisibilityModeSelect').value).toBe('always');
+  });
+
+  it('saves pill visibility mode changes through the Tauri command', async () => {
+    const select = document.getElementById('pillVisibilityModeSelect');
+    select.value = 'off';
+    select.dispatchEvent({ type: 'change', currentTarget: select });
+    await flushUi();
+
+    expect(invokeCalls.at(-1)).toEqual({
+      command: 'set_pill_visibility_mode',
+      args: { mode: 'off' }
+    });
+    expect(api.getState().pillVisibilityMode).toBe('off');
+  });
+
+  it('forces close action to quit when the menu bar mode is turned off', async () => {
+    const select = document.getElementById('menuBarModeSelect');
+    select.value = 'off';
+    select.dispatchEvent({ type: 'change', currentTarget: select });
+    await flushUi();
+
+    const state = api.getState();
+    expect(invokeCalls.at(-1)).toEqual({
+      command: 'set_menu_bar_mode',
+      args: { mode: 'off' }
+    });
+    expect(state.menuBarMode).toBe('off');
+    expect(state.closeAction).toBe('quit');
+    expect(document.getElementById('closeActionSelect').value).toBe('quit');
+    expect(document.getElementById('closeActionSelect').disabled).toBe(true);
+  });
+
+  it('keeps dictation status rendering stable while background UI preferences change', () => {
+    api.handleNativeDictationStatePayload({
+      state: 'listening',
+      session_id: 42
+    });
+    api.applyBackgroundUiPreferencesPayload({
+      pill_visibility_mode: 'off',
+      menu_bar_mode: 'always',
+      close_action: 'hide-to-tray'
+    });
+
+    expect(api.getState().isDictating).toBe(true);
+    expect(document.getElementById('status').textContent).toBe('Listening… click Stop to transcribe.');
   });
 });

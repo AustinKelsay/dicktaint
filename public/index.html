@@ -109,6 +109,38 @@
             <p id="focusedFieldInsertStatus" class="hint">Focused-field insertion is disabled.</p>
           </section>
 
+          <section id="backgroundUiCard" class="hotkey-card settings-section" hidden>
+            <div class="section-heading">
+              <p class="section-kicker">Background UI</p>
+              <label for="menuBarModeSelect">Menu Bar + Floating Pill</label>
+            </div>
+            <p class="hint section-copy">Control how dicktaint behaves when it is running in the background on this Mac.</p>
+            <div class="inline-actions">
+              <label for="menuBarModeSelect">Menu Bar</label>
+              <select id="menuBarModeSelect">
+                <option value="always">Always show</option>
+                <option value="background-only">Only while hidden</option>
+                <option value="off">Off</option>
+              </select>
+            </div>
+            <div class="inline-actions">
+              <label for="closeActionSelect">Close Button</label>
+              <select id="closeActionSelect">
+                <option value="hide-to-tray">Hide to menu bar</option>
+                <option value="quit">Quit app</option>
+              </select>
+            </div>
+            <div class="inline-actions">
+              <label for="pillVisibilityModeSelect">Floating Pill</label>
+              <select id="pillVisibilityModeSelect">
+                <option value="off">Off</option>
+                <option value="active-only">Show while active</option>
+                <option value="always">Always show</option>
+              </select>
+            </div>
+            <p id="backgroundUiStatus" class="hint">Menu bar and floating pill settings load from this Mac.</p>
+          </section>
+
           <section id="dictationPermissionsCard" class="hotkey-card settings-section" hidden>
             <div class="section-heading">
               <p class="section-kicker">Permissions</p>

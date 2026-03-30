@@ -44,6 +44,11 @@ const dictationHotkeyPresetsEl = document.getElementById('dictationHotkeyPresets
 const focusedFieldInsertCardEl = document.getElementById('focusedFieldInsertCard');
 const focusedFieldInsertToggleEl = document.getElementById('focusedFieldInsertToggle');
 const focusedFieldInsertStatusEl = document.getElementById('focusedFieldInsertStatus');
+const backgroundUiCardEl = document.getElementById('backgroundUiCard');
+const menuBarModeSelectEl = document.getElementById('menuBarModeSelect');
+const closeActionSelectEl = document.getElementById('closeActionSelect');
+const pillVisibilityModeSelectEl = document.getElementById('pillVisibilityModeSelect');
+const backgroundUiStatusEl = document.getElementById('backgroundUiStatus');
 const dictationPermissionsCardEl = document.getElementById('dictationPermissionsCard');
 const dictationPermissionSummaryEl = document.getElementById('dictationPermissionSummary');
 const dictationPermissionListEl = document.getElementById('dictationPermissionList');
@@ -61,6 +66,9 @@ const MAC_DESKTOP_ONLY_MESSAGE = 'Desktop MVP currently supports macOS only. Cur
 const PILL_STATUS_EVENT = 'dicktaint://pill-status';
 const DICTATION_HISTORY_LIMIT = 10;
 const DICTATION_WAVEFORM_BAR_COUNT = 12;
+const DEFAULT_PILL_VISIBILITY_MODE = 'active-only';
+const DEFAULT_MENU_BAR_MODE = 'always';
+const DEFAULT_CLOSE_ACTION = 'hide-to-tray';
 const HOTKEY_PRESET_OPTIONS = [
   { value: 'Fn', label: 'Hold Fn' },
   { value: 'CmdOrCtrl+Shift+D', label: 'Cmd/Ctrl+Shift+D' },
@@ -96,6 +104,10 @@ let dictationTriggerPermissionHint = '';
 let focusedFieldInsertEnabled = false;
 let focusedFieldInsertPermissionGranted = false;
 let focusedFieldInsertPermissionStatus = 'Focused-field insertion is disabled.';
+let pillVisibilityMode = DEFAULT_PILL_VISIBILITY_MODE;
+let menuBarMode = DEFAULT_MENU_BAR_MODE;
+let closeAction = DEFAULT_CLOSE_ACTION;
+let isSavingBackgroundUiSettings = false;
 let isSavingFocusedFieldInsertSetting = false;
 let isSavingInputDevice = false;
 let lastHotkeyToggleAtMs = 0;
@@ -216,6 +228,165 @@ function setFocusedFieldInsertStatus(message, tone = 'neutral') {
   if (!focusedFieldInsertStatusEl) return;
   focusedFieldInsertStatusEl.textContent = message;
   focusedFieldInsertStatusEl.dataset.tone = tone;
+}
+
+function setBackgroundUiStatus(message, tone = 'neutral') {
+  if (!backgroundUiStatusEl) return;
+  backgroundUiStatusEl.textContent = message;
+  backgroundUiStatusEl.dataset.tone = tone;
+}
+
+function normalizePillVisibilityMode(value) {
+  const normalized = String(value || '').trim().toLowerCase();
+  if (normalized === 'off') return 'off';
+  if (normalized === 'always') return 'always';
+  return DEFAULT_PILL_VISIBILITY_MODE;
+}
+
+function normalizeMenuBarMode(value) {
+  const normalized = String(value || '').trim().toLowerCase();
+  if (normalized === 'background-only') return 'background-only';
+  if (normalized === 'off') return 'off';
+  return DEFAULT_MENU_BAR_MODE;
+}
+
+function normalizeCloseAction(value, nextMenuBarMode = menuBarMode) {
+  if (normalizeMenuBarMode(nextMenuBarMode) === 'off') return 'quit';
+  const normalized = String(value || '').trim().toLowerCase();
+  return normalized === 'quit' ? 'quit' : DEFAULT_CLOSE_ACTION;
+}
+
+function describeBackgroundUiStatus() {
+  const trayText = menuBarMode === 'always'
+    ? 'Menu bar: always visible.'
+    : (menuBarMode === 'background-only'
+      ? 'Menu bar: only visible while the main window is hidden.'
+      : 'Menu bar: off.');
+  const closeText = closeAction === 'hide-to-tray'
+    ? 'Close button hides to the menu bar.'
+    : 'Close button quits the app.';
+  const pillText = pillVisibilityMode === 'always'
+    ? 'Floating pill: always visible.'
+    : (pillVisibilityMode === 'off'
+      ? 'Floating pill: off.'
+      : 'Floating pill: visible only while active.');
+  return `${trayText} ${closeText} ${pillText}`;
+}
+
+function syncBackgroundUiControls() {
+  if (!backgroundUiCardEl) return;
+
+  const visible = isFocusedMacDesktopMode();
+  backgroundUiCardEl.hidden = !visible;
+  if (!visible) return;
+
+  if (menuBarModeSelectEl) {
+    menuBarModeSelectEl.value = normalizeMenuBarMode(menuBarMode);
+    menuBarModeSelectEl.disabled = !visible || isSavingBackgroundUiSettings;
+  }
+  if (closeActionSelectEl) {
+    closeActionSelectEl.value = normalizeCloseAction(closeAction, menuBarMode);
+    closeActionSelectEl.disabled = !visible || isSavingBackgroundUiSettings || menuBarMode === 'off';
+  }
+  if (pillVisibilityModeSelectEl) {
+    pillVisibilityModeSelectEl.value = normalizePillVisibilityMode(pillVisibilityMode);
+    pillVisibilityModeSelectEl.disabled = !visible || isSavingBackgroundUiSettings;
+  }
+
+  setBackgroundUiStatus(
+    describeBackgroundUiStatus(),
+    menuBarMode === 'off' && closeAction === 'quit' ? 'neutral' : 'ok'
+  );
+}
+
+function applyBackgroundUiPreferencesPayload(payload) {
+  menuBarMode = normalizeMenuBarMode(
+    payload?.menu_bar_mode
+      ?? payload?.menuBarMode
+      ?? menuBarMode
+  );
+  closeAction = normalizeCloseAction(
+    payload?.close_action
+      ?? payload?.closeAction
+      ?? closeAction,
+    menuBarMode
+  );
+  pillVisibilityMode = normalizePillVisibilityMode(
+    payload?.pill_visibility_mode
+      ?? payload?.pillVisibilityMode
+      ?? pillVisibilityMode
+  );
+  syncBackgroundUiControls();
+  syncControls();
+}
+
+async function savePillVisibilityMode(mode) {
+  const tauriInvoke = getTauriInvoke();
+  if (!tauriInvoke || !isFocusedMacDesktopMode()) return;
+
+  try {
+    isSavingBackgroundUiSettings = true;
+    syncControls();
+    const payload = await tauriInvoke('set_pill_visibility_mode', {
+      mode: normalizePillVisibilityMode(mode)
+    });
+    applyBackgroundUiPreferencesPayload(payload);
+    setStatus('Floating pill preference saved.', 'ok');
+  } catch (error) {
+    const details = getErrorMessage(error);
+    syncBackgroundUiControls();
+    setBackgroundUiStatus(`Could not save floating pill setting: ${details}`, 'error');
+    setStatus(`Could not save floating pill setting: ${details}`, 'error');
+  } finally {
+    isSavingBackgroundUiSettings = false;
+    syncControls();
+  }
+}
+
+async function saveMenuBarMode(mode) {
+  const tauriInvoke = getTauriInvoke();
+  if (!tauriInvoke || !isFocusedMacDesktopMode()) return;
+
+  try {
+    isSavingBackgroundUiSettings = true;
+    syncControls();
+    const payload = await tauriInvoke('set_menu_bar_mode', {
+      mode: normalizeMenuBarMode(mode)
+    });
+    applyBackgroundUiPreferencesPayload(payload);
+    setStatus('Menu bar preference saved.', 'ok');
+  } catch (error) {
+    const details = getErrorMessage(error);
+    syncBackgroundUiControls();
+    setBackgroundUiStatus(`Could not save menu bar setting: ${details}`, 'error');
+    setStatus(`Could not save menu bar setting: ${details}`, 'error');
+  } finally {
+    isSavingBackgroundUiSettings = false;
+    syncControls();
+  }
+}
+
+async function saveCloseAction(nextAction) {
+  const tauriInvoke = getTauriInvoke();
+  if (!tauriInvoke || !isFocusedMacDesktopMode()) return;
+
+  try {
+    isSavingBackgroundUiSettings = true;
+    syncControls();
+    const payload = await tauriInvoke('set_close_action', {
+      action: normalizeCloseAction(nextAction, menuBarMode)
+    });
+    applyBackgroundUiPreferencesPayload(payload);
+    setStatus('Close button behavior saved.', 'ok');
+  } catch (error) {
+    const details = getErrorMessage(error);
+    syncBackgroundUiControls();
+    setBackgroundUiStatus(`Could not save close button behavior: ${details}`, 'error');
+    setStatus(`Could not save close button behavior: ${details}`, 'error');
+  } finally {
+    isSavingBackgroundUiSettings = false;
+    syncControls();
+  }
 }
 
 function setDictationInputStatus(message, tone = 'neutral') {
@@ -687,6 +858,9 @@ function summarizeHotkeyPillStatus(message, tone = 'neutral') {
 }
 
 function syncHotkeyPillForStatus(message, tone = 'neutral') {
+  if (isFocusedMacDesktopMode()) {
+    return;
+  }
   const visible = isNativeDesktopMode() && isFocusedMacDesktopMode();
   if (!visible) {
     setHotkeyPill('', 'idle', false);
@@ -870,7 +1044,10 @@ function updateModelActionLabels() {
 function syncControls() {
   const hasCaptureSupport = isFocusedMacDesktopMode() || (!isNativeDesktopMode() && Boolean(SpeechRecognitionApi));
   const dictationModelMissing = isFocusedMacDesktopMode() && !nativeDictationModelReady;
-  const lockControls = isInstallingDictationModel || isDeletingDictationModel || isSavingInputDevice;
+  const lockControls = isInstallingDictationModel
+    || isDeletingDictationModel
+    || isSavingInputDevice
+    || isSavingBackgroundUiSettings;
   const hotkeyDisabled = lockControls || !isNativeDesktopMode();
   const selected = getSelectedDictationModel();
   const setupReady = !isFocusedMacDesktopMode() || nativeDictationModelReady;
@@ -961,6 +1138,7 @@ function syncControls() {
     }
   }
   syncDictationHotkeyUi();
+  syncBackgroundUiControls();
   updateModelActionLabels();
   syncSetupHealthPills();
 }
@@ -1622,6 +1800,10 @@ async function loadDictationOnboarding({ quietStatus = false } = {}) {
     focusedFieldInsertEnabled = false;
     focusedFieldInsertPermissionGranted = false;
     focusedFieldInsertPermissionStatus = 'Focused-field insertion is disabled.';
+    pillVisibilityMode = DEFAULT_PILL_VISIBILITY_MODE;
+    menuBarMode = DEFAULT_MENU_BAR_MODE;
+    closeAction = DEFAULT_CLOSE_ACTION;
+    isSavingBackgroundUiSettings = false;
     isSavingFocusedFieldInsertSetting = false;
     setFocusedFieldInsertStatus('Focused-field insertion is disabled.', 'neutral');
     setSetupScreenMode('onboarding');
@@ -1636,6 +1818,9 @@ async function loadDictationOnboarding({ quietStatus = false } = {}) {
     }
     if (focusedFieldInsertCardEl) {
       focusedFieldInsertCardEl.hidden = true;
+    }
+    if (backgroundUiCardEl) {
+      backgroundUiCardEl.hidden = true;
     }
     if (openSettingsBtn) {
       openSettingsBtn.hidden = true;
@@ -1654,6 +1839,10 @@ async function loadDictationOnboarding({ quietStatus = false } = {}) {
     focusedFieldInsertEnabled = false;
     focusedFieldInsertPermissionGranted = false;
     focusedFieldInsertPermissionStatus = 'Focused-field insertion is unavailable on this platform.';
+    pillVisibilityMode = DEFAULT_PILL_VISIBILITY_MODE;
+    menuBarMode = DEFAULT_MENU_BAR_MODE;
+    closeAction = DEFAULT_CLOSE_ACTION;
+    isSavingBackgroundUiSettings = false;
     isSavingFocusedFieldInsertSetting = false;
     dictationTriggerMode = 'disabled';
     dictationTriggerStatus = 'Hotkey unavailable on this platform.';
@@ -1671,6 +1860,9 @@ async function loadDictationOnboarding({ quietStatus = false } = {}) {
     }
     if (focusedFieldInsertCardEl) {
       focusedFieldInsertCardEl.hidden = true;
+    }
+    if (backgroundUiCardEl) {
+      backgroundUiCardEl.hidden = true;
     }
     setAppScreen('onboarding');
     setDictationModelBusy('');
@@ -1699,6 +1891,10 @@ async function loadDictationOnboarding({ quietStatus = false } = {}) {
     focusedFieldInsertEnabled = false;
     focusedFieldInsertPermissionGranted = false;
     focusedFieldInsertPermissionStatus = 'Focused-field insertion is unavailable while desktop bridge is offline.';
+    pillVisibilityMode = DEFAULT_PILL_VISIBILITY_MODE;
+    menuBarMode = DEFAULT_MENU_BAR_MODE;
+    closeAction = DEFAULT_CLOSE_ACTION;
+    isSavingBackgroundUiSettings = false;
     isSavingFocusedFieldInsertSetting = false;
     setFocusedFieldInsertStatus('Focused-field insertion is unavailable while desktop bridge is offline.', 'neutral');
     setSetupScreenMode('onboarding');
@@ -1713,6 +1909,9 @@ async function loadDictationOnboarding({ quietStatus = false } = {}) {
     }
     if (focusedFieldInsertCardEl) {
       focusedFieldInsertCardEl.hidden = true;
+    }
+    if (backgroundUiCardEl) {
+      backgroundUiCardEl.hidden = true;
     }
     setAppScreen('onboarding');
     syncDictationHotkeyUi();
@@ -1745,6 +1944,9 @@ async function loadDictationOnboarding({ quietStatus = false } = {}) {
     if (focusedFieldInsertCardEl) {
       focusedFieldInsertCardEl.hidden = false;
     }
+    if (backgroundUiCardEl) {
+      backgroundUiCardEl.hidden = false;
+    }
     if (openSettingsBtn) {
       openSettingsBtn.hidden = false;
     }
@@ -1755,6 +1957,7 @@ async function loadDictationOnboarding({ quietStatus = false } = {}) {
     renderDictationModelOptions(onboarding.models, onboarding.selected_model_id);
     renderInputDeviceOptions(onboarding.available_input_devices, onboarding.preferred_input_device);
     applyDictationHotkeyPayload(onboarding);
+    applyBackgroundUiPreferencesPayload(onboarding);
     applyFocusedFieldInsertPayload(onboarding);
 
     if (openWhisperSetupBtn) {
@@ -1810,6 +2013,10 @@ async function loadDictationOnboarding({ quietStatus = false } = {}) {
     focusedFieldInsertEnabled = false;
     focusedFieldInsertPermissionGranted = false;
     focusedFieldInsertPermissionStatus = 'Focused-field insertion is unavailable while setup is loading.';
+    pillVisibilityMode = DEFAULT_PILL_VISIBILITY_MODE;
+    menuBarMode = DEFAULT_MENU_BAR_MODE;
+    closeAction = DEFAULT_CLOSE_ACTION;
+    isSavingBackgroundUiSettings = false;
     isSavingFocusedFieldInsertSetting = false;
     setFocusedFieldInsertStatus('Focused-field insertion is unavailable while setup is loading.', 'neutral');
     setSetupScreenMode('onboarding');
@@ -1824,6 +2031,9 @@ async function loadDictationOnboarding({ quietStatus = false } = {}) {
     }
     if (focusedFieldInsertCardEl) {
       focusedFieldInsertCardEl.hidden = true;
+    }
+    if (backgroundUiCardEl) {
+      backgroundUiCardEl.hidden = true;
     }
     setAppScreen('onboarding');
     const details = getErrorMessage(error);
@@ -2513,6 +2723,24 @@ function initDictation() {
         void saveFocusedFieldInsertSetting(next);
       });
     }
+    if (menuBarModeSelectEl) {
+      menuBarModeSelectEl.addEventListener('change', (event) => {
+        const next = String(event?.currentTarget?.value || '').trim();
+        void saveMenuBarMode(next);
+      });
+    }
+    if (closeActionSelectEl) {
+      closeActionSelectEl.addEventListener('change', (event) => {
+        const next = String(event?.currentTarget?.value || '').trim();
+        void saveCloseAction(next);
+      });
+    }
+    if (pillVisibilityModeSelectEl) {
+      pillVisibilityModeSelectEl.addEventListener('change', (event) => {
+        const next = String(event?.currentTarget?.value || '').trim();
+        void savePillVisibilityMode(next);
+      });
+    }
     if (dictationInputSelectEl) {
       dictationInputSelectEl.addEventListener('change', (event) => {
         const nextValue = String(event?.currentTarget?.value || '').trim();
@@ -2683,7 +2911,10 @@ function getDictationTestState() {
     dictationTriggerMode,
     dictationTriggerStatus,
     savedDictationHotkey,
-    pendingDictationHotkey
+    pendingDictationHotkey,
+    pillVisibilityMode,
+    menuBarMode,
+    closeAction
   };
 }
 
@@ -2706,6 +2937,10 @@ function resetDictationStateForTests() {
   dictationTriggerPermissionHint = '';
   focusedFieldInsertPermissionGranted = false;
   focusedFieldInsertPermissionStatus = 'Focused-field insertion is disabled.';
+  pillVisibilityMode = DEFAULT_PILL_VISIBILITY_MODE;
+  menuBarMode = DEFAULT_MENU_BAR_MODE;
+  closeAction = DEFAULT_CLOSE_ACTION;
+  isSavingBackgroundUiSettings = false;
   savedDictationHotkey = null;
   pendingDictationHotkey = '';
   activeHotkeySpec = null;
@@ -2726,6 +2961,7 @@ if (typeof globalThis !== 'undefined' && globalThis.__DICKTAINT_EXPOSE_TEST_API_
     maybeStartQueuedNativeDictation,
     setDraftTranscriptText,
     applyDictationHotkeyPayload,
+    applyBackgroundUiPreferencesPayload,
     summarizeHotkeyPillStatus,
     handleNativeDictationStatePayload,
     handleNativeDictationAudioLevelPayload,

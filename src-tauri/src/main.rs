@@ -27,6 +27,12 @@ use std::sync::atomic::{AtomicU64, Ordering};
 use std::sync::{mpsc, Arc, Mutex};
 use std::thread;
 use std::time::{Duration, Instant, SystemTime, UNIX_EPOCH};
+#[cfg(target_os = "macos")]
+use tauri::image::Image;
+#[cfg(target_os = "macos")]
+use tauri::menu::{MenuBuilder, MenuItem, MenuItemBuilder};
+#[cfg(target_os = "macos")]
+use tauri::tray::TrayIconBuilder;
 use tauri::{Emitter, Manager, State};
 #[cfg(not(any(target_os = "android", target_os = "ios")))]
 use tauri_plugin_global_shortcut::{GlobalShortcutExt, Shortcut, ShortcutState};
@@ -44,6 +50,18 @@ const MAX_DICTATION_TRIGGER_LENGTH: usize = 64;
 const DICTATION_STATE_EVENT: &str = "dictation:state-changed";
 const DICTATION_AUDIO_LEVEL_EVENT: &str = "dictation:audio-level";
 const PILL_STATUS_EVENT: &str = "dicktaint://pill-status";
+#[cfg(target_os = "macos")]
+const MAIN_TRAY_ID: &str = "main-tray";
+#[cfg(target_os = "macos")]
+const TRAY_MENU_STATUS_ID: &str = "tray-status";
+#[cfg(target_os = "macos")]
+const TRAY_MENU_OPEN_ID: &str = "tray-open";
+#[cfg(target_os = "macos")]
+const TRAY_MENU_TOGGLE_ID: &str = "tray-toggle";
+#[cfg(target_os = "macos")]
+const TRAY_MENU_FORCE_STOP_ID: &str = "tray-force-stop";
+#[cfg(target_os = "macos")]
+const TRAY_MENU_QUIT_ID: &str = "tray-quit";
 const WHISPER_CPP_SETUP_URL: &str = "https://github.com/ggml-org/whisper.cpp#quick-start";
 const START_HIDDEN_ENV: &str = "DICKTAINT_START_HIDDEN";
 const PILL_WINDOW_LABEL_PREFIX: &str = "pill";
@@ -93,8 +111,30 @@ struct AppConfig {
     bundled_whisper_cli_path: Option<String>,
 }
 
+#[derive(Clone, Copy, Debug, Default, PartialEq, Eq)]
+enum BackendDictationStatus {
+    #[default]
+    Idle,
+    Listening,
+    Processing,
+    Error,
+}
+
+impl BackendDictationStatus {
+    fn tray_label(&self) -> &'static str {
+        match self {
+            Self::Idle => "Idle",
+            Self::Listening => "Listening",
+            Self::Processing => "Transcribing",
+            Self::Error => "Error",
+        }
+    }
+}
+
 struct DictationState {
     active_recording: Mutex<Option<ActiveRecording>>,
+    backend_status: Mutex<BackendDictationStatus>,
+    last_error_message: Mutex<Option<String>>,
     next_session_id: AtomicU64,
 }
 
@@ -102,6 +142,8 @@ impl Default for DictationState {
     fn default() -> Self {
         Self {
             active_recording: Mutex::new(None),
+            backend_status: Mutex::new(BackendDictationStatus::Idle),
+            last_error_message: Mutex::new(None),
             next_session_id: AtomicU64::new(1),
         }
     }
@@ -263,6 +305,9 @@ struct LocalSettings {
     dictation_trigger: Option<String>,
     dictation_trigger_enabled: Option<bool>,
     focused_field_insert_enabled: Option<bool>,
+    pill_visibility_mode: Option<String>,
+    menu_bar_mode: Option<String>,
+    close_action: Option<String>,
 }
 
 struct LocalModelState {
@@ -304,6 +349,81 @@ struct GlobalHotkeyState {
     runtime_details: Mutex<TriggerRuntimeDetails>,
     #[cfg(target_os = "macos")]
     macos_fn_listener: Mutex<Option<MacFnGlobalListener>>,
+}
+
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+enum PillVisibilityMode {
+    Off,
+    ActiveOnly,
+    Always,
+}
+
+impl PillVisibilityMode {
+    fn as_str(&self) -> &'static str {
+        match self {
+            Self::Off => "off",
+            Self::ActiveOnly => "active-only",
+            Self::Always => "always",
+        }
+    }
+}
+
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+enum MenuBarMode {
+    Always,
+    BackgroundOnly,
+    Off,
+}
+
+impl MenuBarMode {
+    fn as_str(&self) -> &'static str {
+        match self {
+            Self::Always => "always",
+            Self::BackgroundOnly => "background-only",
+            Self::Off => "off",
+        }
+    }
+}
+
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+enum CloseAction {
+    HideToTray,
+    Quit,
+}
+
+impl CloseAction {
+    fn as_str(&self) -> &'static str {
+        match self {
+            Self::HideToTray => "hide-to-tray",
+            Self::Quit => "quit",
+        }
+    }
+}
+
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+struct BackgroundUiPreferences {
+    pill_visibility_mode: PillVisibilityMode,
+    menu_bar_mode: MenuBarMode,
+    close_action: CloseAction,
+}
+
+#[cfg(target_os = "macos")]
+type AppMenuItem = MenuItem<tauri::Wry>;
+#[cfg(target_os = "macos")]
+type AppTrayIcon = tauri::tray::TrayIcon<tauri::Wry>;
+
+#[cfg(target_os = "macos")]
+struct TrayRuntimeState {
+    tray_icon: AppTrayIcon,
+    status_item: AppMenuItem,
+    toggle_item: AppMenuItem,
+    force_stop_item: AppMenuItem,
+}
+
+#[cfg(target_os = "macos")]
+#[derive(Default)]
+struct TrayState {
+    runtime: Mutex<Option<TrayRuntimeState>>,
 }
 
 #[cfg(target_os = "macos")]
@@ -423,6 +543,16 @@ unsafe impl Send for MacFnGlobalListener {}
 unsafe impl Sync for MacFnGlobalListener {}
 
 #[cfg(target_os = "macos")]
+fn macos_listener_disable_should_dispatch_stop(was_fn_down: bool) -> bool {
+    was_fn_down
+}
+
+#[cfg(target_os = "macos")]
+fn macos_tap_disable_should_dispatch_stop(was_fn_down: bool) -> bool {
+    was_fn_down
+}
+
+#[cfg(target_os = "macos")]
 impl MacFnGlobalListener {
     fn new(app: &tauri::AppHandle) -> Result<Self, String> {
         let callback_ctx = Arc::new(MacFnCallbackContext {
@@ -484,7 +614,13 @@ impl MacFnGlobalListener {
     fn set_enabled(&self, enabled: bool) {
         self.callback_ctx.enabled.store(enabled, Ordering::SeqCst);
         if !enabled {
-            self.callback_ctx.fn_down.store(false, Ordering::SeqCst);
+            let was_fn_down = self.callback_ctx.fn_down.swap(false, Ordering::SeqCst);
+            if macos_listener_disable_should_dispatch_stop(was_fn_down) {
+                dispatch_backend_hotkey_action(
+                    &self.callback_ctx.app,
+                    BackendHotkeyAction::HoldStop,
+                );
+            }
         }
     }
 }
@@ -520,11 +656,14 @@ unsafe extern "C" fn macos_fn_event_tap_callback(
     if event_type == CG_EVENT_TYPE_TAP_DISABLED_BY_TIMEOUT
         || event_type == CG_EVENT_TYPE_TAP_DISABLED_BY_USER_INPUT
     {
+        let was_fn_down = callback_ctx.fn_down.swap(false, Ordering::Relaxed);
+        if macos_tap_disable_should_dispatch_stop(was_fn_down) {
+            dispatch_backend_hotkey_action(&callback_ctx.app, BackendHotkeyAction::HoldStop);
+        }
         let tap = callback_ctx.tap.load(Ordering::Relaxed);
         if !tap.is_null() {
             CGEventTapEnable(tap.cast::<c_void>(), true);
         }
-        callback_ctx.fn_down.store(false, Ordering::Relaxed);
         return event;
     }
 
@@ -593,6 +732,9 @@ struct DictationOnboardingPayload {
     dictation_trigger_mode: String,
     dictation_trigger_status: String,
     dictation_trigger_permission_hint: Option<String>,
+    pill_visibility_mode: String,
+    menu_bar_mode: String,
+    close_action: String,
     focused_field_insert_enabled: bool,
     focused_field_insert_permission_granted: bool,
     focused_field_insert_permission_status: String,
@@ -610,6 +752,13 @@ struct DictationTriggerPayload {
     trigger_mode: String,
     trigger_status: String,
     trigger_permission_hint: Option<String>,
+}
+
+#[derive(Clone, Serialize)]
+struct BackgroundUiPreferencesPayload {
+    pill_visibility_mode: String,
+    menu_bar_mode: String,
+    close_action: String,
 }
 
 #[derive(Serialize)]
@@ -686,21 +835,158 @@ fn should_start_hidden() -> bool {
         .unwrap_or(false)
 }
 
+fn resolve_pill_visibility_mode(settings: &LocalSettings) -> PillVisibilityMode {
+    match settings
+        .pill_visibility_mode
+        .as_deref()
+        .map(str::trim)
+        .filter(|value| !value.is_empty())
+    {
+        Some("off") => PillVisibilityMode::Off,
+        Some("always") => PillVisibilityMode::Always,
+        Some("active-only") => PillVisibilityMode::ActiveOnly,
+        Some(other) => {
+            log::warn!("Ignoring invalid persisted pill visibility mode '{other}'");
+            PillVisibilityMode::ActiveOnly
+        }
+        None => PillVisibilityMode::ActiveOnly,
+    }
+}
+
+fn resolve_menu_bar_mode(settings: &LocalSettings) -> MenuBarMode {
+    match settings
+        .menu_bar_mode
+        .as_deref()
+        .map(str::trim)
+        .filter(|value| !value.is_empty())
+    {
+        Some("off") => MenuBarMode::Off,
+        Some("background-only") => MenuBarMode::BackgroundOnly,
+        Some("always") => MenuBarMode::Always,
+        Some(other) => {
+            log::warn!("Ignoring invalid persisted menu bar mode '{other}'");
+            MenuBarMode::Always
+        }
+        None => MenuBarMode::Always,
+    }
+}
+
+fn resolve_close_action(settings: &LocalSettings, menu_bar_mode: MenuBarMode) -> CloseAction {
+    if menu_bar_mode == MenuBarMode::Off {
+        return CloseAction::Quit;
+    }
+
+    match settings
+        .close_action
+        .as_deref()
+        .map(str::trim)
+        .filter(|value| !value.is_empty())
+    {
+        Some("quit") => CloseAction::Quit,
+        Some("hide-to-tray") => CloseAction::HideToTray,
+        Some(other) => {
+            log::warn!("Ignoring invalid persisted close action '{other}'");
+            CloseAction::HideToTray
+        }
+        None => CloseAction::HideToTray,
+    }
+}
+
+fn resolve_background_ui_preferences(settings: &LocalSettings) -> BackgroundUiPreferences {
+    let menu_bar_mode = resolve_menu_bar_mode(settings);
+    BackgroundUiPreferences {
+        pill_visibility_mode: resolve_pill_visibility_mode(settings),
+        close_action: resolve_close_action(settings, menu_bar_mode),
+        menu_bar_mode,
+    }
+}
+
+fn background_ui_preferences_payload(
+    preferences: BackgroundUiPreferences,
+) -> BackgroundUiPreferencesPayload {
+    BackgroundUiPreferencesPayload {
+        pill_visibility_mode: preferences.pill_visibility_mode.as_str().to_string(),
+        menu_bar_mode: preferences.menu_bar_mode.as_str().to_string(),
+        close_action: preferences.close_action.as_str().to_string(),
+    }
+}
+
+fn current_background_ui_preferences(
+    app: &tauri::AppHandle,
+) -> Result<BackgroundUiPreferences, String> {
+    let settings = app
+        .state::<LocalModelState>()
+        .settings
+        .lock()
+        .map_err(|_| "Failed to lock local model settings".to_string())?
+        .clone();
+    Ok(resolve_background_ui_preferences(&settings))
+}
+
+fn current_backend_dictation_status(
+    app: &tauri::AppHandle,
+) -> Result<BackendDictationStatus, String> {
+    app.state::<DictationState>()
+        .backend_status
+        .lock()
+        .map_err(|_| "Failed to lock backend dictation status".to_string())
+        .map(|guard| *guard)
+}
+
+fn current_backend_error_message(app: &tauri::AppHandle) -> Result<Option<String>, String> {
+    app.state::<DictationState>()
+        .last_error_message
+        .lock()
+        .map_err(|_| "Failed to lock backend dictation error state".to_string())
+        .map(|guard| guard.clone())
+}
+
+fn set_backend_dictation_status(
+    app: &tauri::AppHandle,
+    status: BackendDictationStatus,
+    error: Option<String>,
+) -> Result<(), String> {
+    let dictation = app.state::<DictationState>();
+    {
+        let mut guard = dictation
+            .backend_status
+            .lock()
+            .map_err(|_| "Failed to lock backend dictation status".to_string())?;
+        *guard = status;
+    }
+    let mut error_guard = dictation
+        .last_error_message
+        .lock()
+        .map_err(|_| "Failed to lock backend dictation error state".to_string())?;
+    *error_guard = if status == BackendDictationStatus::Error {
+        error.filter(|value| !value.trim().is_empty())
+    } else {
+        None
+    };
+    Ok(())
+}
+
+fn main_window_is_visible(app: &tauri::AppHandle) -> bool {
+    app.get_webview_window("main")
+        .and_then(|window| window.is_visible().ok())
+        .unwrap_or(false)
+}
+
+fn should_show_tray_icon(preferences: BackgroundUiPreferences, main_window_visible: bool) -> bool {
+    match preferences.menu_bar_mode {
+        MenuBarMode::Always => true,
+        MenuBarMode::BackgroundOnly => !main_window_visible,
+        MenuBarMode::Off => false,
+    }
+}
+
 fn show_main_window(app: &tauri::AppHandle) {
     if let Some(window) = app.get_webview_window("main") {
         let _ = window.show();
         let _ = window.unminimize();
         let _ = window.set_focus();
     }
-}
-
-fn sync_pill_after_main_window_hide(app: &tauri::AppHandle) {
-    let state = if dictation_is_running(app).unwrap_or(false) {
-        "listening"
-    } else {
-        "idle"
-    };
-    sync_pill_for_dictation_state(app, state, None);
+    sync_background_ui(app);
 }
 
 fn active_hotkey_label(app: &tauri::AppHandle) -> String {
@@ -729,8 +1015,21 @@ fn idle_pill_message(app: &tauri::AppHandle) -> String {
     }
 }
 
-fn pill_should_be_visible_for_dictation_state(state: &str, has_error: bool) -> bool {
-    matches!(state, "listening" | "processing") || (state == "error" && has_error)
+fn pill_should_be_visible_for_backend_state(
+    status: BackendDictationStatus,
+    mode: PillVisibilityMode,
+    has_error: bool,
+) -> bool {
+    match mode {
+        PillVisibilityMode::Off => false,
+        PillVisibilityMode::Always => !matches!(status, BackendDictationStatus::Error) || has_error,
+        PillVisibilityMode::ActiveOnly => {
+            matches!(
+                status,
+                BackendDictationStatus::Listening | BackendDictationStatus::Processing
+            ) || (status == BackendDictationStatus::Error && has_error)
+        }
+    }
 }
 
 fn emit_pill_status(
@@ -750,17 +1049,26 @@ fn emit_pill_status(
     .ok();
 }
 
-fn sync_pill_for_dictation_state(app: &tauri::AppHandle, state: &str, error: Option<&str>) {
+fn sync_pill_for_backend_state(
+    app: &tauri::AppHandle,
+    status: BackendDictationStatus,
+    error: Option<&str>,
+) {
     let hotkey_state = app.state::<GlobalHotkeyState>();
     let runtime = current_trigger_runtime_details(hotkey_state.inner()).unwrap_or_default();
+    let preferences = current_background_ui_preferences(app).unwrap_or(BackgroundUiPreferences {
+        pill_visibility_mode: PillVisibilityMode::ActiveOnly,
+        menu_bar_mode: MenuBarMode::Always,
+        close_action: CloseAction::HideToTray,
+    });
     let label = active_hotkey_label(app);
     let has_error = error
         .map(str::trim)
         .filter(|value| !value.is_empty())
         .is_some();
 
-    let (message, pill_state) = match state {
-        "listening" => {
+    let (message, pill_state) = match status {
+        BackendDictationStatus::Listening => {
             let message = match runtime.mode {
                 HotkeyDeliveryMode::GlobalHold | HotkeyDeliveryMode::FocusedWindowHold => {
                     format!("Listening - release {label}")
@@ -770,8 +1078,8 @@ fn sync_pill_for_dictation_state(app: &tauri::AppHandle, state: &str, error: Opt
             };
             (message, "live")
         }
-        "processing" => ("Transcribing...".to_string(), "working"),
-        "error" => (
+        BackendDictationStatus::Processing => ("Transcribing...".to_string(), "working"),
+        BackendDictationStatus::Error => (
             if has_error {
                 "Dictation error - check status".to_string()
             } else {
@@ -779,15 +1087,260 @@ fn sync_pill_for_dictation_state(app: &tauri::AppHandle, state: &str, error: Opt
             },
             if has_error { "error" } else { "idle" },
         ),
-        _ => (idle_pill_message(app), "idle"),
+        BackendDictationStatus::Idle => (idle_pill_message(app), "idle"),
     };
 
     emit_pill_status(
         app,
         message,
         pill_state,
-        pill_should_be_visible_for_dictation_state(state, has_error),
+        pill_should_be_visible_for_backend_state(
+            status,
+            preferences.pill_visibility_mode,
+            has_error,
+        ),
     );
+}
+
+#[cfg(target_os = "macos")]
+fn tray_primary_action_label(status: BackendDictationStatus) -> &'static str {
+    match status {
+        BackendDictationStatus::Listening => "Stop + Transcribe",
+        BackendDictationStatus::Processing => "Transcribing...",
+        BackendDictationStatus::Idle | BackendDictationStatus::Error => "Start Dictation",
+    }
+}
+
+#[cfg(target_os = "macos")]
+fn tray_primary_action_enabled(status: BackendDictationStatus) -> bool {
+    status != BackendDictationStatus::Processing
+}
+
+#[cfg(target_os = "macos")]
+fn tray_force_stop_enabled(status: BackendDictationStatus) -> bool {
+    status == BackendDictationStatus::Listening
+}
+
+#[cfg(target_os = "macos")]
+fn tray_icon_for_backend_status(status: BackendDictationStatus) -> Result<Image<'static>, String> {
+    let bytes: &[u8] = match status {
+        BackendDictationStatus::Listening => include_bytes!("../icons/tray-listening.png"),
+        BackendDictationStatus::Processing | BackendDictationStatus::Error => {
+            include_bytes!("../icons/tray-processing.png")
+        }
+        BackendDictationStatus::Idle => include_bytes!("../icons/tray-idle.png"),
+    };
+    Image::from_bytes(bytes)
+        .map(|image| image.to_owned())
+        .map_err(|e| format!("Failed to decode tray icon asset: {e}"))
+}
+
+#[cfg(target_os = "macos")]
+fn destroy_macos_tray_runtime(app: &tauri::AppHandle) -> Result<(), String> {
+    let tray_state = app.state::<TrayState>();
+    let mut guard = tray_state
+        .runtime
+        .lock()
+        .map_err(|_| "Failed to lock tray runtime state".to_string())?;
+    *guard = None;
+    Ok(())
+}
+
+#[cfg(target_os = "macos")]
+fn handle_tray_menu_event(app: &tauri::AppHandle, menu_id: &tauri::menu::MenuId) {
+    if menu_id == TRAY_MENU_STATUS_ID {
+        return;
+    }
+
+    if menu_id == TRAY_MENU_OPEN_ID {
+        show_main_window(app);
+        return;
+    }
+
+    if menu_id == TRAY_MENU_FORCE_STOP_ID {
+        if let Err(error) = cancel_native_dictation_if_active(app) {
+            emit_dictation_state(
+                app,
+                "error",
+                Some(error.clone()),
+                None,
+                current_active_session_id(app).ok().flatten(),
+            );
+            log::warn!("Tray force-stop failed: {error}");
+        }
+        return;
+    }
+
+    if menu_id == TRAY_MENU_QUIT_ID {
+        if let Err(error) = cancel_native_dictation_if_active(app) {
+            log::warn!("Tray quit mic teardown failed: {error}");
+        }
+        app.exit(0);
+        return;
+    }
+
+    if menu_id != TRAY_MENU_TOGGLE_ID {
+        return;
+    }
+
+    let handle = app.clone();
+    tauri::async_runtime::spawn(async move {
+        let result = match current_backend_dictation_status(&handle) {
+            Ok(BackendDictationStatus::Listening) => stop_native_dictation_inner(handle.clone())
+                .await
+                .map(|_| ()),
+            Ok(BackendDictationStatus::Processing) => Ok(()),
+            Ok(BackendDictationStatus::Idle | BackendDictationStatus::Error) => {
+                start_native_dictation_inner(&handle).map(|_| ())
+            }
+            Err(error) => Err(error),
+        };
+
+        if let Err(error) = result {
+            let trimmed = error.trim();
+            let benign =
+                trimmed == "Dictation already running." || trimmed == "Dictation is not running.";
+            if !benign {
+                log::warn!("Tray dictation action failed: {error}");
+                emit_dictation_state(&handle, "error", Some(error), None, None);
+            }
+        }
+    });
+}
+
+#[cfg(target_os = "macos")]
+fn ensure_macos_tray_runtime(
+    app: &tauri::AppHandle,
+    status: BackendDictationStatus,
+) -> Result<(), String> {
+    let tray_state = app.state::<TrayState>();
+    let mut guard = tray_state
+        .runtime
+        .lock()
+        .map_err(|_| "Failed to lock tray runtime state".to_string())?;
+    if guard.is_some() {
+        return Ok(());
+    }
+
+    let status_item = MenuItemBuilder::with_id(
+        TRAY_MENU_STATUS_ID,
+        format!("Status: {}", status.tray_label()),
+    )
+    .enabled(false)
+    .build(app)
+    .map_err(|e| format!("Failed to build tray status item: {e}"))?;
+    let open_item = MenuItemBuilder::with_id(TRAY_MENU_OPEN_ID, "Open dicktaint")
+        .build(app)
+        .map_err(|e| format!("Failed to build tray open item: {e}"))?;
+    let toggle_item =
+        MenuItemBuilder::with_id(TRAY_MENU_TOGGLE_ID, tray_primary_action_label(status))
+            .enabled(tray_primary_action_enabled(status))
+            .build(app)
+            .map_err(|e| format!("Failed to build tray toggle item: {e}"))?;
+    let force_stop_item =
+        MenuItemBuilder::with_id(TRAY_MENU_FORCE_STOP_ID, "Force Stop Microphone")
+            .enabled(tray_force_stop_enabled(status))
+            .build(app)
+            .map_err(|e| format!("Failed to build tray force-stop item: {e}"))?;
+    let quit_item = MenuItemBuilder::with_id(TRAY_MENU_QUIT_ID, "Quit dicktaint")
+        .build(app)
+        .map_err(|e| format!("Failed to build tray quit item: {e}"))?;
+
+    let menu = MenuBuilder::new(app)
+        .item(&status_item)
+        .item(&open_item)
+        .item(&toggle_item)
+        .item(&force_stop_item)
+        .separator()
+        .item(&quit_item)
+        .build()
+        .map_err(|e| format!("Failed to build macOS tray menu: {e}"))?;
+
+    let tray_icon = TrayIconBuilder::with_id(MAIN_TRAY_ID)
+        .menu(&menu)
+        .icon(tray_icon_for_backend_status(status)?)
+        .icon_as_template(true)
+        .show_menu_on_left_click(true)
+        .tooltip("dicktaint")
+        .on_menu_event(|app, event: tauri::menu::MenuEvent| {
+            handle_tray_menu_event(app, event.id());
+        })
+        .build(app)
+        .map_err(|e| format!("Failed to create macOS tray icon: {e}"))?;
+
+    *guard = Some(TrayRuntimeState {
+        tray_icon,
+        status_item,
+        toggle_item,
+        force_stop_item,
+    });
+    Ok(())
+}
+
+#[cfg(target_os = "macos")]
+fn sync_macos_tray(app: &tauri::AppHandle, status: BackendDictationStatus) -> Result<(), String> {
+    let preferences = current_background_ui_preferences(app)?;
+    if preferences.menu_bar_mode == MenuBarMode::Off {
+        return destroy_macos_tray_runtime(app);
+    }
+
+    ensure_macos_tray_runtime(app, status)?;
+
+    let tray_state = app.state::<TrayState>();
+    let guard = tray_state
+        .runtime
+        .lock()
+        .map_err(|_| "Failed to lock tray runtime state".to_string())?;
+    let Some(runtime) = guard.as_ref() else {
+        return Ok(());
+    };
+
+    runtime
+        .status_item
+        .set_text(format!("Status: {}", status.tray_label()))
+        .map_err(|e| format!("Failed to update tray status text: {e}"))?;
+    runtime
+        .toggle_item
+        .set_text(tray_primary_action_label(status))
+        .map_err(|e| format!("Failed to update tray action text: {e}"))?;
+    runtime
+        .toggle_item
+        .set_enabled(tray_primary_action_enabled(status))
+        .map_err(|e| format!("Failed to update tray action enabled state: {e}"))?;
+    runtime
+        .force_stop_item
+        .set_enabled(tray_force_stop_enabled(status))
+        .map_err(|e| format!("Failed to update tray force-stop enabled state: {e}"))?;
+    runtime
+        .tray_icon
+        .set_icon(Some(tray_icon_for_backend_status(status)?))
+        .map_err(|e| format!("Failed to update tray icon image: {e}"))?;
+    runtime
+        .tray_icon
+        .set_icon_as_template(true)
+        .map_err(|e| format!("Failed to mark tray icon as template: {e}"))?;
+    runtime
+        .tray_icon
+        .set_tooltip(Some(format!("dicktaint: {}", status.tray_label())))
+        .map_err(|e| format!("Failed to update tray tooltip: {e}"))?;
+    runtime
+        .tray_icon
+        .set_visible(should_show_tray_icon(
+            preferences,
+            main_window_is_visible(app),
+        ))
+        .map_err(|e| format!("Failed to update tray visibility: {e}"))?;
+    Ok(())
+}
+
+fn sync_background_ui(app: &tauri::AppHandle) {
+    let status = current_backend_dictation_status(app).unwrap_or_default();
+    let error = current_backend_error_message(app).ok().flatten();
+    sync_pill_for_backend_state(app, status, error.as_deref());
+    #[cfg(target_os = "macos")]
+    if let Err(error) = sync_macos_tray(app, status) {
+        log::warn!("Failed to sync macOS tray state: {error}");
+    }
 }
 
 fn emit_dictation_state(
@@ -797,7 +1350,16 @@ fn emit_dictation_state(
     transcript: Option<String>,
     session_id: Option<u64>,
 ) {
-    sync_pill_for_dictation_state(app, state, error.as_deref());
+    let backend_status = match state {
+        "listening" => BackendDictationStatus::Listening,
+        "processing" => BackendDictationStatus::Processing,
+        "error" => BackendDictationStatus::Error,
+        _ => BackendDictationStatus::Idle,
+    };
+    if let Err(status_error) = set_backend_dictation_status(app, backend_status, error.clone()) {
+        log::warn!("Failed to update backend dictation status: {status_error}");
+    }
+    sync_background_ui(app);
     app.emit(
         DICTATION_STATE_EVENT,
         DictationStatePayload {
@@ -2357,6 +2919,7 @@ fn build_onboarding_payload(
     let onboarding_required = !selected_model_exists || !whisper_cli_available;
     let focused_field_permission =
         focused_field_insert_permission_status(focused_field_insert_enabled(&settings), false);
+    let background_ui_preferences = resolve_background_ui_preferences(&settings);
     let available_input_devices = list_input_devices();
 
     Ok(DictationOnboardingPayload {
@@ -2371,6 +2934,12 @@ fn build_onboarding_payload(
         dictation_trigger_mode: trigger_runtime.mode.as_str().to_string(),
         dictation_trigger_status: trigger_runtime.status,
         dictation_trigger_permission_hint: trigger_runtime.permission_hint,
+        pill_visibility_mode: background_ui_preferences
+            .pill_visibility_mode
+            .as_str()
+            .to_string(),
+        menu_bar_mode: background_ui_preferences.menu_bar_mode.as_str().to_string(),
+        close_action: background_ui_preferences.close_action.as_str().to_string(),
         focused_field_insert_enabled: focused_field_insert_enabled(&settings),
         focused_field_insert_permission_granted: focused_field_permission.granted,
         focused_field_insert_permission_status: focused_field_permission.status,
@@ -3207,6 +3776,7 @@ fn get_dictation_onboarding(
             log::warn!("get_dictation_onboarding: failed to apply global hotkey: {error}");
         }
     }
+    sync_background_ui(&app);
     Ok(payload)
 }
 
@@ -3264,6 +3834,7 @@ fn set_dictation_trigger(
         }
         return Err(error);
     }
+    sync_background_ui(&app);
     Ok(dictation_trigger_payload(&settings, runtime))
 }
 
@@ -3307,7 +3878,113 @@ fn clear_dictation_trigger(
         }
         return Err(error);
     }
+    sync_background_ui(&app);
     Ok(dictation_trigger_payload(&settings, runtime))
+}
+
+fn persist_background_ui_preferences_update<F>(
+    app: &tauri::AppHandle,
+    model_state: &LocalModelState,
+    update: F,
+) -> Result<BackgroundUiPreferencesPayload, String>
+where
+    F: FnOnce(&mut LocalSettings) -> Result<(), String>,
+{
+    let settings_path = model_state.settings_path.clone();
+    let payload = {
+        let mut settings = model_state
+            .settings
+            .lock()
+            .map_err(|_| "Failed to lock local model settings".to_string())?;
+        let previous = settings.clone();
+        update(&mut settings)?;
+
+        let preferences = resolve_background_ui_preferences(&settings);
+        settings.pill_visibility_mode = Some(preferences.pill_visibility_mode.as_str().to_string());
+        settings.menu_bar_mode = Some(preferences.menu_bar_mode.as_str().to_string());
+        settings.close_action = Some(preferences.close_action.as_str().to_string());
+
+        if let Err(error) = save_local_settings(&settings_path, &settings) {
+            *settings = previous;
+            return Err(error);
+        }
+
+        background_ui_preferences_payload(preferences)
+    };
+
+    sync_background_ui(app);
+    Ok(payload)
+}
+
+#[tauri::command]
+fn set_pill_visibility_mode(
+    app: tauri::AppHandle,
+    mode: String,
+    model_state: State<'_, LocalModelState>,
+) -> Result<BackgroundUiPreferencesPayload, String> {
+    let normalized = match mode.trim() {
+        "off" => "off",
+        "active-only" => "active-only",
+        "always" => "always",
+        other => {
+            return Err(format!(
+                "Unsupported pill visibility mode '{}'. Use off, active-only, or always.",
+                other
+            ))
+        }
+    };
+
+    persist_background_ui_preferences_update(&app, model_state.inner(), |settings| {
+        settings.pill_visibility_mode = Some(normalized.to_string());
+        Ok(())
+    })
+}
+
+#[tauri::command]
+fn set_menu_bar_mode(
+    app: tauri::AppHandle,
+    mode: String,
+    model_state: State<'_, LocalModelState>,
+) -> Result<BackgroundUiPreferencesPayload, String> {
+    let normalized = match mode.trim() {
+        "always" => "always",
+        "background-only" => "background-only",
+        "off" => "off",
+        other => {
+            return Err(format!(
+                "Unsupported menu bar mode '{}'. Use always, background-only, or off.",
+                other
+            ))
+        }
+    };
+
+    persist_background_ui_preferences_update(&app, model_state.inner(), |settings| {
+        settings.menu_bar_mode = Some(normalized.to_string());
+        Ok(())
+    })
+}
+
+#[tauri::command]
+fn set_close_action(
+    app: tauri::AppHandle,
+    action: String,
+    model_state: State<'_, LocalModelState>,
+) -> Result<BackgroundUiPreferencesPayload, String> {
+    let normalized = match action.trim() {
+        "hide-to-tray" => "hide-to-tray",
+        "quit" => "quit",
+        other => {
+            return Err(format!(
+                "Unsupported close action '{}'. Use hide-to-tray or quit.",
+                other
+            ))
+        }
+    };
+
+    persist_background_ui_preferences_update(&app, model_state.inner(), |settings| {
+        settings.close_action = Some(normalized.to_string());
+        Ok(())
+    })
 }
 
 #[tauri::command]
@@ -3782,9 +4459,24 @@ fn cancel_native_dictation_inner(app: &tauri::AppHandle) -> Result<(), String> {
     Ok(())
 }
 
+fn cancel_native_dictation_if_active(app: &tauri::AppHandle) -> Result<(), String> {
+    if dictation_is_running(app)? {
+        cancel_native_dictation_inner(app)?;
+    }
+    Ok(())
+}
+
 #[tauri::command]
 fn start_native_dictation(app: tauri::AppHandle) -> Result<(), String> {
-    start_native_dictation_inner(&app).map(|_| ())
+    match start_native_dictation_inner(&app) {
+        Ok(_) => Ok(()),
+        Err(error) => {
+            if error.trim() != "Dictation already running." {
+                emit_dictation_state(&app, "error", Some(error.clone()), None, None);
+            }
+            Err(error)
+        }
+    }
 }
 
 #[tauri::command]
@@ -3802,16 +4494,21 @@ mod tests {
     use super::{
         analyze_audio_signal, audio_signal_is_too_quiet, default_dictation_trigger,
         focused_field_insert_enabled, normalize_audio_gain, normalize_dictation_trigger,
-        onboarding_runtime_details, pill_should_be_visible_for_dictation_state,
+        onboarding_runtime_details, pill_should_be_visible_for_backend_state,
         preferred_whisper_cli_names, quiet_audio_error, resample_linear,
-        resolve_effective_dictation_trigger, runtime_details_for_trigger,
-        wait_for_non_silent_input, whisper_help_text_looks_valid, HotkeyDeliveryMode,
-        LocalSettings,
+        resolve_background_ui_preferences, resolve_effective_dictation_trigger,
+        runtime_details_for_trigger, wait_for_non_silent_input, whisper_help_text_looks_valid,
+        BackendDictationStatus, CloseAction, HotkeyDeliveryMode, LocalSettings, MenuBarMode,
+        PillVisibilityMode,
     };
     use std::sync::{Arc, Mutex};
 
     #[cfg(target_os = "macos")]
-    use super::should_focus_main_window_for_microphone_prompt;
+    use super::{
+        macos_listener_disable_should_dispatch_stop, macos_tap_disable_should_dispatch_stop,
+        should_focus_main_window_for_microphone_prompt, tray_force_stop_enabled,
+        tray_primary_action_enabled, tray_primary_action_label,
+    };
     #[cfg(target_os = "macos")]
     use objc2_av_foundation::AVAuthorizationStatus;
 
@@ -3996,18 +4693,108 @@ mod tests {
     }
 
     #[test]
-    fn pill_visibility_hides_idle_and_shows_active_states() {
-        assert!(!pill_should_be_visible_for_dictation_state("idle", false));
-        assert!(pill_should_be_visible_for_dictation_state(
-            "listening",
-            false
+    fn background_ui_preferences_default_to_active_only_always_and_hide_to_tray() {
+        let preferences = resolve_background_ui_preferences(&LocalSettings::default());
+        assert_eq!(
+            preferences.pill_visibility_mode,
+            PillVisibilityMode::ActiveOnly
+        );
+        assert_eq!(preferences.menu_bar_mode, MenuBarMode::Always);
+        assert_eq!(preferences.close_action, CloseAction::HideToTray);
+    }
+
+    #[test]
+    fn background_ui_preferences_force_quit_when_menu_bar_is_off() {
+        let preferences = resolve_background_ui_preferences(&LocalSettings {
+            menu_bar_mode: Some("off".to_string()),
+            close_action: Some("hide-to-tray".to_string()),
+            ..LocalSettings::default()
+        });
+        assert_eq!(preferences.menu_bar_mode, MenuBarMode::Off);
+        assert_eq!(preferences.close_action, CloseAction::Quit);
+    }
+
+    #[test]
+    fn pill_visibility_modes_map_expected_states() {
+        assert!(!pill_should_be_visible_for_backend_state(
+            BackendDictationStatus::Idle,
+            PillVisibilityMode::ActiveOnly,
+            false,
         ));
-        assert!(pill_should_be_visible_for_dictation_state(
-            "processing",
-            false
+        assert!(pill_should_be_visible_for_backend_state(
+            BackendDictationStatus::Listening,
+            PillVisibilityMode::ActiveOnly,
+            false,
         ));
-        assert!(!pill_should_be_visible_for_dictation_state("error", false));
-        assert!(pill_should_be_visible_for_dictation_state("error", true));
+        assert!(pill_should_be_visible_for_backend_state(
+            BackendDictationStatus::Processing,
+            PillVisibilityMode::ActiveOnly,
+            false,
+        ));
+        assert!(!pill_should_be_visible_for_backend_state(
+            BackendDictationStatus::Error,
+            PillVisibilityMode::ActiveOnly,
+            false,
+        ));
+        assert!(pill_should_be_visible_for_backend_state(
+            BackendDictationStatus::Error,
+            PillVisibilityMode::ActiveOnly,
+            true,
+        ));
+        assert!(!pill_should_be_visible_for_backend_state(
+            BackendDictationStatus::Listening,
+            PillVisibilityMode::Off,
+            true,
+        ));
+        assert!(pill_should_be_visible_for_backend_state(
+            BackendDictationStatus::Idle,
+            PillVisibilityMode::Always,
+            false,
+        ));
+    }
+
+    #[cfg(target_os = "macos")]
+    #[test]
+    fn listener_disable_dispatches_stop_when_fn_was_down() {
+        assert!(macos_listener_disable_should_dispatch_stop(true));
+        assert!(!macos_listener_disable_should_dispatch_stop(false));
+    }
+
+    #[cfg(target_os = "macos")]
+    #[test]
+    fn tap_disable_dispatches_stop_when_fn_was_down() {
+        assert!(macos_tap_disable_should_dispatch_stop(true));
+        assert!(!macos_tap_disable_should_dispatch_stop(false));
+    }
+
+    #[cfg(target_os = "macos")]
+    #[test]
+    fn tray_mapping_reflects_backend_status() {
+        assert_eq!(BackendDictationStatus::Idle.tray_label(), "Idle");
+        assert_eq!(BackendDictationStatus::Listening.tray_label(), "Listening");
+        assert_eq!(
+            BackendDictationStatus::Processing.tray_label(),
+            "Transcribing"
+        );
+        assert_eq!(BackendDictationStatus::Error.tray_label(), "Error");
+
+        assert_eq!(
+            tray_primary_action_label(BackendDictationStatus::Idle),
+            "Start Dictation"
+        );
+        assert_eq!(
+            tray_primary_action_label(BackendDictationStatus::Listening),
+            "Stop + Transcribe"
+        );
+        assert_eq!(
+            tray_primary_action_label(BackendDictationStatus::Processing),
+            "Transcribing..."
+        );
+        assert!(!tray_primary_action_enabled(
+            BackendDictationStatus::Processing
+        ));
+        assert!(tray_force_stop_enabled(BackendDictationStatus::Listening));
+        assert!(!tray_force_stop_enabled(BackendDictationStatus::Idle));
     }
 
     #[cfg(target_os = "macos")]
@@ -4082,6 +4869,8 @@ fn main() {
             });
             app.manage(DictationState::default());
             app.manage(GlobalHotkeyState::default());
+            #[cfg(target_os = "macos")]
+            app.manage(TrayState::default());
 
             if let Err(error) = apply_registered_hotkey(
                 app.handle(),
@@ -4101,6 +4890,8 @@ fn main() {
                 log::warn!("Failed to create pill overlay windows: {error}");
             }
 
+            sync_background_ui(app.handle());
+
             Ok(())
         })
         .on_window_event(|window, event| {
@@ -4108,9 +4899,20 @@ fn main() {
                 return;
             }
             if let tauri::WindowEvent::CloseRequested { api, .. } = event {
-                api.prevent_close();
-                sync_pill_after_main_window_hide(window.app_handle());
-                let _ = window.hide();
+                let preferences = current_background_ui_preferences(window.app_handle()).unwrap_or(
+                    BackgroundUiPreferences {
+                        pill_visibility_mode: PillVisibilityMode::ActiveOnly,
+                        menu_bar_mode: MenuBarMode::Always,
+                        close_action: CloseAction::HideToTray,
+                    },
+                );
+                if preferences.close_action == CloseAction::HideToTray
+                    && preferences.menu_bar_mode != MenuBarMode::Off
+                {
+                    api.prevent_close();
+                    let _ = window.hide();
+                    sync_background_ui(window.app_handle());
+                }
             }
         })
         .invoke_handler(tauri::generate_handler![
@@ -4118,6 +4920,9 @@ fn main() {
             get_dictation_trigger,
             set_dictation_trigger,
             clear_dictation_trigger,
+            set_pill_visibility_mode,
+            set_menu_bar_mode,
+            set_close_action,
             set_preferred_input_device,
             set_focused_field_insert_enabled,
             open_whisper_setup_page,
@@ -4131,10 +4936,14 @@ fn main() {
         .build(tauri::generate_context!())
         .expect("error while building tauri application");
 
-    app.run(|app_handle, event| {
+    app.run(|app_handle, event| match event {
         #[cfg(target_os = "macos")]
-        if let tauri::RunEvent::Reopen { .. } = event {
-            show_main_window(app_handle);
+        tauri::RunEvent::Reopen { .. } => show_main_window(app_handle),
+        tauri::RunEvent::ExitRequested { .. } | tauri::RunEvent::Exit => {
+            if let Err(error) = cancel_native_dictation_if_active(app_handle) {
+                log::warn!("Failed to cancel active dictation during app exit: {error}");
+            }
         }
+        _ => {}
     });
 }
