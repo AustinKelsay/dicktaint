@@ -1,5 +1,19 @@
 # Changelog
 
+## v0.3.9 - 2026-03-30
+
+### Highlights
+
+- fixed the remaining macOS idle-mic leak by patching the CoreAudio `cpal` backend retain cycle that could keep a non-default input stream alive even after dicktaint said it was idle
+- tightened microphone device selection so a preferred device that matches the current system default now reuses the default handle instead of opening a second wrapper for the same mic
+- replaced the broken square macOS menu bar icon path with a title-based status indicator so tray state changes are visible and reliable on current macOS builds
+
+### Release Notes
+
+- this patch follows `v0.3.8` and specifically targets the case where the real macOS privacy microphone indicator could stay lit while the tray still reported `Status: Idle`
+- the Mac menu bar item now shows a compact text state: `DT` while idle, `REC` while listening, `...` while transcribing, and `ERR` on backend errors
+- the audio fix includes a local `cpal` patch in the app build so packaged releases no longer depend on the upstream retain-cycle behavior for CoreAudio input teardown
+
 ## v0.3.8 - 2026-03-30
 
 ### Highlights

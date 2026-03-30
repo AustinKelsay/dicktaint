@@ -1,6 +1,6 @@
 [package]
 name = "dicktaint"
-version = "0.3.8"
+version = "0.3.9"
 description = "Local dictation starter with native Whisper CLI transcription"
 edition = "2021"
 rust-version = "1.77.2"
@@ -26,3 +26,6 @@ objc2 = "0.6.3"
 objc2-av-foundation = { version = "0.3.2", features = ["AVCaptureDevice", "AVMediaFormat", "block2"] }
 objc2-app-kit = { version = "0.3.2", features = ["NSEvent", "NSPasteboard", "NSPasteboardItem", "block2"] }
 objc2-foundation = { version = "0.3.2", features = ["NSArray", "NSString"] }
+
+[patch.crates-io]
+cpal = { path = "../vendor/cpal" }

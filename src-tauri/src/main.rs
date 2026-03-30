@@ -28,8 +28,6 @@ use std::sync::{mpsc, Arc, Mutex};
 use std::thread;
 use std::time::{Duration, Instant, SystemTime, UNIX_EPOCH};
 #[cfg(target_os = "macos")]
-use tauri::image::Image;
-#[cfg(target_os = "macos")]
 use tauri::menu::{MenuBuilder, MenuItem, MenuItemBuilder};
 #[cfg(target_os = "macos")]
 use tauri::tray::TrayIconBuilder;
@@ -1122,17 +1120,13 @@ fn tray_force_stop_enabled(status: BackendDictationStatus) -> bool {
 }
 
 #[cfg(target_os = "macos")]
-fn tray_icon_for_backend_status(status: BackendDictationStatus) -> Result<Image<'static>, String> {
-    let bytes: &[u8] = match status {
-        BackendDictationStatus::Listening => include_bytes!("../icons/tray-listening.png"),
-        BackendDictationStatus::Processing | BackendDictationStatus::Error => {
-            include_bytes!("../icons/tray-processing.png")
-        }
-        BackendDictationStatus::Idle => include_bytes!("../icons/tray-idle.png"),
-    };
-    Image::from_bytes(bytes)
-        .map(|image| image.to_owned())
-        .map_err(|e| format!("Failed to decode tray icon asset: {e}"))
+fn tray_title_for_backend_status(status: BackendDictationStatus) -> &'static str {
+    match status {
+        BackendDictationStatus::Idle => "DT",
+        BackendDictationStatus::Listening => "REC",
+        BackendDictationStatus::Processing => "...",
+        BackendDictationStatus::Error => "ERR",
+    }
 }
 
 #[cfg(target_os = "macos")]
@@ -1258,8 +1252,7 @@ fn ensure_macos_tray_runtime(
 
     let tray_icon = TrayIconBuilder::with_id(MAIN_TRAY_ID)
         .menu(&menu)
-        .icon(tray_icon_for_backend_status(status)?)
-        .icon_as_template(true)
+        .title(tray_title_for_backend_status(status))
         .show_menu_on_left_click(true)
         .tooltip("dicktaint")
         .on_menu_event(|app, event: tauri::menu::MenuEvent| {
@@ -1313,16 +1306,12 @@ fn sync_macos_tray(app: &tauri::AppHandle, status: BackendDictationStatus) -> Re
         .map_err(|e| format!("Failed to update tray force-stop enabled state: {e}"))?;
     runtime
         .tray_icon
-        .set_icon(Some(tray_icon_for_backend_status(status)?))
-        .map_err(|e| format!("Failed to update tray icon image: {e}"))?;
-    runtime
-        .tray_icon
-        .set_icon_as_template(true)
-        .map_err(|e| format!("Failed to mark tray icon as template: {e}"))?;
-    runtime
-        .tray_icon
         .set_tooltip(Some(format!("dicktaint: {}", status.tray_label())))
         .map_err(|e| format!("Failed to update tray tooltip: {e}"))?;
+    runtime
+        .tray_icon
+        .set_title(Some(tray_title_for_backend_status(status)))
+        .map_err(|e| format!("Failed to update tray title: {e}"))?;
     runtime
         .tray_icon
         .set_visible(should_show_tray_icon(
@@ -3271,11 +3260,57 @@ fn create_input_stream_for_device(
         if let Ok(mut guard) = samples.lock() {
             guard.truncate(probe_start_len);
         }
-        drop(stream);
+        stop_and_drop_input_stream(stream);
         return Err(error);
     }
 
     Ok((stream, sample_rate))
+}
+
+fn stop_and_drop_input_stream(stream: Stream) {
+    if let Err(error) = stream.pause() {
+        log::warn!("Failed to pause microphone stream before drop: {error}");
+    }
+    drop(stream);
+}
+
+fn ordered_input_device_candidate_names(
+    preferred_input_name: Option<&str>,
+    default_name: Option<&str>,
+    available_names: &[String],
+) -> Vec<String> {
+    let mut ordered = Vec::new();
+    let mut seen = HashSet::new();
+
+    let mut push_name = |name: &str| {
+        if seen.insert(name.to_string()) {
+            ordered.push(name.to_string());
+        }
+    };
+
+    if let (Some(preferred_name), Some(default_name)) = (preferred_input_name, default_name) {
+        if preferred_name == default_name {
+            push_name(default_name);
+        }
+    }
+
+    if let Some(preferred_name) = preferred_input_name {
+        for name in available_names {
+            if name == preferred_name {
+                push_name(name);
+            }
+        }
+    }
+
+    if let Some(default_name) = default_name {
+        push_name(default_name);
+    }
+
+    for name in available_names {
+        push_name(name);
+    }
+
+    ordered
 }
 
 fn wait_for_non_silent_input(
@@ -3442,30 +3477,43 @@ fn create_input_stream(
         .preferred_input_device
         .clone();
     let mut candidate_devices: Vec<(String, cpal::Device)> = Vec::new();
-
-    let default_name = host
-        .default_input_device()
-        .map(|device| device_name(&device, "default input"));
-
-    if let Some(preferred_name) = preferred_input_name.as_deref() {
-        if let Ok(devices) = host.input_devices() {
-            for device in devices {
-                let name = device_name(&device, "unknown input");
-                if name == preferred_name {
-                    candidate_devices.push((name, device));
-                }
-            }
+    let mut enumerated_devices: Vec<(String, cpal::Device)> = Vec::new();
+    if let Ok(devices) = host.input_devices() {
+        for device in devices {
+            enumerated_devices.push((device_name(&device, "unknown input"), device));
         }
     }
 
-    if let Some(default_device) = host.default_input_device() {
-        let name = device_name(&default_device, "default input");
-        candidate_devices.push((name, default_device));
-    }
+    let mut default_device = host
+        .default_input_device()
+        .map(|device| (device_name(&device, "default input"), device));
+    let default_name = default_device.as_ref().map(|(name, _)| name.clone());
+    let available_names = enumerated_devices
+        .iter()
+        .map(|(name, _)| name.clone())
+        .chain(default_name.iter().cloned())
+        .collect::<Vec<_>>();
 
-    if let Ok(devices) = host.input_devices() {
-        for device in devices {
-            candidate_devices.push((device_name(&device, "unknown input"), device));
+    for ordered_name in ordered_input_device_candidate_names(
+        preferred_input_name.as_deref(),
+        default_name.as_deref(),
+        &available_names,
+    ) {
+        if default_device
+            .as_ref()
+            .is_some_and(|(name, _)| *name == ordered_name)
+        {
+            if let Some(device) = default_device.take() {
+                candidate_devices.push(device);
+                continue;
+            }
+        }
+
+        if let Some(index) = enumerated_devices
+            .iter()
+            .position(|(name, _)| *name == ordered_name)
+        {
+            candidate_devices.push(enumerated_devices.remove(index));
         }
     }
 
@@ -3522,7 +3570,7 @@ fn spawn_recording_thread(
             Ok((stream, sample_rate, input_device_name)) => {
                 let _ = init_tx.send(Ok((sample_rate, input_device_name)));
                 let _ = stop_rx.recv();
-                drop(stream);
+                stop_and_drop_input_stream(stream);
             }
             Err(e) => {
                 let _ = init_tx.send(Err(e));
@@ -4494,7 +4542,8 @@ mod tests {
     use super::{
         analyze_audio_signal, audio_signal_is_too_quiet, default_dictation_trigger,
         focused_field_insert_enabled, normalize_audio_gain, normalize_dictation_trigger,
-        onboarding_runtime_details, pill_should_be_visible_for_backend_state,
+        onboarding_runtime_details, ordered_input_device_candidate_names,
+        pill_should_be_visible_for_backend_state,
         preferred_whisper_cli_names, quiet_audio_error, resample_linear,
         resolve_background_ui_preferences, resolve_effective_dictation_trigger,
         runtime_details_for_trigger, wait_for_non_silent_input, whisper_help_text_looks_valid,
@@ -4795,6 +4844,27 @@ mod tests {
         ));
         assert!(tray_force_stop_enabled(BackendDictationStatus::Listening));
         assert!(!tray_force_stop_enabled(BackendDictationStatus::Idle));
+    }
+
+    #[test]
+    fn preferred_default_input_uses_default_handle_and_dedupes_names() {
+        let ordered = ordered_input_device_candidate_names(
+            Some("MacBook Pro Microphone"),
+            Some("MacBook Pro Microphone"),
+            &[
+                "MacBook Pro Microphone".to_string(),
+                "USB Mic".to_string(),
+                "MacBook Pro Microphone".to_string(),
+            ],
+        );
+
+        assert_eq!(
+            ordered,
+            vec![
+                "MacBook Pro Microphone".to_string(),
+                "USB Mic".to_string()
+            ]
+        );
     }
 
     #[cfg(target_os = "macos")]
