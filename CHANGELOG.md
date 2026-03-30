@@ -1,5 +1,19 @@
 # Changelog
 
+## v0.3.7 - 2026-03-29
+
+### Highlights
+
+- hid the floating macOS dictation pill while idle so it only appears during active dictation, transcription, or error states
+- aligned the backend and frontend overlay visibility contract so idle status refreshes no longer pin the pill after the main window is hidden
+- added regression coverage for the idle-hidden overlay state in the Rust test suite
+
+### Release Notes
+
+- this patch fixes the background overlay behavior after `v0.3.6`, where the compact mic pill could remain visible even when dicktaint was not actively recording
+- macOS desktop remains the primary release target for this build
+- `macOSPrivateApi` remains enabled to support the transparent overlay behavior, so this release is intended for direct distribution rather than Mac App Store submission
+
 ## v0.3.6 - 2026-03-27
 
 ### Highlights

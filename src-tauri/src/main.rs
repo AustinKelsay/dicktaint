@@ -729,6 +729,10 @@ fn idle_pill_message(app: &tauri::AppHandle) -> String {
     }
 }
 
+fn pill_should_be_visible_for_dictation_state(state: &str, has_error: bool) -> bool {
+    matches!(state, "listening" | "processing") || (state == "error" && has_error)
+}
+
 fn emit_pill_status(
     app: &tauri::AppHandle,
     message: impl Into<String>,
@@ -750,6 +754,10 @@ fn sync_pill_for_dictation_state(app: &tauri::AppHandle, state: &str, error: Opt
     let hotkey_state = app.state::<GlobalHotkeyState>();
     let runtime = current_trigger_runtime_details(hotkey_state.inner()).unwrap_or_default();
     let label = active_hotkey_label(app);
+    let has_error = error
+        .map(str::trim)
+        .filter(|value| !value.is_empty())
+        .is_some();
 
     let (message, pill_state) = match state {
         "listening" => {
@@ -764,29 +772,22 @@ fn sync_pill_for_dictation_state(app: &tauri::AppHandle, state: &str, error: Opt
         }
         "processing" => ("Transcribing...".to_string(), "working"),
         "error" => (
-            if error
-                .map(str::trim)
-                .filter(|value| !value.is_empty())
-                .is_some()
-            {
+            if has_error {
                 "Dictation error - check status".to_string()
             } else {
                 idle_pill_message(app)
             },
-            if error
-                .map(str::trim)
-                .filter(|value| !value.is_empty())
-                .is_some()
-            {
-                "error"
-            } else {
-                "idle"
-            },
+            if has_error { "error" } else { "idle" },
         ),
         _ => (idle_pill_message(app), "idle"),
     };
 
-    emit_pill_status(app, message, pill_state, true);
+    emit_pill_status(
+        app,
+        message,
+        pill_state,
+        pill_should_be_visible_for_dictation_state(state, has_error),
+    );
 }
 
 fn emit_dictation_state(
@@ -3801,8 +3802,9 @@ mod tests {
     use super::{
         analyze_audio_signal, audio_signal_is_too_quiet, default_dictation_trigger,
         focused_field_insert_enabled, normalize_audio_gain, normalize_dictation_trigger,
-        onboarding_runtime_details, preferred_whisper_cli_names, quiet_audio_error,
-        resample_linear, resolve_effective_dictation_trigger, runtime_details_for_trigger,
+        onboarding_runtime_details, pill_should_be_visible_for_dictation_state,
+        preferred_whisper_cli_names, quiet_audio_error, resample_linear,
+        resolve_effective_dictation_trigger, runtime_details_for_trigger,
         wait_for_non_silent_input, whisper_help_text_looks_valid, HotkeyDeliveryMode,
         LocalSettings,
     };
@@ -3991,6 +3993,21 @@ mod tests {
         assert_eq!(runtime.mode.as_str(), "focused-window-hold");
         assert!(runtime.status.contains("focused"));
         assert!(runtime.permission_hint.is_some());
+    }
+
+    #[test]
+    fn pill_visibility_hides_idle_and_shows_active_states() {
+        assert!(!pill_should_be_visible_for_dictation_state("idle", false));
+        assert!(pill_should_be_visible_for_dictation_state(
+            "listening",
+            false
+        ));
+        assert!(pill_should_be_visible_for_dictation_state(
+            "processing",
+            false
+        ));
+        assert!(!pill_should_be_visible_for_dictation_state("error", false));
+        assert!(pill_should_be_visible_for_dictation_state("error", true));
     }
 
     #[cfg(target_os = "macos")]

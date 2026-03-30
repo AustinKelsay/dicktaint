@@ -12,6 +12,8 @@
       -webkit-user-select: none;
       user-select: none;
       overflow: hidden;
+      opacity: 0;
+      transition: opacity 120ms ease;
     }
 
     .pill {
@@ -176,6 +178,7 @@
       const click = document.getElementById('click');
       const waveformBars = Array.from(document.querySelectorAll('.waveform span'));
       const DICTATION_AUDIO_LEVEL_EVENT = 'dictation:audio-level';
+      const PILL_STATUS_EVENT = 'dicktaint://pill-status';
 
       let state = 'idle';
       let currentSessionId = null;
@@ -220,6 +223,19 @@
         }
       }
 
+      function setVisible(visible) {
+        document.body.dataset.visible = visible ? 'true' : 'false';
+        document.body.style.opacity = visible ? '1' : '0';
+      }
+
+      function normalizeOverlayStatusState(value) {
+        const normalized = String(value || '').toLowerCase();
+        if (normalized === 'live') return 'listening';
+        if (normalized === 'working') return 'processing';
+        if (normalized === 'error') return 'error';
+        return 'idle';
+      }
+
       function setMeter(level, bars) {
         const normalizedLevel = clampLevel(level);
         pill.dataset.audioState = audioStateForLevel(normalizedLevel);
@@ -230,10 +246,12 @@
         }
       }
 
-      function setState(s) {
+      function setState(s, options = {}) {
+        const visible = options.visible !== false && s !== 'idle';
         if (s === 'error') {
           state = 'error';
           pill.setAttribute('data-state', 'error');
+          setVisible(visible);
           resetMeter();
           setTimeout(() => {
             if (state === 'error') {
@@ -241,12 +259,14 @@
               pill.setAttribute('data-state', 'idle');
               currentSessionId = null;
               resetMeter();
+              setVisible(false);
             }
           }, 1400);
           return;
         }
         state = s;
         pill.setAttribute('data-state', s);
+        setVisible(visible);
         if (state !== 'listening') {
           currentSessionId = state === 'processing' ? currentSessionId : null;
           resetMeter();
@@ -281,6 +301,11 @@
           }
           setState(payload?.state ?? 'idle');
         }).catch(() => {});
+        ev.listen(PILL_STATUS_EVENT, ({ payload }) => {
+          setState(normalizeOverlayStatusState(payload?.state), {
+            visible: payload?.visible !== false
+          });
+        }).catch(() => {});
         ev.listen(DICTATION_AUDIO_LEVEL_EVENT, ({ payload }) => {
           const payloadSessionId = payload?.session_id === null || payload?.session_id === undefined
             ? null
@@ -292,7 +317,7 @@
         ev.listen('dictation:hotkey-triggered', () => { if (state !== 'processing') click.click(); }).catch(() => {});
       }
 
-      resetMeter();
+      setState('idle', { visible: false });
     })();
   </script>
 </body>

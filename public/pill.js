@@ -29,5 +29,5 @@ async function initOverlayListener() {
   });
 }
 
-applyStatus({ state: 'idle', message: 'Hold fn to dictate', visible: true });
+applyStatus({ state: 'idle', message: 'Hold fn to dictate', visible: false });
 initOverlayListener().catch(() => {});

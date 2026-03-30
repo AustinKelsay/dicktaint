@@ -696,7 +696,8 @@ function syncHotkeyPillForStatus(message, tone = 'neutral') {
   const state = tone === 'live'
     ? 'live'
     : (tone === 'working' ? 'working' : (tone === 'ok' ? 'ok' : (tone === 'error' ? 'error' : 'idle')));
-  setHotkeyPill(summarizeHotkeyPillStatus(message, tone), state, true);
+  const showOverlay = state === 'live' || state === 'working' || state === 'error';
+  setHotkeyPill(summarizeHotkeyPillStatus(message, tone), state, showOverlay);
 }
 
 function setAppScreen(screen) {
