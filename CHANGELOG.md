@@ -1,5 +1,19 @@
 # Changelog
 
+## v0.3.10 - 2026-03-30
+
+### Highlights
+
+- fixed a macOS startup probe regression where dictation could fail before recording began if the microphone delivered only silence-suppressed frames during the first 1.5 seconds
+- stopped treating silent startup frames as a permission-style failure, which makes built-in Mac microphones behave correctly with Mic Mode features like `Voice Isolation`
+- kept the later “captured audio was too quiet” validation in place so genuinely empty recordings still fail with a more accurate post-recording error
+
+### Release Notes
+
+- this patch follows `v0.3.9` and targets a separate false negative in the native capture path: the microphone could open successfully, but dicktaint aborted immediately because the startup probe expected non-zero frames before you had time to speak
+- affected symptom: errors mentioning `opened but only produced silent audio frames` even though Microphone access was enabled and the selected input device was correct
+- Mic Mode configurations that suppress initial silence, especially `Voice Isolation`, should no longer cause startup failure on their own
+
 ## v0.3.9 - 2026-03-30
 
 ### Highlights

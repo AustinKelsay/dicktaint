@@ -76,7 +76,6 @@ const LIVE_AUDIO_BAR_COUNT: usize = 12;
 const LIVE_AUDIO_EMIT_INTERVAL_MS: u64 = 45;
 const INPUT_STREAM_PROBE_TIMEOUT_MS: u64 = 1_500;
 const INPUT_STREAM_PROBE_POLL_INTERVAL_MS: u64 = 40;
-const INPUT_STREAM_PROBE_MIN_DURATION_MS: u32 = 120;
 
 #[derive(Clone, Serialize)]
 struct DictationStatePayload {
@@ -3313,19 +3312,25 @@ fn ordered_input_device_candidate_names(
     ordered
 }
 
-fn wait_for_non_silent_input(
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+enum InputStreamProbeOutcome {
+    NonSilentFrames,
+    SilentFrames,
+}
+
+fn probe_input_stream_activity(
     samples: &Arc<Mutex<Vec<f32>>>,
     start_len: usize,
     sample_rate: u32,
     device_name: &str,
-) -> Result<(), String> {
+    timeout: Duration,
+    poll_interval: Duration,
+) -> Result<InputStreamProbeOutcome, String> {
     if sample_rate == 0 {
-        return Ok(());
+        return Ok(InputStreamProbeOutcome::NonSilentFrames);
     }
 
-    let min_samples =
-        ((sample_rate as u64 * INPUT_STREAM_PROBE_MIN_DURATION_MS as u64) / 1000).max(32) as usize;
-    let deadline = Instant::now() + Duration::from_millis(INPUT_STREAM_PROBE_TIMEOUT_MS);
+    let deadline = Instant::now() + timeout;
     let mut saw_any_frames = false;
 
     loop {
@@ -3346,14 +3351,9 @@ fn wait_for_non_silent_input(
         if let Some((captured_len, peak_abs)) = observed {
             saw_any_frames = true;
             if peak_abs > 0.0 {
-                return Ok(());
+                return Ok(InputStreamProbeOutcome::NonSilentFrames);
             }
-            if captured_len >= min_samples {
-                return Err(format!(
-                    "Microphone '{}' opened but only produced silent audio frames. On macOS this usually means the selected input route is stale or muted. In Sound > Input, switch to another microphone and back, or choose System Default and retry.",
-                    device_name
-                ));
-            }
+            let _ = captured_len;
         }
 
         if Instant::now() >= deadline {
@@ -3363,13 +3363,35 @@ fn wait_for_non_silent_input(
                     device_name
                 ));
             }
-            return Err(format!(
-                "Microphone '{}' opened but only produced silent audio frames. On macOS this usually means microphone access is blocked or the input route is stale. In Privacy & Security > Microphone, allow this app, then check Sound > Input and retry.",
-                device_name
-            ));
+            return Ok(InputStreamProbeOutcome::SilentFrames);
         }
 
-        thread::sleep(Duration::from_millis(INPUT_STREAM_PROBE_POLL_INTERVAL_MS));
+        thread::sleep(poll_interval);
+    }
+}
+
+fn wait_for_non_silent_input(
+    samples: &Arc<Mutex<Vec<f32>>>,
+    start_len: usize,
+    sample_rate: u32,
+    device_name: &str,
+) -> Result<(), String> {
+    match probe_input_stream_activity(
+        samples,
+        start_len,
+        sample_rate,
+        device_name,
+        Duration::from_millis(INPUT_STREAM_PROBE_TIMEOUT_MS),
+        Duration::from_millis(INPUT_STREAM_PROBE_POLL_INTERVAL_MS),
+    )? {
+        InputStreamProbeOutcome::NonSilentFrames => Ok(()),
+        InputStreamProbeOutcome::SilentFrames => {
+            log::warn!(
+                "Microphone '{}' opened with only silent startup frames; continuing because macOS Mic Mode can suppress initial silence.",
+                device_name
+            );
+            Ok(())
+        }
     }
 }
 
@@ -4543,14 +4565,17 @@ mod tests {
         analyze_audio_signal, audio_signal_is_too_quiet, default_dictation_trigger,
         focused_field_insert_enabled, normalize_audio_gain, normalize_dictation_trigger,
         onboarding_runtime_details, ordered_input_device_candidate_names,
-        pill_should_be_visible_for_backend_state,
+        pill_should_be_visible_for_backend_state, probe_input_stream_activity,
         preferred_whisper_cli_names, quiet_audio_error, resample_linear,
         resolve_background_ui_preferences, resolve_effective_dictation_trigger,
         runtime_details_for_trigger, wait_for_non_silent_input, whisper_help_text_looks_valid,
-        BackendDictationStatus, CloseAction, HotkeyDeliveryMode, LocalSettings, MenuBarMode,
-        PillVisibilityMode,
+        BackendDictationStatus, CloseAction, HotkeyDeliveryMode, InputStreamProbeOutcome,
+        LocalSettings, MenuBarMode, PillVisibilityMode,
     };
-    use std::sync::{Arc, Mutex};
+    use std::{
+        sync::{Arc, Mutex},
+        time::Duration,
+    };
 
     #[cfg(target_os = "macos")]
     use super::{
@@ -4612,16 +4637,50 @@ mod tests {
     }
 
     #[test]
-    fn silent_stream_probe_rejects_zeroed_frames() {
+    fn silent_stream_probe_accepts_zeroed_frames_when_frames_exist() {
         let samples = Arc::new(Mutex::new(vec![0.0_f32; 4096]));
-        let error = wait_for_non_silent_input(&samples, 0, 16_000, "Austin's AirPods").unwrap_err();
-        assert!(error.contains("silent audio frames"));
+        let outcome = probe_input_stream_activity(
+            &samples,
+            0,
+            16_000,
+            "Austin's AirPods",
+            Duration::ZERO,
+            Duration::ZERO,
+        )
+        .unwrap();
+        assert_eq!(outcome, InputStreamProbeOutcome::SilentFrames);
+        wait_for_non_silent_input(&samples, 0, 16_000, "Austin's AirPods").unwrap();
     }
 
     #[test]
     fn silent_stream_probe_accepts_nonzero_frames() {
         let samples = Arc::new(Mutex::new(vec![0.0_f32, 0.02, -0.01, 0.0]));
+        let outcome = probe_input_stream_activity(
+            &samples,
+            0,
+            16_000,
+            "MacBook Pro Microphone",
+            Duration::ZERO,
+            Duration::ZERO,
+        )
+        .unwrap();
+        assert_eq!(outcome, InputStreamProbeOutcome::NonSilentFrames);
         wait_for_non_silent_input(&samples, 0, 16_000, "MacBook Pro Microphone").unwrap();
+    }
+
+    #[test]
+    fn silent_stream_probe_rejects_missing_frames() {
+        let samples = Arc::new(Mutex::new(Vec::<f32>::new()));
+        let error = probe_input_stream_activity(
+            &samples,
+            0,
+            16_000,
+            "MacBook Pro Microphone",
+            Duration::ZERO,
+            Duration::ZERO,
+        )
+        .unwrap_err();
+        assert!(error.contains("did not deliver any audio frames"));
     }
 
     #[test]
