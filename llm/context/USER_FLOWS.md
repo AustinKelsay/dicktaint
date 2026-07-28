@@ -80,7 +80,7 @@ Web flow:
 Re-verify when changing:
 
 1. onboarding and dictation handlers in `public/app.js`
-2. command implementations in `src-tauri/src/main.rs`
+2. command implementations in `src-tauri/src/commands.rs`
 3. setup UI structure in `public/index.html`
 
 ## Related Docs
