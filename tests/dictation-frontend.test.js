@@ -1,3 +1,5 @@
+const path = require('node:path');
+const { pathToFileURL } = require('node:url');
 const { describe, it, expect, beforeEach, afterEach } = require('bun:test');
 
 class MockElement {
@@ -333,13 +335,23 @@ function createMockDom({ nativeDesktop = false, onboardingPayload = null, invoke
   return { clipboardCalls, invokeCalls };
 }
 
+const appModulePath = path.join(__dirname, '../public/app.js');
+let appModulePromise = null;
+
 async function loadAppWithTestApi() {
   global.__DICKTAINT_EXPOSE_TEST_API__ = true;
   delete global.__DICKTAINT_TEST_API__;
-  delete require.cache[require.resolve('../public/app.js')];
-  require('../public/app.js');
+  if (!appModulePromise) {
+    appModulePromise = import(pathToFileURL(appModulePath).href);
+  }
+  const appModule = await appModulePromise;
+  appModule.bootstrapApp();
   await Promise.resolve();
   await Promise.resolve();
+  if (!global.__DICKTAINT_TEST_API__) {
+    const { createTestApi } = await import(pathToFileURL(path.join(__dirname, '../public/js/test-api.js')).href);
+    global.__DICKTAINT_TEST_API__ = createTestApi();
+  }
   return global.__DICKTAINT_TEST_API__;
 }
 
