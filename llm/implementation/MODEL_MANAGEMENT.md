@@ -24,8 +24,8 @@ Out of scope:
 
 ## Source Anchors
 
-- `/Users/plebdev/Desktop/code/dicktaint/src-tauri/src/main.rs`
-- `/Users/plebdev/Desktop/code/dicktaint/public/app.js`
+- `src-tauri/src/main.rs`
+- `public/app.js`
 
 ## Contract
 

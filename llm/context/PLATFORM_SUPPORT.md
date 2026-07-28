@@ -22,10 +22,10 @@ Out of scope:
 
 ## Source Anchors
 
-- `/Users/plebdev/Desktop/code/dicktaint/public/app.js`
-- `/Users/plebdev/Desktop/code/dicktaint/src-tauri/src/main.rs`
-- `/Users/plebdev/Desktop/code/dicktaint/src-tauri/tauri.conf.json`
-- `/Users/plebdev/Desktop/code/dicktaint/package.json`
+- `public/app.js`
+- `src-tauri/src/main.rs`
+- `src-tauri/tauri.conf.json`
+- `package.json`
 
 ## Current State
 
@@ -53,9 +53,9 @@ Android:
 
 Re-verify this document when any of these change:
 
-1. platform guards in `/Users/plebdev/Desktop/code/dicktaint/public/app.js`
-2. macOS-specific blocks in `/Users/plebdev/Desktop/code/dicktaint/src-tauri/src/main.rs`
-3. private API config in `/Users/plebdev/Desktop/code/dicktaint/src-tauri/tauri.conf.json`
+1. platform guards in `public/app.js`
+2. macOS-specific blocks in `src-tauri/src/main.rs`
+3. private API config in `src-tauri/tauri.conf.json`
 
 ## Related Docs
 

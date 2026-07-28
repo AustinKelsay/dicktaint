@@ -23,8 +23,8 @@ Out of scope:
 
 ## Source Anchors
 
-- `/Users/plebdev/Desktop/code/dicktaint/src-tauri/tauri.conf.json`
-- `/Users/plebdev/Desktop/code/dicktaint/src-tauri/Cargo.toml`
+- `src-tauri/tauri.conf.json`
+- `src-tauri/Cargo.toml`
 
 ## Runbook
 

@@ -22,8 +22,8 @@ Out of scope:
 
 ## Source Anchors
 
-- `/Users/plebdev/Desktop/code/dicktaint/server.js`
-- `/Users/plebdev/Desktop/code/dicktaint/src-tauri/src/main.rs`
+- `server.js`
+- `src-tauri/src/main.rs`
 
 ## Contract
 
@@ -74,9 +74,9 @@ Environment variables with contract impact:
 
 Re-verify this file when these change:
 
-1. route handling in `/Users/plebdev/Desktop/code/dicktaint/server.js`
-2. `tauri::generate_handler!` registrations in `/Users/plebdev/Desktop/code/dicktaint/src-tauri/src/main.rs`
-3. event names or payload fields in `/Users/plebdev/Desktop/code/dicktaint/public/app.js` and `/Users/plebdev/Desktop/code/dicktaint/public/pill.js`
+1. route handling in `server.js`
+2. `tauri::generate_handler!` registrations in `src-tauri/src/main.rs`
+3. event names or payload fields in `public/app.js` and `public/pill.js`
 
 ## Related Docs
 

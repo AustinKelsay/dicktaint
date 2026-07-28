@@ -24,9 +24,9 @@ Out of scope:
 
 ## Source Anchors
 
-- `/Users/plebdev/Desktop/code/dicktaint/src-tauri/src/main.rs`
-- `/Users/plebdev/Desktop/code/dicktaint/src-tauri/tauri.conf.json`
-- `/Users/plebdev/Desktop/code/dicktaint/package.json`
+- `src-tauri/src/main.rs`
+- `src-tauri/tauri.conf.json`
+- `package.json`
 
 ## Contract
 

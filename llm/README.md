@@ -3,7 +3,7 @@
 ## Status Snapshot
 
 - Date: 2026-02-17
-- Canonical docs root: `/Users/plebdev/Desktop/code/dicktaint/llm`
+- Canonical docs root: `llm`
 - Canonical scope: current shipped behavior for this repository
 
 ## Purpose
@@ -27,13 +27,13 @@ Out of scope:
 
 Primary source files:
 
-- `/Users/plebdev/Desktop/code/dicktaint/server.js`
-- `/Users/plebdev/Desktop/code/dicktaint/public/app.js`
-- `/Users/plebdev/Desktop/code/dicktaint/src-tauri/src/main.rs`
-- `/Users/plebdev/Desktop/code/dicktaint/src-tauri/tauri.conf.json`
-- `/Users/plebdev/Desktop/code/dicktaint/scripts/build-whisper-sidecar.sh`
-- `/Users/plebdev/Desktop/code/dicktaint/scripts/smoke-whisper-sidecar.sh`
-- `/Users/plebdev/Desktop/code/dicktaint/package.json`
+- `server.js`
+- `public/app.js`
+- `src-tauri/src/main.rs`
+- `src-tauri/tauri.conf.json`
+- `scripts/build-whisper-sidecar.sh`
+- `scripts/smoke-whisper-sidecar.sh`
+- `package.json`
 
 ## Current State
 

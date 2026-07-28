@@ -25,10 +25,10 @@ Out of scope:
 
 ## Source Anchors
 
-- `/Users/plebdev/Desktop/code/dicktaint/src-tauri/src/main.rs`
-- `/Users/plebdev/Desktop/code/dicktaint/public/app.js`
-- `/Users/plebdev/Desktop/code/dicktaint/public/pill.js`
-- `/Users/plebdev/Desktop/code/dicktaint/src-tauri/tauri.conf.json`
+- `src-tauri/src/main.rs`
+- `public/app.js`
+- `public/pill.js`
+- `src-tauri/tauri.conf.json`
 
 ## Contract
 

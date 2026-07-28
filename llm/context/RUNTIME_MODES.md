@@ -23,9 +23,9 @@ Out of scope:
 
 ## Source Anchors
 
-- `/Users/plebdev/Desktop/code/dicktaint/public/app.js`
-- `/Users/plebdev/Desktop/code/dicktaint/server.js`
-- `/Users/plebdev/Desktop/code/dicktaint/package.json`
+- `public/app.js`
+- `server.js`
+- `package.json`
 
 ## Current State
 
@@ -50,9 +50,9 @@ Rule of thumb:
 
 Re-verify runtime mode docs when these change:
 
-1. mode helper functions in `/Users/plebdev/Desktop/code/dicktaint/public/app.js`
-2. Tauri scripts in `/Users/plebdev/Desktop/code/dicktaint/package.json`
-3. server behavior in `/Users/plebdev/Desktop/code/dicktaint/server.js`
+1. mode helper functions in `public/app.js`
+2. Tauri scripts in `package.json`
+3. server behavior in `server.js`
 
 ## Related Docs
 

@@ -25,9 +25,9 @@ Out of scope:
 
 ## Source Anchors
 
-- `/Users/plebdev/Desktop/code/dicktaint/public/app.js`
-- `/Users/plebdev/Desktop/code/dicktaint/src-tauri/src/main.rs`
-- `/Users/plebdev/Desktop/code/dicktaint/scripts/smoke-whisper-sidecar.sh`
+- `public/app.js`
+- `src-tauri/src/main.rs`
+- `scripts/smoke-whisper-sidecar.sh`
 
 ## Runbook
 

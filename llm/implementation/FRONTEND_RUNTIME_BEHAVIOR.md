@@ -24,9 +24,9 @@ Out of scope:
 
 ## Source Anchors
 
-- `/Users/plebdev/Desktop/code/dicktaint/public/app.js`
-- `/Users/plebdev/Desktop/code/dicktaint/public/index.html`
-- `/Users/plebdev/Desktop/code/dicktaint/public/pill.js`
+- `public/app.js`
+- `public/index.html`
+- `public/pill.js`
 
 ## Contract
 

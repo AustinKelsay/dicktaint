@@ -25,9 +25,9 @@ Out of scope:
 
 ## Source Anchors
 
-- `/Users/plebdev/Desktop/code/dicktaint/public/index.html`
-- `/Users/plebdev/Desktop/code/dicktaint/public/app.js`
-- `/Users/plebdev/Desktop/code/dicktaint/src-tauri/src/main.rs`
+- `public/index.html`
+- `public/app.js`
+- `src-tauri/src/main.rs`
 
 ## Current State
 
@@ -75,9 +75,9 @@ Web flow:
 
 Re-verify when changing:
 
-1. onboarding and dictation handlers in `/Users/plebdev/Desktop/code/dicktaint/public/app.js`
-2. command implementations in `/Users/plebdev/Desktop/code/dicktaint/src-tauri/src/main.rs`
-3. setup UI structure in `/Users/plebdev/Desktop/code/dicktaint/public/index.html`
+1. onboarding and dictation handlers in `public/app.js`
+2. command implementations in `src-tauri/src/main.rs`
+3. setup UI structure in `public/index.html`
 
 ## Related Docs
 
