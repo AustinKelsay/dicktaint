@@ -24,7 +24,8 @@ Out of scope:
 
 ## Source Anchors
 
-- `public/app.js`
+- `public/app.js` (ESM entry)
+- `public/js/` (frontend domain modules)
 - `public/index.html`
 - `public/pill.js`
 

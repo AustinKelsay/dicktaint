@@ -24,7 +24,8 @@ Out of scope:
 
 ## Source Anchors
 
-- `src-tauri/src/main.rs`
+- `src-tauri/src/main.rs` (thin entry)
+- `src-tauri/src/` domain modules (`audio`, `commands`, `hotkey_overlay`, `insert`, `models`, `state`, `transcribe`, `whisper_cli`)
 - `src-tauri/Cargo.toml`
 
 ## Contract
