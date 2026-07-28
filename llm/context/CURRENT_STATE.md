@@ -25,9 +25,13 @@ Out of scope:
 
 ## Source Anchors
 
-- `public/app.js`
+- `public/app.js` (ESM entry)
+- `public/js/`
 - `server.js`
-- `src-tauri/src/main.rs`
+- `src-tauri/src/main.rs` (thin entry)
+- `src-tauri/src/commands.rs`
+- `src-tauri/src/hotkey_overlay.rs`
+- `src-tauri/src/state.rs`
 - `src-tauri/tauri.conf.json`
 
 ## Current State
@@ -57,8 +61,8 @@ Key policy:
 
 Validate this document when any of these change:
 
-1. app runtime mode detection in `public/app.js`
-2. command/event registrations in `src-tauri/src/main.rs`
+1. app runtime mode detection in `public/js/platform.js` / `public/app.js`
+2. command/event registrations across `src-tauri/src/commands.rs` and `src-tauri/src/hotkey_overlay.rs`
 3. desktop bundle/runtime config in `src-tauri/tauri.conf.json`
 
 ## Related Docs

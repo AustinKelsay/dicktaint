@@ -16,7 +16,7 @@
 | Onboarding | Local model + whisper-cli readiness flow before dictation |
 | Staging tip | Integration branch for PRs; should track shipping `main` closely |
 
-## Module map (target after cleanup)
+## Module map
 
 | Module | Owns |
 | --- | --- |

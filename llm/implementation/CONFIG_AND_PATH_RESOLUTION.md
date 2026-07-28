@@ -24,7 +24,10 @@ Out of scope:
 
 ## Source Anchors
 
-- `src-tauri/src/main.rs`
+- `src-tauri/src/main.rs` (thin entry)
+- `src-tauri/src/commands.rs`
+- `src-tauri/src/hotkey_overlay.rs`
+- `src-tauri/src/state.rs`
 - `src-tauri/tauri.conf.json`
 - `package.json`
 

@@ -28,8 +28,12 @@ Out of scope:
 Primary source files:
 
 - `server.js`
-- `public/app.js`
-- `src-tauri/src/main.rs`
+- `public/app.js` (ESM entry)
+- `public/js/`
+- `src-tauri/src/main.rs` (thin entry)
+- `src-tauri/src/commands.rs`
+- `src-tauri/src/hotkey_overlay.rs`
+- `src-tauri/src/state.rs`
 - `src-tauri/tauri.conf.json`
 - `scripts/build-whisper-sidecar.sh`
 - `scripts/smoke-whisper-sidecar.sh`

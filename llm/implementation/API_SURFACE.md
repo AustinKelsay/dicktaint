@@ -23,7 +23,10 @@ Out of scope:
 ## Source Anchors
 
 - `server.js`
-- `src-tauri/src/main.rs`
+- `src-tauri/src/main.rs` (thin entry)
+- `src-tauri/src/commands.rs`
+- `src-tauri/src/hotkey_overlay.rs`
+- `src-tauri/src/state.rs`
 
 ## Contract
 
@@ -75,7 +78,7 @@ Environment variables with contract impact:
 Re-verify this file when these change:
 
 1. route handling in `server.js`
-2. `tauri::generate_handler!` registrations in `src-tauri/src/main.rs`
+2. `tauri::generate_handler!` registrations wired from `src-tauri/src/main.rs` (handlers in `src-tauri/src/commands.rs`)
 3. event names or payload fields in `public/app.js` and `public/pill.js`
 
 ## Related Docs

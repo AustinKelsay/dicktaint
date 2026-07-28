@@ -25,8 +25,12 @@ Out of scope:
 
 ## Source Anchors
 
-- `public/app.js`
-- `src-tauri/src/main.rs`
+- `public/app.js` (ESM entry)
+- `public/js/`
+- `src-tauri/src/main.rs` (thin entry)
+- `src-tauri/src/commands.rs`
+- `src-tauri/src/hotkey_overlay.rs`
+- `src-tauri/src/state.rs`
 - `scripts/smoke-whisper-sidecar.sh`
 
 ## Runbook
