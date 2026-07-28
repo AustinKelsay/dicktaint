@@ -14,7 +14,7 @@ Provide a strict contract reference for all callable routes, commands, and runti
 In scope:
 
 - web HTTP contract from `/server.js`
-- Tauri command and event contract from `/src-tauri/src/main.rs`
+- Tauri command and event contract from `src-tauri/src/commands.rs` / `src-tauri/src/hotkey_overlay.rs`
 
 Out of scope:
 
@@ -79,7 +79,7 @@ Re-verify this file when these change:
 
 1. route handling in `server.js`
 2. `tauri::generate_handler!` registrations wired from `src-tauri/src/main.rs` (handlers in `src-tauri/src/commands.rs`)
-3. event names or payload fields in `public/app.js` and `public/pill.js`
+3. event names or payload fields in `public/js/` and `public/pill.js`
 
 ## Related Docs
 
