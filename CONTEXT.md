@@ -24,7 +24,12 @@
 | `models` | Catalog, download, settings persistence, onboarding payload |
 | `audio` | Mic capture, resample, sanitize, WAV write |
 | `transcribe` | Whisper invoke + transcript normalization |
-| `hotkey_overlay` | Global hotkeys, Fn hold, pill windows, tray sync |
+| `hotkey_overlay` | Facade: dictation UI coordination + re-exports |
+| `hotkey_overlay::macos_fn` | macOS Fn/Globe CGEventTap listener |
+| `hotkey_overlay::trigger` | Dictation trigger normalize/resolve + hotkey registration |
+| `hotkey_overlay::pill` | Overlay pill windows + status sync |
+| `hotkey_overlay::tray` | macOS menu bar tray runtime |
+| `hotkey_overlay::background_ui` | Background prefs, main window, pill/tray sync |
 | `insert` | Clipboard / Accessibility insertion |
 | `commands` | Tauri command handlers |
 | Frontend `public/js/*` | Onboarding, settings, native session, history, web speech |
