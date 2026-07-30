@@ -5,11 +5,12 @@ import { SpeechRecognitionApi, PILL_STATUS_EVENT } from './constants.js';
 import {
   getTauriEventApi, isNativeDesktopMode, isFocusedMacDesktopMode
 } from './platform.js';
-import { updateDictationWaveform, resetDictationWaveform, modelDisplayName } from './waveform.js';
-import { syncBackgroundUiControls } from './settings/background-ui.js';
-import { instructionHotkeyLabel, isHoldToTalkHotkey, idlePillMessage } from './settings/hotkeys.js';
+import { updateDictationWaveform, resetDictationWaveform } from './waveform.js';
+import { modelDisplayName } from './labels.js';
+import { syncBackgroundUiControls } from './settings/background-ui-controls.js';
+import { instructionHotkeyLabel, isHoldToTalkHotkey, idlePillMessage } from './settings/hotkey-logic.js';
 import { syncDictationHotkeyUi } from './settings/hotkey-ui.js';
-import { getSelectedDictationModel, updateModelActionLabels } from './onboarding/models.js';
+import { getSelectedDictationModel, updateModelActionLabels } from './onboarding/model-selection.js';
 
 export function setUiMode(mode) {
   document.body.dataset.mode = mode;

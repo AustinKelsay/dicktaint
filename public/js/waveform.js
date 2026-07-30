@@ -3,10 +3,7 @@ import { dom } from './dom-elements.js';
 import { state } from './state.js';
 import { DICTATION_WAVEFORM_BAR_COUNT } from './constants.js';
 
-export function modelDisplayName(model) {
-  return String(model?.display_name || '').replace(/\s+\(Selected\)$/u, '').trim();
-}
-
+export { modelDisplayName } from './labels.js';
 
 export function clampAudioLevel(value) {
   const numeric = Number(value);

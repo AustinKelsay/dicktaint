@@ -4,14 +4,21 @@ import { state } from './state.js';
 import { DICTATION_HISTORY_LIMIT } from './constants.js';
 import { getErrorMessage } from './platform.js';
 import { setStatus } from './ui.js';
-import { appendToDraftTranscript } from './transcript.js';
+import { appendToDraftTranscript } from './draft-transcript.js';
 
+/**
+ * @returns {string} Unique history entry id.
+ */
 export function nextDictationHistoryId() {
   state.dictationHistorySeq += 1;
   return `dict-${Date.now()}-${state.dictationHistorySeq}`;
 }
 
-
+/**
+ * Pushes a transcript chunk onto recent history and re-renders the list.
+ * @param {string} chunk
+ * @param {string} [source]
+ */
 export function pushDictationHistory(chunk, source = 'native') {
   const trimmed = String(chunk || '').trim();
   if (!trimmed) return;
@@ -28,24 +35,29 @@ export function pushDictationHistory(chunk, source = 'native') {
 }
 
 /**
- * Attempts to record a native session as committed.
- * Returns false when a duplicate session id is detected; null/empty ids return true.
+ * @param {string} historyId
+ * @returns {object | null}
  */
-
 export function findDictationHistoryEntry(historyId) {
   const id = String(historyId || '').trim();
   if (!id) return null;
   return state.dictationHistory.find((entry) => entry.id === id) || null;
 }
 
-
+/**
+ * @param {string} value
+ * @returns {string}
+ */
 export function formatHistoryTimestamp(value) {
   const date = new Date(value);
   if (Number.isNaN(date.getTime())) return '';
   return date.toLocaleTimeString([], { hour: 'numeric', minute: '2-digit' });
 }
 
-
+/**
+ * @param {string} source
+ * @returns {string}
+ */
 export function historySourceLabel(source) {
   const value = String(source || '').trim().toLowerCase();
   if (value === 'web') return 'WEB';
@@ -53,7 +65,10 @@ export function historySourceLabel(source) {
   return 'DICTATION';
 }
 
-
+/**
+ * @param {string} text
+ * @returns {Promise<boolean>}
+ */
 export async function copyTextToClipboard(text) {
   const trimmed = String(text || '').trim();
   if (!trimmed) return false;
@@ -75,7 +90,12 @@ export async function copyTextToClipboard(text) {
   return false;
 }
 
-
+/**
+ * Runs a history row action (reinsert / copy).
+ * @param {string} historyAction
+ * @param {string} historyId
+ * @returns {Promise<boolean>}
+ */
 export async function runDictationHistoryAction(historyAction, historyId) {
   const action = String(historyAction || '').trim();
   const id = String(historyId || '').trim();
@@ -114,7 +134,7 @@ export async function runDictationHistoryAction(historyAction, historyId) {
   return false;
 }
 
-
+/** Renders the recent dictation history list. */
 export function renderDictationHistory() {
   if (!dom.dictationHistorySection || !dom.dictationHistoryListEl || !dom.dictationHistoryEmptyEl) return;
   dom.dictationHistorySection.hidden = false;
@@ -164,4 +184,3 @@ export function renderDictationHistory() {
     dom.dictationHistoryListEl.appendChild(item);
   }
 }
-

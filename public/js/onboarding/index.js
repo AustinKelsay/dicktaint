@@ -2,26 +2,32 @@
 import { dom } from '../dom-elements.js';
 import { state } from '../state.js';
 import {
-  DEFAULT_DICTATION_HOTKEY, DEFAULT_PILL_VISIBILITY_MODE, DEFAULT_MENU_BAR_MODE,
+  DEFAULT_PILL_VISIBILITY_MODE, DEFAULT_MENU_BAR_MODE,
   DEFAULT_CLOSE_ACTION, MAC_DESKTOP_ONLY_MESSAGE
 } from '../constants.js';
 import {
   getTauriInvoke, detectDesktopOs, isNativeDesktopMode, isFocusedMacDesktopMode, getErrorMessage
 } from '../platform.js';
-import { applyBackgroundUiPreferencesPayload } from '../settings/background-ui.js';
+import { applyBackgroundUiPreferencesPayload } from '../settings/background-ui-controls.js';
 import { applyDictationHotkeyPayload } from '../settings/hotkeys.js';
 import { applyFocusedFieldInsertPayload, setFocusedFieldInsertStatus } from '../settings/focused-field-insert.js';
 import { renderInputDeviceOptions } from '../settings/input-device.js';
 import {
   describeDeviceProfile, renderDictationModelOptions
 } from './models.js';
-import { modelDisplayName } from '../waveform.js';
+import { modelDisplayName } from '../labels.js';
 import {
   setStatus, setAppScreen, setSetupScreenMode, syncFlowForSetupReadiness,
   setDictationModelStatus, setDictationModelBusy, syncControls
 } from '../ui.js';
 import { syncDictationHotkeyUi } from '../settings/hotkey-ui.js';
+import { registerDictationOnboardingLoader } from './refresh.js';
 
+/**
+ * Loads dictation onboarding/setup state from Tauri (or web bypass).
+ * @param {{ quietStatus?: boolean }} [options]
+ * @returns {Promise<object | null>}
+ */
 export async function loadDictationOnboarding({ quietStatus = false } = {}) {
   // Web/mobile bypass desktop onboarding gates and run with browser/manual input paths.
   if (!isNativeDesktopMode()) {
@@ -287,4 +293,6 @@ export async function loadDictationOnboarding({ quietStatus = false } = {}) {
     return null;
   }
 }
+
+registerDictationOnboardingLoader(loadDictationOnboarding);
 

@@ -6,16 +6,14 @@ import {
   getTauriInvoke, isFocusedMacDesktopMode, getErrorMessage
 } from './platform.js';
 import {
-  listeningStatusForTrigger, completedStatusForTrigger, eventKeyToken, isHoldToTalkHotkey,
-  instructionHotkeyLabel
-} from './settings/hotkeys.js';
+  listeningStatusForTrigger, completedStatusForTrigger, eventKeyToken
+} from './settings/hotkey-logic.js';
 import {
   setUiMode, setStatus, setHotkeyPill, setAppScreen, setDictationState, syncControls
 } from './ui.js';
-import { appendTranscriptChunk } from './transcript.js';
-import { ensureMicrophoneAccess } from './web-speech.js';
+import { appendTranscriptChunk, normalizeNativeSessionId } from './transcript.js';
+import { ensureMicrophoneAccess } from './media-permissions.js';
 import { clampAudioLevel, normalizeLiveAudioBars, updateDictationWaveform } from './waveform.js';
-import { normalizeNativeSessionId } from './transcript.js';
 
 export function normalizeNativeDictationError(text) {
   return String(text || '').trim().toLowerCase();

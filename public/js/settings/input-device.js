@@ -1,17 +1,26 @@
-/** Microphone input device selection. */
+/**
+ * Microphone input device selection.
+ */
 import { dom } from '../dom-elements.js';
 import { state } from '../state.js';
 import { getTauriInvoke, isFocusedMacDesktopMode, getErrorMessage } from '../platform.js';
-import { loadDictationOnboarding } from '../onboarding/index.js';
+import { refreshDictationOnboarding } from '../onboarding/refresh.js';
 import { setStatus, syncControls } from '../ui.js';
 
+/**
+ * @param {string} message
+ * @param {string} [tone]
+ */
 export function setDictationInputStatus(message, tone = 'neutral') {
   if (!dom.dictationInputStatusEl) return;
   dom.dictationInputStatusEl.textContent = message;
   dom.dictationInputStatusEl.dataset.tone = tone;
 }
 
-
+/**
+ * @param {Array<object>} devices
+ * @param {string | null | undefined} selectedDeviceName
+ */
 export function renderInputDeviceOptions(devices, selectedDeviceName) {
   if (!dom.dictationInputSelectEl) return;
 
@@ -46,7 +55,10 @@ export function renderInputDeviceOptions(devices, selectedDeviceName) {
   }
 }
 
-
+/**
+ * Persists preferred input device and refreshes onboarding.
+ * @param {string} deviceName
+ */
 export async function savePreferredInputDevice(deviceName) {
   const tauriInvoke = getTauriInvoke();
   if (!tauriInvoke || !isFocusedMacDesktopMode()) return;
@@ -59,7 +71,7 @@ export async function savePreferredInputDevice(deviceName) {
       deviceName: normalized || null
     });
     state.preferredInputDevice = saved || null;
-    state.currentOnboarding = await loadDictationOnboarding({ quietStatus: true });
+    state.currentOnboarding = await refreshDictationOnboarding({ quietStatus: true });
     setStatus(
       state.preferredInputDevice
         ? `Preferred microphone saved: ${state.preferredInputDevice}.`
@@ -76,4 +88,3 @@ export async function savePreferredInputDevice(deviceName) {
     syncControls();
   }
 }
-

@@ -2,14 +2,24 @@
 import { dom } from '../dom-elements.js';
 import { state } from '../state.js';
 import { getTauriInvoke, isFocusedMacDesktopMode, getErrorMessage } from '../platform.js';
-import { modelDisplayName } from '../waveform.js';
-import { describeMachineLabel } from '../settings/hotkeys.js';
+import { modelDisplayName } from '../labels.js';
+import { describeMachineLabel } from '../settings/hotkey-logic.js';
 import {
   setUiMode, setStatus, setAppScreen, setSetupScreenMode, syncControls,
-  setDictationModelStatus, setDictationModelBusy, syncSetupHealthPills, refreshSelectedModelMeta
+  setDictationModelStatus, setDictationModelBusy, refreshSelectedModelMeta
 } from '../ui.js';
-import { loadDictationOnboarding } from './index.js';
+import { refreshDictationOnboarding } from './refresh.js';
+import {
+  getSelectedDictationModel,
+  updateModelActionLabels
+} from './model-selection.js';
 
+export { getSelectedDictationModel, updateModelActionLabels };
+
+/**
+ * @param {object | null} device
+ * @returns {string}
+ */
 export function describeDeviceProfile(device) {
   if (!device) return '';
   const ram = Number(device.total_memory_gb) || 0;
@@ -18,7 +28,10 @@ export function describeDeviceProfile(device) {
   return `${machine} • ${ram} GB RAM • ${cores} logical CPU cores • ${device.os || 'unknown os'}`;
 }
 
-
+/**
+ * @param {object} model
+ * @returns {string}
+ */
 export function buildDictationModelLabel(model) {
   const fit = model.recommended
     ? 'Recommended'
@@ -27,7 +40,10 @@ export function buildDictationModelLabel(model) {
   return `${modelDisplayName(model)} • ${local} • ${fit}`;
 }
 
-
+/**
+ * @param {Array<object>} models
+ * @param {string} selectedModelId
+ */
 export function renderDictationModelOptions(models, selectedModelId) {
   if (!dom.dictationModelSelect) return;
   const safeModels = Array.isArray(models) ? models : [];
@@ -63,35 +79,7 @@ export function renderDictationModelOptions(models, selectedModelId) {
   refreshSelectedModelMeta();
 }
 
-
-export function getSelectedDictationModel() {
-  const selectedId = (dom.dictationModelSelect?.value || '').trim();
-  if (!selectedId) return null;
-  return state.dictationModels.find((model) => model.id === selectedId) || null;
-}
-
-
-export function updateModelActionLabels() {
-  if (!dom.installDictationModelBtn) return;
-
-  const selected = getSelectedDictationModel();
-  if (!selected) {
-    dom.installDictationModelBtn.textContent = 'Download + Use';
-    return;
-  }
-
-  const isCurrent = Boolean(state.currentOnboarding?.selected_model_exists)
-    && state.currentOnboarding?.selected_model_id === selected.id;
-
-  if (!selected.installed) {
-    dom.installDictationModelBtn.textContent = 'Download + Use';
-    return;
-  }
-
-  dom.installDictationModelBtn.textContent = isCurrent ? 'Using Now' : 'Use Installed';
-}
-
-
+/** Downloads or switches the selected dictation model. */
 export async function installSelectedDictationModel() {
   const tauriInvoke = getTauriInvoke();
   if (!tauriInvoke || !isFocusedMacDesktopMode()) return;
@@ -129,7 +117,7 @@ export async function installSelectedDictationModel() {
     }
 
     await tauriInvoke('install_dictation_model', { model: selected.id });
-    const onboarding = await loadDictationOnboarding({ quietStatus: true });
+    const onboarding = await refreshDictationOnboarding({ quietStatus: true });
     onboardingAfterInstall = onboarding;
 
     if (!onboarding) {
@@ -164,7 +152,7 @@ export async function installSelectedDictationModel() {
   }
 }
 
-
+/** Deletes the selected downloaded model after confirmation. */
 export async function deleteSelectedDictationModel() {
   const tauriInvoke = getTauriInvoke();
   if (!isFocusedMacDesktopMode()) {
@@ -217,7 +205,7 @@ export async function deleteSelectedDictationModel() {
     setStatus(`Deleting ${modelDisplayName(selected)}...`, 'working');
 
     await tauriInvoke('delete_dictation_model', { model: selected.id });
-    const onboarding = await loadDictationOnboarding({ quietStatus: true });
+    const onboarding = await refreshDictationOnboarding({ quietStatus: true });
 
     if (!onboarding) {
       throw new Error('Delete completed, but setup refresh failed. Click Refresh Setup.');
@@ -251,7 +239,7 @@ export async function deleteSelectedDictationModel() {
   }
 }
 
-
+/** Opens the whisper.cpp setup guide. */
 export async function openWhisperSetupPage() {
   const tauriInvoke = getTauriInvoke();
   try {
@@ -266,4 +254,3 @@ export async function openWhisperSetupPage() {
     setStatus(`Could not open setup page: ${details}`, 'error');
   }
 }
-

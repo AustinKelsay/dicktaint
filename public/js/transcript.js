@@ -1,9 +1,20 @@
 /** Draft transcript text and chunk append pipeline. */
-import { dom } from './dom-elements.js';
 import { state } from './state.js';
 import { maybeInsertTranscriptIntoFocusedField } from './settings/focused-field-insert.js';
 import { pushDictationHistory } from './history.js';
+import {
+  setDraftTranscriptText,
+  appendToDraftTranscript
+} from './draft-transcript.js';
 
+export { setDraftTranscriptText, appendToDraftTranscript };
+
+/**
+ * Attempts to record a native session as committed.
+ * Returns false when a duplicate session id is detected; null/empty ids return true.
+ * @param {string | null} sessionId
+ * @returns {boolean}
+ */
 export function tryCommitNativeSession(sessionId) {
   if (!sessionId) return true;
   if (state.committedNativeSessionIds.has(sessionId)) return false;
@@ -15,29 +26,22 @@ export function tryCommitNativeSession(sessionId) {
   return true;
 }
 
-
+/**
+ * @param {unknown} sessionId
+ * @returns {string | null}
+ */
 export function normalizeNativeSessionId(sessionId) {
   if (sessionId === null || sessionId === undefined) return null;
   const normalized = String(sessionId).trim();
   return normalized || null;
 }
 
-
-export function setDraftTranscriptText(text) {
-  state.currentDraftText = String(text || '').trim();
-  dom.transcriptInput.value = state.currentDraftText;
-}
-
-
-export function appendToDraftTranscript(text) {
-  const trimmed = String(text || '').trim();
-  if (!trimmed) return false;
-  state.currentDraftText = `${state.currentDraftText} ${trimmed}`.trim();
-  dom.transcriptInput.value = state.currentDraftText;
-  return true;
-}
-
-
+/**
+ * Appends a finished transcript chunk to draft + history (+ optional focused insert).
+ * @param {string} chunk
+ * @param {{ source?: string, nativeSessionId?: string | null }} [options]
+ * @returns {boolean}
+ */
 export function appendTranscriptChunk(chunk, { source = 'native', nativeSessionId = null } = {}) {
   const trimmed = String(chunk || '').trim();
   if (!trimmed) return false;
@@ -55,4 +59,3 @@ export function appendTranscriptChunk(chunk, { source = 'native', nativeSessionI
   void maybeInsertTranscriptIntoFocusedField(trimmed);
   return true;
 }
-

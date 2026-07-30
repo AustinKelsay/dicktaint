@@ -1,12 +1,16 @@
-/** Hotkey preset chips and permission guidance UI. */
+/**
+ * Hotkey preset chips and permission guidance UI.
+ */
 import { dom } from '../dom-elements.js';
 import { state } from '../state.js';
+import { DEFAULT_DICTATION_HOTKEY } from '../constants.js';
 import { isNativeDesktopMode, isFocusedMacDesktopMode } from '../platform.js';
 import {
   parseHotkeyCombo, getSuggestedHotkeyOptions, describeMachineLabel,
-  instructionHotkeyLabel, setDictationHotkeyStatus
-} from './hotkeys.js';
+  instructionHotkeyLabel
+} from './hotkey-logic.js';
 
+/** Renders suggested hotkey preset chips. */
 export function renderDictationHotkeyPresets() {
   if (!dom.dictationHotkeyPresetsEl) return;
   dom.dictationHotkeyPresetsEl.innerHTML = '';
@@ -26,7 +30,7 @@ export function renderDictationHotkeyPresets() {
   }
 }
 
-
+/** Renders microphone / hotkey / accessibility permission guidance. */
 export function renderPermissionGuidance() {
   if (!dom.dictationPermissionsCardEl || !dom.dictationPermissionSummaryEl || !dom.dictationPermissionListEl) return;
 
@@ -94,7 +98,7 @@ export function renderPermissionGuidance() {
   }
 }
 
-
+/** Syncs hotkey card visibility, input value, presets, and permission guidance. */
 export function syncDictationHotkeyUi() {
   const nativeDesktop = isNativeDesktopMode();
   if (dom.dictationHotkeyCardEl) dom.dictationHotkeyCardEl.hidden = !nativeDesktop;
@@ -112,4 +116,3 @@ export function syncDictationHotkeyUi() {
   renderDictationHotkeyPresets();
   renderPermissionGuidance();
 }
-

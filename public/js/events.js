@@ -1,7 +1,17 @@
-/** DOM and Tauri event wiring for dictation. */
+/**
+ * DOM and Tauri event wiring for dictation.
+ *
+ * Acyclic layering (leaves → orchestration):
+ *   constants/state/dom/platform/labels/media-permissions/draft-transcript
+ *   → hotkey-logic / background-ui-controls / model-selection / waveform
+ *   → history | transcript | hotkey-ui | hotkeys | background-ui | models
+ *   → ui | native-dictation | web-speech | onboarding
+ *   → events (this file)
+ */
 import { dom } from './dom-elements.js';
 import { state } from './state.js';
 import {
+  DEFAULT_DICTATION_HOTKEY,
   DICTATION_HOTKEY_EVENT, DICTATION_STATE_EVENT, DICTATION_AUDIO_LEVEL_EVENT, SpeechRecognitionApi
 } from './constants.js';
 import { isNativeDesktopMode, isFocusedMacDesktopMode, shouldUseTauriCommands, getTauriInvoke, getErrorMessage } from './platform.js';
@@ -9,8 +19,8 @@ import {
   setUiMode, setStatus, setAppScreen, setSetupScreenMode, syncControls, setDictationState,
   setDictationModelStatus, refreshSelectedModelMeta
 } from './ui.js';
-import { modelDisplayName } from './waveform.js';
-import { renderDictationHistory } from './history.js';
+import { modelDisplayName } from './labels.js';
+import { renderDictationHistory, runDictationHistoryAction } from './history.js';
 import { setDraftTranscriptText, appendTranscriptChunk } from './transcript.js';
 import { clearRestartTimer, scheduleRecognitionRestart } from './speech-runtime.js';
 import {
@@ -21,8 +31,9 @@ import {
 import {
   handleDictationHotkeyEvent, beginDictationHotkeyCapture, saveDictationHotkey, clearDictationHotkey
 } from './settings/hotkeys.js';
+import { setDictationHotkeyStatus } from './settings/hotkey-logic.js';
 import {
-  saveFocusedFieldInsertSetting, applyFocusedFieldInsertPayload
+  saveFocusedFieldInsertSetting
 } from './settings/focused-field-insert.js';
 import {
   saveMenuBarMode, saveCloseAction, savePillVisibilityMode
@@ -34,10 +45,12 @@ import {
 } from './onboarding/models.js';
 import { loadDictationOnboarding } from './onboarding/index.js';
 import {
-  describeSpeechError, isFatalSpeechError, ensureMicrophoneAccess
+  describeSpeechError, isFatalSpeechError
 } from './web-speech.js';
+import { ensureMicrophoneAccess } from './media-permissions.js';
 
-export function initDictation() {
+/** Wires Tauri dictation events and native hold/start/stop controls. */
+export function initNativeListeners() {
   const tauriEventApi = window.__TAURI__?.event || null;
   if (isNativeDesktopMode() && tauriEventApi?.listen) {
     tauriEventApi.listen(DICTATION_HOTKEY_EVENT, ({ payload }) => {
@@ -71,6 +84,143 @@ export function initDictation() {
   document.addEventListener('keydown', handleDictationHotkeyEvent);
   document.addEventListener('keyup', handleDictationHotkeyEvent);
 
+  if (!isFocusedMacDesktopMode()) return;
+
+  dom.startDictationBtn.addEventListener('click', () => {
+    startNativeDesktopDictation('button');
+  });
+
+  dom.stopDictationBtn.addEventListener('click', () => {
+    void stopNativeDesktopDictation('button');
+  });
+
+  window.addEventListener('keydown', handleNativeHoldKeydown, true);
+  window.addEventListener('keyup', handleNativeHoldKeyup, true);
+}
+
+/** Wires settings / onboarding UI handlers (macOS desktop only). */
+export function initSettingsListeners() {
+  if (!isFocusedMacDesktopMode()) return;
+
+  if (dom.installDictationModelBtn) {
+    dom.installDictationModelBtn.addEventListener('click', installSelectedDictationModel);
+  }
+  if (dom.deleteDictationModelBtn) {
+    dom.deleteDictationModelBtn.addEventListener('click', deleteSelectedDictationModel);
+  }
+  if (dom.openWhisperSetupBtn) {
+    dom.openWhisperSetupBtn.addEventListener('click', openWhisperSetupPage);
+  }
+  if (dom.retryWhisperCheckBtn) {
+    dom.retryWhisperCheckBtn.addEventListener('click', () => {
+      loadDictationOnboarding();
+    });
+  }
+  if (dom.recordDictationHotkeyBtn) {
+    dom.recordDictationHotkeyBtn.addEventListener('click', beginDictationHotkeyCapture);
+  }
+  if (dom.dictationHotkeyInputEl) {
+    dom.dictationHotkeyInputEl.addEventListener('input', (event) => {
+      state.pendingDictationHotkey = String(event?.currentTarget?.value || '').trim();
+      state.isCapturingDictationHotkey = false;
+      if (!state.pendingDictationHotkey) {
+        setDictationHotkeyStatus(`Hotkey disabled. Default: ${state.defaultDictationHotkey}.`, 'neutral');
+      } else {
+        setDictationHotkeyStatus(`Pending hotkey: ${state.pendingDictationHotkey}. Click "Save Hotkey" to apply.`, 'neutral');
+      }
+      syncControls();
+    });
+  }
+  if (dom.dictationHotkeyPresetsEl) {
+    dom.dictationHotkeyPresetsEl.addEventListener('click', (event) => {
+      const target = event.target instanceof Element
+        ? event.target.closest('button[data-hotkey-preset]')
+        : null;
+      if (!target) return;
+
+      state.pendingDictationHotkey = String(target.dataset.hotkeyPreset || '').trim();
+      state.isCapturingDictationHotkey = false;
+      if (dom.dictationHotkeyInputEl) {
+        dom.dictationHotkeyInputEl.value = state.pendingDictationHotkey;
+      }
+      setDictationHotkeyStatus(`Preset selected: ${state.pendingDictationHotkey}. Click "Save Hotkey" to apply.`, 'neutral');
+      syncControls();
+    });
+  }
+  if (dom.saveDictationHotkeyBtn) {
+    dom.saveDictationHotkeyBtn.addEventListener('click', async () => {
+      const nextValue = String(dom.dictationHotkeyInputEl?.value || state.pendingDictationHotkey || '').trim();
+      await saveDictationHotkey(nextValue);
+    });
+  }
+  if (dom.resetDictationHotkeyBtn) {
+    dom.resetDictationHotkeyBtn.addEventListener('click', async () => {
+      state.pendingDictationHotkey = state.defaultDictationHotkey || DEFAULT_DICTATION_HOTKEY;
+      await saveDictationHotkey(state.pendingDictationHotkey);
+    });
+  }
+  if (dom.clearDictationHotkeyBtn) {
+    dom.clearDictationHotkeyBtn.addEventListener('click', clearDictationHotkey);
+  }
+  if (dom.focusedFieldInsertToggleEl) {
+    dom.focusedFieldInsertToggleEl.addEventListener('change', (event) => {
+      const next = Boolean(event?.currentTarget?.checked);
+      void saveFocusedFieldInsertSetting(next);
+    });
+  }
+  if (dom.menuBarModeSelectEl) {
+    dom.menuBarModeSelectEl.addEventListener('change', (event) => {
+      const next = String(event?.currentTarget?.value || '').trim();
+      void saveMenuBarMode(next);
+    });
+  }
+  if (dom.closeActionSelectEl) {
+    dom.closeActionSelectEl.addEventListener('change', (event) => {
+      const next = String(event?.currentTarget?.value || '').trim();
+      void saveCloseAction(next);
+    });
+  }
+  if (dom.pillVisibilityModeSelectEl) {
+    dom.pillVisibilityModeSelectEl.addEventListener('change', (event) => {
+      const next = String(event?.currentTarget?.value || '').trim();
+      void savePillVisibilityMode(next);
+    });
+  }
+  if (dom.dictationInputSelectEl) {
+    dom.dictationInputSelectEl.addEventListener('change', (event) => {
+      const nextValue = String(event?.currentTarget?.value || '').trim();
+      void savePreferredInputDevice(nextValue);
+    });
+  }
+  if (dom.dictationModelSelect) {
+    dom.dictationModelSelect.addEventListener('change', () => {
+      const selected = getSelectedDictationModel();
+      if (!selected) {
+        setDictationModelStatus('Pick a model to manage download/use state.', 'neutral');
+      } else if (selected.installed) {
+        const isCurrent = Boolean(state.currentOnboarding?.selected_model_exists)
+          && state.currentOnboarding?.selected_model_id === selected.id;
+        setDictationModelStatus(
+          isCurrent
+            ? `${modelDisplayName(selected)} is active for dictation.`
+            : `${modelDisplayName(selected)} is installed. Click "Use Installed" to switch.`,
+          'neutral'
+        );
+      } else {
+        setDictationModelStatus(
+          `${modelDisplayName(selected)} is not downloaded yet. Click "Download + Use" to install it.`,
+          'neutral'
+        );
+      }
+      refreshSelectedModelMeta();
+      updateModelActionLabels();
+      syncControls();
+    });
+  }
+}
+
+/** Wires shared transcript / history / navigation controls. */
+export function initSharedUiListeners() {
   dom.clearTranscriptBtn.addEventListener('click', () => {
     const tauriInvoke = shouldUseTauriCommands() ? getTauriInvoke() : null;
     if (tauriInvoke) {
@@ -147,143 +297,10 @@ export function initDictation() {
       setStatus('Settings opened. Manage local model setup here.', 'neutral');
     });
   }
+}
 
-  if (isFocusedMacDesktopMode()) {
-    if (dom.installDictationModelBtn) {
-      dom.installDictationModelBtn.addEventListener('click', installSelectedDictationModel);
-    }
-    if (dom.deleteDictationModelBtn) {
-      dom.deleteDictationModelBtn.addEventListener('click', deleteSelectedDictationModel);
-    }
-    if (dom.openWhisperSetupBtn) {
-      dom.openWhisperSetupBtn.addEventListener('click', openWhisperSetupPage);
-    }
-    if (dom.retryWhisperCheckBtn) {
-      dom.retryWhisperCheckBtn.addEventListener('click', () => {
-        loadDictationOnboarding();
-      });
-    }
-    if (dom.recordDictationHotkeyBtn) {
-      dom.recordDictationHotkeyBtn.addEventListener('click', beginDictationHotkeyCapture);
-    }
-    if (dom.dictationHotkeyInputEl) {
-      dom.dictationHotkeyInputEl.addEventListener('input', (event) => {
-        state.pendingDictationHotkey = String(event?.currentTarget?.value || '').trim();
-        state.isCapturingDictationHotkey = false;
-        if (!state.pendingDictationHotkey) {
-          setDictationHotkeyStatus(`Hotkey disabled. Default: ${state.defaultDictationHotkey}.`, 'neutral');
-        } else {
-          setDictationHotkeyStatus(`Pending hotkey: ${state.pendingDictationHotkey}. Click "Save Hotkey" to apply.`, 'neutral');
-        }
-        syncControls();
-      });
-    }
-    if (dom.dictationHotkeyPresetsEl) {
-      dom.dictationHotkeyPresetsEl.addEventListener('click', (event) => {
-        const target = event.target instanceof Element
-          ? event.target.closest('button[data-hotkey-preset]')
-          : null;
-        if (!target) return;
-
-        state.pendingDictationHotkey = String(target.dataset.hotkeyPreset || '').trim();
-        state.isCapturingDictationHotkey = false;
-        if (dom.dictationHotkeyInputEl) {
-          dom.dictationHotkeyInputEl.value = state.pendingDictationHotkey;
-        }
-        setDictationHotkeyStatus(`Preset selected: ${state.pendingDictationHotkey}. Click "Save Hotkey" to apply.`, 'neutral');
-        syncControls();
-      });
-    }
-    if (dom.saveDictationHotkeyBtn) {
-      dom.saveDictationHotkeyBtn.addEventListener('click', async () => {
-        const nextValue = String(dom.dictationHotkeyInputEl?.value || state.pendingDictationHotkey || '').trim();
-        await saveDictationHotkey(nextValue);
-      });
-    }
-    if (dom.resetDictationHotkeyBtn) {
-      dom.resetDictationHotkeyBtn.addEventListener('click', async () => {
-        state.pendingDictationHotkey = state.defaultDictationHotkey || DEFAULT_DICTATION_HOTKEY;
-        await saveDictationHotkey(state.pendingDictationHotkey);
-      });
-    }
-    if (dom.clearDictationHotkeyBtn) {
-      dom.clearDictationHotkeyBtn.addEventListener('click', clearDictationHotkey);
-    }
-    if (dom.focusedFieldInsertToggleEl) {
-      dom.focusedFieldInsertToggleEl.addEventListener('change', (event) => {
-        const next = Boolean(event?.currentTarget?.checked);
-        void saveFocusedFieldInsertSetting(next);
-      });
-    }
-    if (dom.menuBarModeSelectEl) {
-      dom.menuBarModeSelectEl.addEventListener('change', (event) => {
-        const next = String(event?.currentTarget?.value || '').trim();
-        void saveMenuBarMode(next);
-      });
-    }
-    if (dom.closeActionSelectEl) {
-      dom.closeActionSelectEl.addEventListener('change', (event) => {
-        const next = String(event?.currentTarget?.value || '').trim();
-        void saveCloseAction(next);
-      });
-    }
-    if (dom.pillVisibilityModeSelectEl) {
-      dom.pillVisibilityModeSelectEl.addEventListener('change', (event) => {
-        const next = String(event?.currentTarget?.value || '').trim();
-        void savePillVisibilityMode(next);
-      });
-    }
-    if (dom.dictationInputSelectEl) {
-      dom.dictationInputSelectEl.addEventListener('change', (event) => {
-        const nextValue = String(event?.currentTarget?.value || '').trim();
-        void savePreferredInputDevice(nextValue);
-      });
-    }
-    if (dom.dictationModelSelect) {
-      dom.dictationModelSelect.addEventListener('change', () => {
-        const selected = getSelectedDictationModel();
-        if (!selected) {
-          setDictationModelStatus('Pick a model to manage download/use state.', 'neutral');
-        } else if (selected.installed) {
-          const isCurrent = Boolean(state.currentOnboarding?.selected_model_exists)
-            && state.currentOnboarding?.selected_model_id === selected.id;
-          setDictationModelStatus(
-            isCurrent
-              ? `${modelDisplayName(selected)} is active for dictation.`
-              : `${modelDisplayName(selected)} is installed. Click "Use Installed" to switch.`,
-            'neutral'
-          );
-        } else {
-          setDictationModelStatus(
-            `${modelDisplayName(selected)} is not downloaded yet. Click "Download + Use" to install it.`,
-            'neutral'
-          );
-        }
-        refreshSelectedModelMeta();
-        updateModelActionLabels();
-        syncControls();
-      });
-    }
-
-    dom.startDictationBtn.addEventListener('click', () => {
-      startNativeDesktopDictation('button');
-    });
-
-    dom.stopDictationBtn.addEventListener('click', () => {
-      void stopNativeDesktopDictation('button');
-    });
-
-    window.addEventListener('keydown', handleNativeHoldKeydown, true);
-    window.addEventListener('keyup', handleNativeHoldKeyup, true);
-    syncControls();
-    return;
-  }
-
-  if (isNativeDesktopMode() && !isFocusedMacDesktopMode()) {
-    syncControls();
-    return;
-  }
-
+/** Wires browser SpeechRecognition start/stop (non-native path). */
+export function initWebSpeechDictation() {
   if (!SpeechRecognitionApi) {
     syncControls();
     return;
@@ -383,3 +400,21 @@ export function initDictation() {
   });
 }
 
+/** Orchestrates native / settings / web dictation event wiring. */
+export function initDictation() {
+  initSharedUiListeners();
+  initNativeListeners();
+
+  if (isFocusedMacDesktopMode()) {
+    initSettingsListeners();
+    syncControls();
+    return;
+  }
+
+  if (isNativeDesktopMode() && !isFocusedMacDesktopMode()) {
+    syncControls();
+    return;
+  }
+
+  initWebSpeechDictation();
+}

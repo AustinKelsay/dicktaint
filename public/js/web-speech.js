@@ -1,10 +1,8 @@
-/** Browser SpeechRecognition dictation path. */
+/** Browser SpeechRecognition dictation path (mic probe lives in media-permissions.js). */
 import { state } from './state.js';
-import { SpeechRecognitionApi } from './constants.js';
-import { isFocusedMacDesktopMode, getErrorMessage } from './platform.js';
-import { setUiMode, setStatus, setDictationState, syncControls } from './ui.js';
-import { appendTranscriptChunk } from './transcript.js';
-import { clearRestartTimer, scheduleRecognitionRestart } from './speech-runtime.js';
+import { isFocusedMacDesktopMode } from './platform.js';
+
+export { ensureMicrophoneAccess } from './media-permissions.js';
 
 export function describeSpeechError(errorCode) {
   if (errorCode === 'not-allowed' || errorCode === 'service-not-allowed') {
@@ -45,17 +43,5 @@ export function describeSpeechError(errorCode) {
 
 export function isFatalSpeechError(errorCode) {
   return ['not-allowed', 'service-not-allowed', 'audio-capture', 'network', 'language-not-supported'].includes(errorCode);
-}
-
-
-export async function ensureMicrophoneAccess() {
-  if (isFocusedMacDesktopMode()) return;
-  if (!navigator.mediaDevices?.getUserMedia) return;
-
-  const stream = await navigator.mediaDevices.getUserMedia({ audio: true });
-  state.hasMicrophoneAccess = true;
-  for (const track of stream.getTracks()) {
-    track.stop();
-  }
 }
 
