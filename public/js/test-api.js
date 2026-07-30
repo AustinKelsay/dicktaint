@@ -23,6 +23,8 @@ import {
   installSelectedDictationModel,
   deleteSelectedDictationModel
 } from './onboarding/models.js';
+// Ensure onboarding loader registration even when tests import test-api without app.js.
+import './onboarding/index.js';
 import { isFatalSpeechError, describeSpeechError } from './web-speech.js';
 import { scheduleRecognitionRestart, clearRestartTimer } from './speech-runtime.js';
 import { summarizeHotkeyPillStatus, syncControls, setHotkeyPill, emitHotkeyPillOverlay } from './ui.js';
