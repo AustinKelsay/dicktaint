@@ -12,9 +12,20 @@ import {
   queueNativeStartAfterCurrentStop,
   maybeStartQueuedNativeDictation
 } from './native-dictation.js';
-import { applyDictationHotkeyPayload } from './settings/hotkeys.js';
+import { applyDictationHotkeyPayload, saveDictationHotkey, clearDictationHotkey } from './settings/hotkeys.js';
 import { applyBackgroundUiPreferencesPayload } from './settings/background-ui.js';
-import { summarizeHotkeyPillStatus, syncControls } from './ui.js';
+import {
+  applyFocusedFieldInsertPayload,
+  saveFocusedFieldInsertSetting,
+  maybeInsertTranscriptIntoFocusedField
+} from './settings/focused-field-insert.js';
+import {
+  installSelectedDictationModel,
+  deleteSelectedDictationModel
+} from './onboarding/models.js';
+import { isFatalSpeechError, describeSpeechError } from './web-speech.js';
+import { scheduleRecognitionRestart, clearRestartTimer } from './speech-runtime.js';
+import { summarizeHotkeyPillStatus, syncControls, setHotkeyPill, emitHotkeyPillOverlay } from './ui.js';
 import {
   handleNativeDictationStatePayload,
   handleNativeDictationAudioLevelPayload
@@ -42,12 +53,20 @@ export function getDictationTestState() {
     pendingDictationHotkey: state.pendingDictationHotkey,
     pillVisibilityMode: state.pillVisibilityMode,
     menuBarMode: state.menuBarMode,
-    closeAction: state.closeAction
+    closeAction: state.closeAction,
+    focusedFieldInsertEnabled: state.focusedFieldInsertEnabled,
+    focusedFieldInsertPermissionGranted: state.focusedFieldInsertPermissionGranted,
+    focusedFieldInsertPermissionStatus: state.focusedFieldInsertPermissionStatus,
+    whisperCliAvailable: state.whisperCliAvailable,
+    nativeDictationModelReady: state.nativeDictationModelReady,
+    hasRestartTimer: Boolean(state.restartTimer),
+    shouldKeepDictating: state.shouldKeepDictating
   };
 }
 
 /** Resets mutable dictation state to a predictable baseline for isolated tests. */
 export function resetDictationStateForTests() {
+  clearRestartTimer();
   state.dictationHistory = [];
   state.dictationHistorySeq = 0;
   state.isDictating = false;
@@ -64,8 +83,10 @@ export function resetDictationStateForTests() {
   state.dictationTriggerMode = 'disabled';
   state.dictationTriggerStatus = 'Hotkey disabled.';
   state.dictationTriggerPermissionHint = '';
+  state.focusedFieldInsertEnabled = false;
   state.focusedFieldInsertPermissionGranted = false;
   state.focusedFieldInsertPermissionStatus = 'Focused-field insertion is disabled.';
+  state.isSavingFocusedFieldInsertSetting = false;
   state.pillVisibilityMode = DEFAULT_PILL_VISIBILITY_MODE;
   state.menuBarMode = DEFAULT_MENU_BAR_MODE;
   state.closeAction = DEFAULT_CLOSE_ACTION;
@@ -76,6 +97,7 @@ export function resetDictationStateForTests() {
   state.currentDeviceProfile = { os: 'macos', architecture: 'aarch64' };
   state.liveAudioLevel = 0;
   state.liveAudioBars = defaultLiveAudioBars();
+  state.recognition = null;
   setDraftTranscriptText('');
   renderDictationHistory();
   resetDictationWaveform('idle');
@@ -92,7 +114,20 @@ export function createTestApi() {
     setDraftTranscriptText,
     applyDictationHotkeyPayload,
     applyBackgroundUiPreferencesPayload,
+    applyFocusedFieldInsertPayload,
+    saveDictationHotkey,
+    clearDictationHotkey,
+    saveFocusedFieldInsertSetting,
+    maybeInsertTranscriptIntoFocusedField,
+    installSelectedDictationModel,
+    deleteSelectedDictationModel,
+    isFatalSpeechError,
+    describeSpeechError,
+    scheduleRecognitionRestart,
+    clearRestartTimer,
     summarizeHotkeyPillStatus,
+    setHotkeyPill,
+    emitHotkeyPillOverlay,
     handleNativeDictationStatePayload,
     handleNativeDictationAudioLevelPayload,
     getState: getDictationTestState,
@@ -109,10 +144,26 @@ export function createTestApi() {
       if (typeof next.pendingNativeStartTrigger === 'string' || next.pendingNativeStartTrigger === null) {
         state.pendingNativeStartTrigger = next.pendingNativeStartTrigger;
       }
+      if (typeof next.shouldKeepDictating === 'boolean') {
+        state.shouldKeepDictating = next.shouldKeepDictating;
+      }
+      if (typeof next.focusedFieldInsertEnabled === 'boolean') {
+        state.focusedFieldInsertEnabled = next.focusedFieldInsertEnabled;
+      }
+      if (typeof next.whisperCliAvailable === 'boolean') {
+        state.whisperCliAvailable = next.whisperCliAvailable;
+      }
       syncControls();
     },
     setStartNativeDesktopDictationOverride(fn) {
       state.startNativeDesktopDictationOverride = typeof fn === 'function' ? fn : null;
+    },
+    /**
+     * Installs a mock SpeechRecognition instance used by restart scheduling tests.
+     * @param {{ start?: () => void, stop?: () => void } | null} recognition
+     */
+    setRecognition(recognition) {
+      state.recognition = recognition;
     }
   };
 }
