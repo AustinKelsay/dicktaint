@@ -2,7 +2,7 @@
 
 ## Status Snapshot
 
-- Date: 2026-02-17
+- Date: 2026-07-30
 - Priority order: macOS desktop -> iPhone iOS -> web fallback
 
 ## Purpose
@@ -23,7 +23,7 @@ Out of scope:
 ## Source Anchors
 
 - `public/app.js` (ESM entry)
-- `public/js/`
+- `public/js/platform.js`
 - `src-tauri/src/main.rs` (thin entry)
 - `src-tauri/src/commands.rs`
 - `src-tauri/src/hotkey_overlay.rs`
@@ -57,8 +57,8 @@ Android:
 
 Re-verify this document when any of these change:
 
-1. platform guards in `public/app.js`
-2. macOS-specific blocks in `src-tauri/src/main.rs`
+1. platform guards in `public/js/platform.js`
+2. macOS-specific blocks in `src-tauri/src/hotkey_overlay.rs` / `src-tauri/src/commands.rs`
 3. private API config in `src-tauri/tauri.conf.json`
 
 ## Related Docs

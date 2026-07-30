@@ -2,7 +2,7 @@
 
 ## Status Snapshot
 
-- Date: 2026-02-20
+- Date: 2026-07-30
 - Flow descriptions match current app behavior in web and desktop paths
 
 ## Purpose
@@ -27,7 +27,12 @@ Out of scope:
 
 - `public/index.html`
 - `public/app.js` (ESM entry)
-- `public/js/`
+- `public/js/events.js`
+- `public/js/native-dictation.js`
+- `public/js/onboarding/index.js`
+- `public/js/ui.js`
+- `public/pill.html`
+- `public/pill.js`
 - `src-tauri/src/main.rs` (thin entry)
 - `src-tauri/src/commands.rs`
 - `src-tauri/src/hotkey_overlay.rs`
@@ -79,9 +84,10 @@ Web flow:
 
 Re-verify when changing:
 
-1. onboarding and dictation handlers in `public/app.js`
+1. onboarding and dictation handlers in `public/js/events.js`, `public/js/onboarding/index.js`, and `public/js/native-dictation.js`
 2. command implementations in `src-tauri/src/commands.rs`
 3. setup UI structure in `public/index.html`
+4. overlay status / waveform behavior in `public/pill.js`
 
 ## Related Docs
 

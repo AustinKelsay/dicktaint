@@ -2,7 +2,7 @@
 
 ## Status Snapshot
 
-- Date: 2026-02-20
+- Date: 2026-07-30
 - Runtime interfaces: HTTP server contract and Tauri invoke/event contract
 
 ## Purpose
@@ -27,6 +27,10 @@ Out of scope:
 - `src-tauri/src/commands.rs`
 - `src-tauri/src/hotkey_overlay.rs`
 - `src-tauri/src/state.rs`
+- `public/js/constants.js`
+- `public/js/events.js`
+- `public/js/ui.js`
+- `public/pill.js`
 
 ## Contract
 
@@ -63,9 +67,11 @@ Command payload notes:
 Event channels:
 
 - frontend local fallback only: `dictation:hotkey-triggered` payload `{ pressed }`
-- backend to frontend: `dictation:state-changed` payload `{ state, error?, transcript?, session_id? }`
+- backend to frontend (and overlay): `dictation:state-changed` payload `{ state, error?, transcript?, session_id? }`
+- backend to frontend/overlay: `dictation:audio-level` payload `{ level, bars?, session_id? }`
 - backend/frontend to overlay: `dicktaint://pill-status` payload `{ message, state, visible }`
 - allowed `state`: `idle`, `working`, `live`, `ok`, `error`
+- event name constants: SPA in `public/js/constants.js`; overlay duplicates strings in `public/pill.js`
 
 Environment variables with contract impact:
 
@@ -79,7 +85,7 @@ Re-verify this file when these change:
 
 1. route handling in `server.js`
 2. `tauri::generate_handler!` registrations wired from `src-tauri/src/main.rs` (handlers in `src-tauri/src/commands.rs`)
-3. event names or payload fields in `public/js/` and `public/pill.js`
+3. event names or payload fields in `public/js/constants.js`, `public/js/events.js`, `public/js/ui.js`, and `public/pill.js`
 
 ## Related Docs
 

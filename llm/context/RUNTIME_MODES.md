@@ -2,7 +2,7 @@
 
 ## Status Snapshot
 
-- Date: 2026-02-17
+- Date: 2026-07-30
 - Runtime split is determined by Tauri bridge presence, UA platform classification, and browser speech API support
 
 ## Purpose
@@ -24,13 +24,14 @@ Out of scope:
 ## Source Anchors
 
 - `public/app.js` (ESM entry)
-- `public/js/`
+- `public/js/platform.js`
+- `public/js/constants.js`
 - `server.js`
 - `package.json`
 
 ## Current State
 
-Mode detection primitives:
+Mode detection primitives (in `public/js/platform.js` / `public/js/constants.js`):
 
 - `isNativeDesktopMode()`
 - `isFocusedMacDesktopMode()`
@@ -51,7 +52,7 @@ Rule of thumb:
 
 Re-verify runtime mode docs when these change:
 
-1. mode helper functions in `public/app.js`
+1. mode helper functions in `public/js/platform.js`
 2. Tauri scripts in `package.json`
 3. server behavior in `server.js`
 

@@ -2,8 +2,9 @@
 
 ## Status Snapshot
 
-- Date: 2026-02-20
-- Frontend runtime split is implemented in `public/app.js`
+- Date: 2026-07-30
+- Frontend runtime split: `public/app.js` ESM entry loads domain modules under `public/js/`
+- Overlay runtime is separate: `public/pill.html` loads `public/pill.js`
 
 ## Purpose
 
@@ -25,15 +26,21 @@ Out of scope:
 ## Source Anchors
 
 - `public/app.js` (ESM entry)
-- `public/js/` (frontend domain modules)
+- `public/js/platform.js`
+- `public/js/events.js`
+- `public/js/ui.js`
+- `public/js/native-dictation.js`
+- `public/js/onboarding/index.js`
+- `public/js/constants.js`
 - `public/index.html`
+- `public/pill.html`
 - `public/pill.js`
 
 ## Contract
 
 Runtime routing:
 
-- `isFocusedMacDesktopMode()` -> native desktop dictation command path
+- `isFocusedMacDesktopMode()` (`public/js/platform.js`) -> native desktop dictation command path
 - web path -> browser speech recognition when supported
 - non-mac native desktop -> unsupported desktop messaging path
 
@@ -59,20 +66,22 @@ Browser speech path:
 
 Status to overlay mapping:
 
-- `setStatus()` calls overlay sync and emits `dicktaint://pill-status`
+- `setStatus()` in `public/js/ui.js` calls overlay sync and emits `dicktaint://pill-status`
+- overlay listeners and audio-level waveform live in `public/pill.js`
 
 Invariants:
 
 - runtime mode is authoritative for command path selection
-- UI controls reflect lock/busy/setup states through `syncControls()`
+- UI controls reflect lock/busy/setup states through `syncControls()` in `public/js/ui.js`
 
 ## Verification
 
-Re-verify after `public/app.js` changes:
+Re-verify after `public/js/` or `public/pill.js` changes:
 
 1. mac desktop: onboarding gate, start/stop flow, status updates
 2. web mode: speech path and manual input fallback
 3. overlay event emission for status changes
+4. overlay waveform updates while listening (`dictation:audio-level`)
 
 ## Related Docs
 

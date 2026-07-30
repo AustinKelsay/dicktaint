@@ -2,8 +2,9 @@
 
 ## Status Snapshot
 
-- Date: 2026-02-20
+- Date: 2026-07-30
 - hold-to-talk and overlay behavior are macOS-focused MVP features
+- overlay document is `public/pill.html`; live runtime is `public/pill.js`
 
 ## Purpose
 
@@ -30,7 +31,11 @@ Out of scope:
 - `src-tauri/src/hotkey_overlay.rs`
 - `src-tauri/src/state.rs`
 - `public/app.js` (ESM entry)
-- `public/js/`
+- `public/js/events.js`
+- `public/js/native-dictation.js`
+- `public/js/ui.js`
+- `public/js/constants.js`
+- `public/pill.html`
 - `public/pill.js`
 - `src-tauri/tauri.conf.json`
 
@@ -57,6 +62,12 @@ Frontend behavior:
 - onboarding/settings surface hotkey runtime state plus permission guidance
 - finalized transcript appends locally and can optionally paste into the focused field when setting is enabled and another app is focused
 
+Overlay window (`public/pill.html` + `public/pill.js`):
+
+- classic script (not SPA ESM); event name strings mirror `public/js/constants.js`
+- listens for `dicktaint://pill-status`, `dictation:state-changed`, `dictation:audio-level`, and `dictation:hotkey-triggered`
+- renders icon / audio-level waveform / spinner states (not text-label pill UI)
+
 Permission expectations:
 
 - Input Monitoring and Accessibility may be required for global key monitoring
@@ -75,7 +86,7 @@ Manual verification after hotkey/overlay edits:
 3. hold/release `fn` and speak
 4. reopen app and verify transcript append
 5. enable focused-field insertion, focus another app text field, repeat hold/release flow, verify paste
-6. verify overlay status transitions across lifecycle
+6. verify overlay status transitions across lifecycle (including audio-level waveform while listening)
 
 ## Related Docs
 

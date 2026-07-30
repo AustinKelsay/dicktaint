@@ -2,7 +2,7 @@
 
 ## Status Snapshot
 
-- Date: 2026-03-21
+- Date: 2026-07-30
 - Product focus: private local-first dictation
 - MVP platform priority: macOS desktop, then iPhone iOS, then web fallback
 
@@ -26,7 +26,10 @@ Out of scope:
 ## Source Anchors
 
 - `public/app.js` (ESM entry)
-- `public/js/`
+- `public/js/platform.js`
+- `public/js/events.js`
+- `public/pill.html`
+- `public/pill.js`
 - `server.js`
 - `src-tauri/src/main.rs` (thin entry)
 - `src-tauri/src/commands.rs`
@@ -61,9 +64,10 @@ Key policy:
 
 Validate this document when any of these change:
 
-1. app runtime mode detection in `public/js/platform.js` / `public/app.js`
+1. app runtime mode detection in `public/js/platform.js` (bootstrapped from `public/app.js`)
 2. command/event registrations across `src-tauri/src/commands.rs` and `src-tauri/src/hotkey_overlay.rs`
 3. desktop bundle/runtime config in `src-tauri/tauri.conf.json`
+4. overlay runtime in `public/pill.html` / `public/pill.js`
 
 ## Related Docs
 
