@@ -1,14 +1,13 @@
 //! Shared application state: constants, configuration types, and dictation settings.
 
 use serde::{Deserialize, Serialize};
-use std::path::{Path, PathBuf};
+use std::path::PathBuf;
 use std::sync::{mpsc, Arc, Mutex};
 #[cfg(target_os = "macos")]
 use std::ffi::c_void;
-use std::sync::atomic::{AtomicU64, Ordering};
+use std::sync::atomic::AtomicU64;
 use std::thread;
 use std::time::Instant;
-use cpal::Stream;
 #[cfg(target_os = "macos")]
 use tauri::menu::MenuItem;
 
@@ -307,6 +306,38 @@ impl PillVisibilityMode {
     }
 }
 
+/// Parses a pill visibility mode string. Rejects unsupported values.
+pub(crate) fn parse_pill_visibility_mode(value: &str) -> Result<PillVisibilityMode, String> {
+    match value.trim() {
+        "off" => Ok(PillVisibilityMode::Off),
+        "active-only" => Ok(PillVisibilityMode::ActiveOnly),
+        "always" => Ok(PillVisibilityMode::Always),
+        other => Err(format!(
+            "Unsupported pill visibility mode '{}'. Use off, active-only, or always.",
+            other
+        )),
+    }
+}
+
+/// Resolves pill visibility from settings; invalid or missing values default to ActiveOnly.
+pub(crate) fn resolve_pill_visibility_mode(settings: &LocalSettings) -> PillVisibilityMode {
+    match settings
+        .pill_visibility_mode
+        .as_deref()
+        .map(str::trim)
+        .filter(|value| !value.is_empty())
+    {
+        Some(value) => match parse_pill_visibility_mode(value) {
+            Ok(mode) => mode,
+            Err(_) => {
+                log::warn!("Ignoring invalid persisted pill visibility mode '{value}'");
+                PillVisibilityMode::ActiveOnly
+            }
+        },
+        None => PillVisibilityMode::ActiveOnly,
+    }
+}
+
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub(crate) enum MenuBarMode {
     Always,
@@ -321,6 +352,38 @@ impl MenuBarMode {
             Self::BackgroundOnly => "background-only",
             Self::Off => "off",
         }
+    }
+}
+
+/// Parses a menu bar mode string. Rejects unsupported values.
+pub(crate) fn parse_menu_bar_mode(value: &str) -> Result<MenuBarMode, String> {
+    match value.trim() {
+        "always" => Ok(MenuBarMode::Always),
+        "background-only" => Ok(MenuBarMode::BackgroundOnly),
+        "off" => Ok(MenuBarMode::Off),
+        other => Err(format!(
+            "Unsupported menu bar mode '{}'. Use always, background-only, or off.",
+            other
+        )),
+    }
+}
+
+/// Resolves menu bar mode from settings; invalid or missing values default to Always.
+pub(crate) fn resolve_menu_bar_mode(settings: &LocalSettings) -> MenuBarMode {
+    match settings
+        .menu_bar_mode
+        .as_deref()
+        .map(str::trim)
+        .filter(|value| !value.is_empty())
+    {
+        Some(value) => match parse_menu_bar_mode(value) {
+            Ok(mode) => mode,
+            Err(_) => {
+                log::warn!("Ignoring invalid persisted menu bar mode '{value}'");
+                MenuBarMode::Always
+            }
+        },
+        None => MenuBarMode::Always,
     }
 }
 
@@ -339,11 +402,56 @@ impl CloseAction {
     }
 }
 
+/// Parses a close action string. Rejects unsupported values.
+pub(crate) fn parse_close_action(value: &str) -> Result<CloseAction, String> {
+    match value.trim() {
+        "hide-to-tray" => Ok(CloseAction::HideToTray),
+        "quit" => Ok(CloseAction::Quit),
+        other => Err(format!(
+            "Unsupported close action '{}'. Use hide-to-tray or quit.",
+            other
+        )),
+    }
+}
+
+/// Resolves close action from settings. Menu bar Off forces Quit; otherwise defaults to HideToTray.
+pub(crate) fn resolve_close_action(settings: &LocalSettings, menu_bar_mode: MenuBarMode) -> CloseAction {
+    if menu_bar_mode == MenuBarMode::Off {
+        return CloseAction::Quit;
+    }
+
+    match settings
+        .close_action
+        .as_deref()
+        .map(str::trim)
+        .filter(|value| !value.is_empty())
+    {
+        Some(value) => match parse_close_action(value) {
+            Ok(action) => action,
+            Err(_) => {
+                log::warn!("Ignoring invalid persisted close action '{value}'");
+                CloseAction::HideToTray
+            }
+        },
+        None => CloseAction::HideToTray,
+    }
+}
+
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub(crate) struct BackgroundUiPreferences {
     pub(crate) pill_visibility_mode: PillVisibilityMode,
     pub(crate) menu_bar_mode: MenuBarMode,
     pub(crate) close_action: CloseAction,
+}
+
+/// Resolves the full background UI preference set from persisted local settings.
+pub(crate) fn resolve_background_ui_preferences(settings: &LocalSettings) -> BackgroundUiPreferences {
+    let menu_bar_mode = resolve_menu_bar_mode(settings);
+    BackgroundUiPreferences {
+        pill_visibility_mode: resolve_pill_visibility_mode(settings),
+        close_action: resolve_close_action(settings, menu_bar_mode),
+        menu_bar_mode,
+    }
 }
 
 #[cfg(target_os = "macos")]
@@ -414,51 +522,6 @@ pub(crate) const KEYCODE_V: u16 = 0x09;
 pub(crate) type MacFnEventTapCallback =
     unsafe extern "C" fn(CGEventTapProxy, u32, CGEventRef, *mut c_void) -> CGEventRef;
 
-#[cfg(target_os = "macos")]
-#[link(name = "CoreGraphics", kind = "framework")]
-extern "C" {
-    fn CGEventTapCreate(
-        tap: u32,
-        place: u32,
-        options: u32,
-        events_of_interest: CGEventMask,
-        callback: MacFnEventTapCallback,
-        user_info: *mut c_void,
-    ) -> CFMachPortRef;
-    fn CGEventTapEnable(tap: CFMachPortRef, enable: bool);
-    fn CGEventGetFlags(event: CGEventRef) -> CGEventFlags;
-    fn CGEventCreateKeyboardEvent(
-        source: *const c_void,
-        virtual_key: u16,
-        key_down: bool,
-    ) -> CGEventRef;
-    fn CGEventSetFlags(event: CGEventRef, flags: CGEventFlags);
-    fn CGEventPost(tap: u32, event: CGEventRef);
-}
-
-#[cfg(target_os = "macos")]
-#[link(name = "CoreFoundation", kind = "framework")]
-extern "C" {
-    static kCFAllocatorDefault: CFAllocatorRef;
-    static kCFRunLoopCommonModes: CFStringRef;
-
-    fn CFMachPortCreateRunLoopSource(
-        allocator: CFAllocatorRef,
-        port: CFMachPortRef,
-        order: isize,
-    ) -> CFRunLoopSourceRef;
-    fn CFMachPortInvalidate(port: CFMachPortRef);
-    fn CFRunLoopGetMain() -> CFRunLoopRef;
-    fn CFRunLoopAddSource(rl: CFRunLoopRef, source: CFRunLoopSourceRef, mode: CFStringRef);
-    fn CFRunLoopRemoveSource(rl: CFRunLoopRef, source: CFRunLoopSourceRef, mode: CFStringRef);
-    fn CFRelease(cf: *const c_void);
-}
-
-#[cfg(target_os = "macos")]
-#[link(name = "ApplicationServices", kind = "framework")]
-extern "C" {
-    fn AXIsProcessTrusted() -> bool;
-}
 #[derive(Serialize)]
 pub(crate) struct DeviceProfile {
     pub(crate) total_memory_gb: u64,
@@ -587,4 +650,115 @@ pub(crate) enum BackendHotkeyAction {
     Toggle,
     HoldStart,
     HoldStop,
+}
+
+#[cfg(test)]
+mod tests {
+    use super::{
+        parse_close_action, parse_menu_bar_mode, parse_pill_visibility_mode,
+        resolve_background_ui_preferences, resolve_close_action, resolve_menu_bar_mode,
+        resolve_pill_visibility_mode, CloseAction, LocalSettings, MenuBarMode, PillVisibilityMode,
+    };
+
+    #[test]
+    fn parse_pill_visibility_mode_accepts_valid_values() {
+        assert_eq!(
+            parse_pill_visibility_mode("off").unwrap(),
+            PillVisibilityMode::Off
+        );
+        assert_eq!(
+            parse_pill_visibility_mode("  active-only  ").unwrap(),
+            PillVisibilityMode::ActiveOnly
+        );
+        assert_eq!(
+            parse_pill_visibility_mode("always").unwrap(),
+            PillVisibilityMode::Always
+        );
+    }
+
+    #[test]
+    fn parse_pill_visibility_mode_rejects_invalid_values() {
+        assert!(parse_pill_visibility_mode("nope").is_err());
+        assert!(parse_pill_visibility_mode("").is_err());
+    }
+
+    #[test]
+    fn parse_menu_bar_mode_accepts_valid_values() {
+        assert_eq!(parse_menu_bar_mode("always").unwrap(), MenuBarMode::Always);
+        assert_eq!(
+            parse_menu_bar_mode("background-only").unwrap(),
+            MenuBarMode::BackgroundOnly
+        );
+        assert_eq!(parse_menu_bar_mode("off").unwrap(), MenuBarMode::Off);
+    }
+
+    #[test]
+    fn parse_menu_bar_mode_rejects_invalid_values() {
+        assert!(parse_menu_bar_mode("sometimes").is_err());
+        assert!(parse_menu_bar_mode("").is_err());
+    }
+
+    #[test]
+    fn parse_close_action_accepts_valid_values() {
+        assert_eq!(
+            parse_close_action("hide-to-tray").unwrap(),
+            CloseAction::HideToTray
+        );
+        assert_eq!(parse_close_action(" quit ").unwrap(), CloseAction::Quit);
+    }
+
+    #[test]
+    fn parse_close_action_rejects_invalid_values() {
+        assert!(parse_close_action("minimize").is_err());
+        assert!(parse_close_action("").is_err());
+    }
+
+    #[test]
+    fn resolve_modes_default_when_missing_or_invalid() {
+        let defaults = LocalSettings::default();
+        assert_eq!(
+            resolve_pill_visibility_mode(&defaults),
+            PillVisibilityMode::ActiveOnly
+        );
+        assert_eq!(resolve_menu_bar_mode(&defaults), MenuBarMode::Always);
+        assert_eq!(
+            resolve_close_action(&defaults, MenuBarMode::Always),
+            CloseAction::HideToTray
+        );
+
+        let invalid = LocalSettings {
+            pill_visibility_mode: Some("bogus".to_string()),
+            menu_bar_mode: Some("bogus".to_string()),
+            close_action: Some("bogus".to_string()),
+            ..LocalSettings::default()
+        };
+        assert_eq!(
+            resolve_pill_visibility_mode(&invalid),
+            PillVisibilityMode::ActiveOnly
+        );
+        assert_eq!(resolve_menu_bar_mode(&invalid), MenuBarMode::Always);
+        assert_eq!(
+            resolve_close_action(&invalid, MenuBarMode::Always),
+            CloseAction::HideToTray
+        );
+    }
+
+    #[test]
+    fn resolve_background_ui_preferences_defaults_and_forces_quit_when_menu_bar_off() {
+        let preferences = resolve_background_ui_preferences(&LocalSettings::default());
+        assert_eq!(
+            preferences.pill_visibility_mode,
+            PillVisibilityMode::ActiveOnly
+        );
+        assert_eq!(preferences.menu_bar_mode, MenuBarMode::Always);
+        assert_eq!(preferences.close_action, CloseAction::HideToTray);
+
+        let preferences = resolve_background_ui_preferences(&LocalSettings {
+            menu_bar_mode: Some("off".to_string()),
+            close_action: Some("hide-to-tray".to_string()),
+            ..LocalSettings::default()
+        });
+        assert_eq!(preferences.menu_bar_mode, MenuBarMode::Off);
+        assert_eq!(preferences.close_action, CloseAction::Quit);
+    }
 }

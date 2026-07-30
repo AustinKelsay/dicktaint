@@ -47,13 +47,14 @@ mod tests {
         default_dictation_trigger, focused_field_insert_enabled,
         macos_listener_disable_should_dispatch_stop, macos_tap_disable_should_dispatch_stop,
         normalize_dictation_trigger, onboarding_runtime_details,
-        pill_should_be_visible_for_backend_state, resolve_background_ui_preferences,
+        pill_should_be_visible_for_backend_state,
         resolve_effective_dictation_trigger, runtime_details_for_trigger,
         tray_force_stop_enabled,
         tray_primary_action_enabled, tray_primary_action_label, HotkeyDeliveryMode,
     };
     use crate::state::{
-        BackendDictationStatus, CloseAction, LocalSettings, MenuBarMode, PillVisibilityMode,
+        resolve_background_ui_preferences, BackendDictationStatus, CloseAction, LocalSettings,
+        MenuBarMode, PillVisibilityMode,
     };
     use crate::transcribe::{
         analyze_audio_signal, audio_signal_is_too_quiet, normalize_audio_gain, quiet_audio_error,

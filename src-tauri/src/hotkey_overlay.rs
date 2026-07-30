@@ -3,19 +3,17 @@
 use crate::commands::{
     cancel_native_dictation_if_active, start_native_dictation_inner, stop_native_dictation_inner,
 };
-use crate::models::{load_local_settings, save_local_settings};
 use crate::state::{
-    BackendDictationStatus, BackendHotkeyAction, CloseAction, DICTATION_AUDIO_LEVEL_EVENT,
+    BackendDictationStatus, BackendHotkeyAction, CloseAction,
     DICTATION_STATE_EVENT, DictationTriggerPayload, LocalModelState, LocalSettings,
-    MenuBarMode, PILL_STATUS_EVENT, PillStatusPayload, PillVisibilityMode, TrayState, APP_SETTINGS_FILE, DEFAULT_DICTATION_TRIGGER,
-    MAX_DICTATION_TRIGGER_LENGTH, MAIN_TRAY_ID, PILL_WINDOW_BASE_WIDTH, PILL_WINDOW_BOTTOM_MARGIN,
-    PILL_WINDOW_HEIGHT, PILL_WINDOW_LABEL_PREFIX, PILL_WINDOW_MIN_WIDTH, MAX_PILL_WINDOWS,
-    START_HIDDEN_ENV, TRAY_MENU_FORCE_STOP_ID, TRAY_MENU_OPEN_ID, TRAY_MENU_QUIT_ID,
-    TRAY_MENU_STATUS_ID, TRAY_MENU_TOGGLE_ID, BackgroundUiPreferences,
-    BackgroundUiPreferencesPayload, DictationAudioLevelPayload, DictationState,
-    DictationStatePayload, LIVE_AUDIO_BAR_COUNT, LIVE_AUDIO_EMIT_INTERVAL_MS,
+    MenuBarMode, PILL_STATUS_EVENT, PillStatusPayload, PillVisibilityMode, TrayState,
+    DEFAULT_DICTATION_TRIGGER, MAX_DICTATION_TRIGGER_LENGTH, MAIN_TRAY_ID, PILL_WINDOW_BASE_WIDTH,
+    PILL_WINDOW_BOTTOM_MARGIN, PILL_WINDOW_HEIGHT, PILL_WINDOW_LABEL_PREFIX, PILL_WINDOW_MIN_WIDTH,
+    MAX_PILL_WINDOWS, START_HIDDEN_ENV, TRAY_MENU_FORCE_STOP_ID, TRAY_MENU_OPEN_ID,
+    TRAY_MENU_QUIT_ID, TRAY_MENU_STATUS_ID, TRAY_MENU_TOGGLE_ID, BackgroundUiPreferences,
+    BackgroundUiPreferencesPayload, DictationState, DictationStatePayload,
+    resolve_background_ui_preferences,
 };
-use serde::Serialize;
 use std::collections::HashSet;
 #[cfg(target_os = "macos")]
 use std::ffi::c_void;
@@ -23,12 +21,12 @@ use std::str::FromStr;
 use std::sync::atomic::{AtomicBool, AtomicPtr, Ordering};
 use std::sync::{Arc, Mutex};
 #[cfg(target_os = "macos")]
-use tauri::menu::{MenuBuilder, MenuItem, MenuItemBuilder};
+use tauri::menu::{MenuBuilder, MenuItemBuilder};
 #[cfg(target_os = "macos")]
 use tauri::tray::TrayIconBuilder;
 use tauri::{Emitter, Manager};
 #[cfg(not(any(target_os = "android", target_os = "ios")))]
-use tauri_plugin_global_shortcut::{GlobalShortcutExt, Shortcut, ShortcutState};
+use tauri_plugin_global_shortcut::{GlobalShortcutExt, Shortcut};
 
 #[cfg(target_os = "macos")]
 use crate::state::{
@@ -291,72 +289,6 @@ pub(crate) fn should_start_hidden() -> bool {
     std::env::var(START_HIDDEN_ENV)
         .map(|value| parse_truthy_env(&value))
         .unwrap_or(false)
-}
-
-pub(crate) fn resolve_pill_visibility_mode(settings: &LocalSettings) -> PillVisibilityMode {
-    match settings
-        .pill_visibility_mode
-        .as_deref()
-        .map(str::trim)
-        .filter(|value| !value.is_empty())
-    {
-        Some("off") => PillVisibilityMode::Off,
-        Some("always") => PillVisibilityMode::Always,
-        Some("active-only") => PillVisibilityMode::ActiveOnly,
-        Some(other) => {
-            log::warn!("Ignoring invalid persisted pill visibility mode '{other}'");
-            PillVisibilityMode::ActiveOnly
-        }
-        None => PillVisibilityMode::ActiveOnly,
-    }
-}
-
-pub(crate) fn resolve_menu_bar_mode(settings: &LocalSettings) -> MenuBarMode {
-    match settings
-        .menu_bar_mode
-        .as_deref()
-        .map(str::trim)
-        .filter(|value| !value.is_empty())
-    {
-        Some("off") => MenuBarMode::Off,
-        Some("background-only") => MenuBarMode::BackgroundOnly,
-        Some("always") => MenuBarMode::Always,
-        Some(other) => {
-            log::warn!("Ignoring invalid persisted menu bar mode '{other}'");
-            MenuBarMode::Always
-        }
-        None => MenuBarMode::Always,
-    }
-}
-
-pub(crate) fn resolve_close_action(settings: &LocalSettings, menu_bar_mode: MenuBarMode) -> CloseAction {
-    if menu_bar_mode == MenuBarMode::Off {
-        return CloseAction::Quit;
-    }
-
-    match settings
-        .close_action
-        .as_deref()
-        .map(str::trim)
-        .filter(|value| !value.is_empty())
-    {
-        Some("quit") => CloseAction::Quit,
-        Some("hide-to-tray") => CloseAction::HideToTray,
-        Some(other) => {
-            log::warn!("Ignoring invalid persisted close action '{other}'");
-            CloseAction::HideToTray
-        }
-        None => CloseAction::HideToTray,
-    }
-}
-
-pub(crate) fn resolve_background_ui_preferences(settings: &LocalSettings) -> BackgroundUiPreferences {
-    let menu_bar_mode = resolve_menu_bar_mode(settings);
-    BackgroundUiPreferences {
-        pill_visibility_mode: resolve_pill_visibility_mode(settings),
-        close_action: resolve_close_action(settings, menu_bar_mode),
-        menu_bar_mode,
-    }
 }
 
 pub(crate) fn background_ui_preferences_payload(

@@ -2,7 +2,7 @@
 
 use crate::state::{
     FocusedFieldInsertPermissionStatus, KEYCODE_COMMAND, KEYCODE_V, MACOS_COMMAND_FLAG_MASK,
-    CG_EVENT_TAP_LOCATION_HID, CG_EVENT_TAP_LOCATION_SESSION, CGEventFlags, CGEventRef,
+    CG_EVENT_TAP_LOCATION_HID, CGEventFlags, CGEventRef,
 };
 use std::thread;
 use std::time::Duration;

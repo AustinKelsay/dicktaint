@@ -3,34 +3,32 @@
 use crate::audio::{ensure_microphone_access_authorized, list_input_devices, spawn_recording_thread};
 use crate::hotkey_overlay::{
     GlobalHotkeyState,
-    apply_registered_hotkey, background_ui_preferences_payload, current_background_ui_preferences,
-    current_trigger_runtime_details, default_dictation_trigger, dictation_is_running,
+    apply_registered_hotkey, background_ui_preferences_payload,
+    current_trigger_runtime_details, dictation_is_running,
     dictation_trigger_payload, emit_dictation_state, focused_field_insert_enabled,
-    normalize_dictation_trigger, resolve_background_ui_preferences,
-    resolve_effective_dictation_trigger, sync_background_ui,
+    normalize_dictation_trigger, resolve_effective_dictation_trigger, sync_background_ui,
 };
 use crate::insert::{focused_field_insert_permission_status, insert_text_into_focused_field_impl};
 use crate::models::{
-    build_onboarding_payload, download_whisper_model, find_whisper_model_spec, load_local_settings,
+    build_onboarding_payload, download_whisper_model, find_whisper_model_spec,
     model_path_for_spec, pick_best_installed_model, resolve_active_model_path, save_local_settings,
     system_memory_gb, whisper_model_catalog,
 };
 use crate::state::{
-    ActiveRecording, AppConfig, BackgroundUiPreferencesPayload, DictationModelDeletion,
-    DictationModelSelection, DictationOnboardingPayload, DictationState, DictationTriggerPayload,
-    FocusedFieldInsertPayload, LocalModelState, LocalSettings,
-    WHISPER_CPP_SETUP_URL,
+    parse_close_action, parse_menu_bar_mode, parse_pill_visibility_mode, ActiveRecording, AppConfig,
+    BackgroundUiPreferencesPayload, DictationModelDeletion, DictationModelSelection,
+    DictationOnboardingPayload, DictationState, DictationTriggerPayload, FocusedFieldInsertPayload,
+    LocalModelState, LocalSettings, WHISPER_CPP_SETUP_URL, resolve_background_ui_preferences,
 };
 use crate::transcribe::transcribe_samples;
 use crate::whisper_cli::{
     detect_whisper_cli_path, ensure_whisper_cli_available, resolve_whisper_cli_path,
 };
 use std::fs;
-use std::path::Path;
 use std::process::Command;
 use std::sync::atomic::Ordering;
 use std::sync::{Arc, Mutex};
-use tauri::{Emitter, Manager, State};
+use tauri::{Manager, State};
 
 
 
@@ -238,20 +236,10 @@ pub(crate) fn set_pill_visibility_mode(
     mode: String,
     model_state: State<'_, LocalModelState>,
 ) -> Result<BackgroundUiPreferencesPayload, String> {
-    let normalized = match mode.trim() {
-        "off" => "off",
-        "active-only" => "active-only",
-        "always" => "always",
-        other => {
-            return Err(format!(
-                "Unsupported pill visibility mode '{}'. Use off, active-only, or always.",
-                other
-            ))
-        }
-    };
+    let normalized = parse_pill_visibility_mode(&mode)?;
 
     persist_background_ui_preferences_update(&app, model_state.inner(), |settings| {
-        settings.pill_visibility_mode = Some(normalized.to_string());
+        settings.pill_visibility_mode = Some(normalized.as_str().to_string());
         Ok(())
     })
 }
@@ -262,20 +250,10 @@ pub(crate) fn set_menu_bar_mode(
     mode: String,
     model_state: State<'_, LocalModelState>,
 ) -> Result<BackgroundUiPreferencesPayload, String> {
-    let normalized = match mode.trim() {
-        "always" => "always",
-        "background-only" => "background-only",
-        "off" => "off",
-        other => {
-            return Err(format!(
-                "Unsupported menu bar mode '{}'. Use always, background-only, or off.",
-                other
-            ))
-        }
-    };
+    let normalized = parse_menu_bar_mode(&mode)?;
 
     persist_background_ui_preferences_update(&app, model_state.inner(), |settings| {
-        settings.menu_bar_mode = Some(normalized.to_string());
+        settings.menu_bar_mode = Some(normalized.as_str().to_string());
         Ok(())
     })
 }
@@ -286,19 +264,10 @@ pub(crate) fn set_close_action(
     action: String,
     model_state: State<'_, LocalModelState>,
 ) -> Result<BackgroundUiPreferencesPayload, String> {
-    let normalized = match action.trim() {
-        "hide-to-tray" => "hide-to-tray",
-        "quit" => "quit",
-        other => {
-            return Err(format!(
-                "Unsupported close action '{}'. Use hide-to-tray or quit.",
-                other
-            ))
-        }
-    };
+    let normalized = parse_close_action(&action)?;
 
     persist_background_ui_preferences_update(&app, model_state.inner(), |settings| {
-        settings.close_action = Some(normalized.to_string());
+        settings.close_action = Some(normalized.as_str().to_string());
         Ok(())
     })
 }

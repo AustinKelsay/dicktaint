@@ -4,23 +4,20 @@ use crate::audio::list_input_devices;
 use crate::hotkey_overlay::{
     GlobalHotkeyState,
     current_registered_hotkey, current_trigger_runtime_details, default_dictation_trigger,
-    focused_field_insert_enabled, onboarding_runtime_details, resolve_background_ui_preferences,
+    focused_field_insert_enabled, onboarding_runtime_details,
     resolve_effective_dictation_trigger,
 };
 use crate::insert::focused_field_insert_permission_status;
 use crate::state::{
-    AppConfig, DeviceProfile, DictationInputDevice, DictationModelOption,
-    DictationOnboardingPayload, LocalModelState, LocalSettings,
-    WhisperModelSpec, WHISPER_MODEL_CATALOG, APP_MODELS_DIR, APP_SETTINGS_DIR,
-    APP_SETTINGS_FILE,
+    resolve_background_ui_preferences, AppConfig, DeviceProfile, DictationModelOption,
+    DictationOnboardingPayload, LocalModelState, LocalSettings, WhisperModelSpec,
+    WHISPER_MODEL_CATALOG, APP_MODELS_DIR, APP_SETTINGS_DIR, APP_SETTINGS_FILE,
 };
 use crate::whisper_cli::{detect_whisper_cli_path, resolve_whisper_cli_path};
-use serde::{Deserialize, Serialize};
 use std::fs;
 use std::io::Write;
 use std::path::{Path, PathBuf};
 use std::process::Command;
-use std::sync::{Arc, Mutex};
 use std::time::{SystemTime, UNIX_EPOCH};
 
 
