@@ -47,6 +47,11 @@ CLI resolution order:
 3. default `whisper-cli` command
 4. candidate probing through local sidecar and common OS install paths
 
+Bundled sidecar policy (real vs placeholder per target triple):
+
+- see [`../../src-tauri/binaries/README.md`](../../src-tauri/binaries/README.md)
+- validation rejects placeholder binaries (`--help` / probe behavior)
+
 CLI validation requirements:
 
 - candidate exists

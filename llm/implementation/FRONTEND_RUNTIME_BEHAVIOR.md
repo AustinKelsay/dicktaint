@@ -32,11 +32,23 @@ Out of scope:
 - `public/js/native-dictation.js`
 - `public/js/onboarding/index.js`
 - `public/js/constants.js`
+- `public/js/state.js`
 - `public/index.html`
 - `public/pill.html`
 - `public/pill.js`
 
 ## Contract
+
+Mutable SPA state (`public/js/state.js`) is grouped behind a single `state` export:
+
+- `webSpeech` — browser recognition handle, restart timer, keep-dictating, mic access
+- `nativeSession` — native session ids, pending start-after-stop, Fn/hotkey in-flight flags
+- `onboarding` — models list, current onboarding payload, install/delete busy, device profile, setup mode
+- `settingsPrefs` — hotkey, pill/menu/close, focused-field insert, preferred input device, save busy flags
+- `uiBusy` — `isDictating` / `isStartingDictation`, live waveform level/bars
+- top-level transcript fields — `currentDraftText`, `dictationHistory`, `dictationHistorySeq`
+
+Flat property names (`state.isDictating`, etc.) remain aliases onto those slices so existing modules keep working.
 
 Runtime routing:
 

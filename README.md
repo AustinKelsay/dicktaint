@@ -91,6 +91,10 @@ Requires Xcode. Android is deferred. See [`llm/context/PLATFORM_SUPPORT.md`](llm
 
 Desktop CLI resolution: env override → bundled sidecar → `PATH` → local `src-tauri/binaries/` candidates.
 
+**Sidecar policy:** which `whisper-cli-*` binaries are real vs placeholder is documented in [`src-tauri/binaries/README.md`](src-tauri/binaries/README.md). Placeholders must not ship as working transcription binaries.
+
+**Vendored `cpal`:** macOS CoreAudio retain-cycle / idle-mic leak fix — path-patched via `src-tauri/Cargo.toml` → [`vendor/cpal`](vendor/cpal). Rationale: [`vendor/cpal/VENDOR.md`](vendor/cpal/VENDOR.md).
+
 Settings / models on macOS live under:
 
 `$HOME/Library/Application Support/com.plebdev.dicktaint/.dicktaint/`
