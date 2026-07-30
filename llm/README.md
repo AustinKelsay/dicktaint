@@ -32,7 +32,7 @@ Primary source files:
 - `public/js/`
 - `src-tauri/src/main.rs` (thin entry)
 - `src-tauri/src/commands.rs`
-- `src-tauri/src/hotkey_overlay.rs`
+- `src-tauri/src/hotkey_overlay/mod.rs`
 - `src-tauri/src/state.rs`
 - `src-tauri/tauri.conf.json`
 - `scripts/build-whisper-sidecar.sh`

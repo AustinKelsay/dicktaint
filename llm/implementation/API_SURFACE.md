@@ -14,7 +14,7 @@ Provide a strict contract reference for all callable routes, commands, and runti
 In scope:
 
 - web HTTP contract from `/server.js`
-- Tauri command and event contract from `src-tauri/src/commands.rs` / `src-tauri/src/hotkey_overlay.rs`
+- Tauri command and event contract from `src-tauri/src/commands.rs` / `src-tauri/src/hotkey_overlay/mod.rs`
 
 Out of scope:
 
@@ -25,7 +25,7 @@ Out of scope:
 - `server.js`
 - `src-tauri/src/main.rs` (thin entry)
 - `src-tauri/src/commands.rs`
-- `src-tauri/src/hotkey_overlay.rs`
+- `src-tauri/src/hotkey_overlay/mod.rs`
 - `src-tauri/src/state.rs`
 - `public/js/constants.js`
 - `public/js/events.js`

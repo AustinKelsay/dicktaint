@@ -33,7 +33,7 @@ Out of scope:
 - `server.js`
 - `src-tauri/src/main.rs` (thin entry)
 - `src-tauri/src/commands.rs`
-- `src-tauri/src/hotkey_overlay.rs`
+- `src-tauri/src/hotkey_overlay/mod.rs`
 - `src-tauri/src/state.rs`
 - `src-tauri/tauri.conf.json`
 
@@ -65,7 +65,7 @@ Key policy:
 Validate this document when any of these change:
 
 1. app runtime mode detection in `public/js/platform.js` (bootstrapped from `public/app.js`)
-2. command/event registrations across `src-tauri/src/commands.rs` and `src-tauri/src/hotkey_overlay.rs`
+2. command/event registrations across `src-tauri/src/commands.rs` and `src-tauri/src/hotkey_overlay/mod.rs`
 3. desktop bundle/runtime config in `src-tauri/tauri.conf.json`
 4. overlay runtime in `public/pill.html` / `public/pill.js`
 

@@ -26,7 +26,7 @@ Out of scope:
 - `public/js/platform.js`
 - `src-tauri/src/main.rs` (thin entry)
 - `src-tauri/src/commands.rs`
-- `src-tauri/src/hotkey_overlay.rs`
+- `src-tauri/src/hotkey_overlay/mod.rs`
 - `src-tauri/src/state.rs`
 - `src-tauri/tauri.conf.json`
 - `package.json`
@@ -58,7 +58,7 @@ Android:
 Re-verify this document when any of these change:
 
 1. platform guards in `public/js/platform.js`
-2. macOS-specific blocks in `src-tauri/src/hotkey_overlay.rs` / `src-tauri/src/commands.rs`
+2. macOS-specific blocks in `src-tauri/src/hotkey_overlay/mod.rs` / `src-tauri/src/commands.rs`
 3. private API config in `src-tauri/tauri.conf.json`
 
 ## Related Docs

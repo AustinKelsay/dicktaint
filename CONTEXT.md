@@ -30,6 +30,7 @@
 | `hotkey_overlay::pill` | Overlay pill windows + status sync |
 | `hotkey_overlay::tray` | macOS menu bar tray runtime |
 | `hotkey_overlay::background_ui` | Background prefs, main window, pill/tray sync |
+| `dictation_session` | Native start/stop/cancel/is_running session orchestration |
 | `insert` | Clipboard / Accessibility insertion |
 | `commands` | Tauri command handlers |
 | Frontend `public/js/*` | Onboarding, settings, native session, history, web speech |

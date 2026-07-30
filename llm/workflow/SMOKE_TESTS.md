@@ -30,7 +30,7 @@ Out of scope:
 - `public/js/`
 - `src-tauri/src/main.rs` (thin entry)
 - `src-tauri/src/commands.rs`
-- `src-tauri/src/hotkey_overlay.rs`
+- `src-tauri/src/hotkey_overlay/mod.rs`
 - `src-tauri/src/state.rs`
 - `scripts/smoke-whisper-sidecar.sh`
 
