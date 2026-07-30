@@ -77,21 +77,14 @@ export function summarizeHotkeyPillStatus(message, tone = 'neutral') {
 }
 
 
-export function syncHotkeyPillForStatus(message, tone = 'neutral') {
-  if (isFocusedMacDesktopMode()) {
-    return;
-  }
-  const visible = isNativeDesktopMode() && isFocusedMacDesktopMode();
-  if (!visible) {
-    setHotkeyPill('', 'idle', false);
-    return;
-  }
-  // Overlay window expects a tight state enum; map richer UI tones into it.
-  const overlayState = tone === 'live'
-    ? 'live'
-    : (tone === 'working' ? 'working' : (tone === 'ok' ? 'ok' : (tone === 'error' ? 'error' : 'idle')));
-  const showOverlay = overlayState === 'live' || overlayState === 'working' || overlayState === 'error';
-  setHotkeyPill(summarizeHotkeyPillStatus(message, tone), overlayState, showOverlay);
+/**
+ * SPA-side pill sync. On focused macOS desktop the native overlay is driven by
+ * Rust (`emit_dictation_state` → pill sync); the SPA must not double-emit.
+ * Everywhere else, hide any leftover in-app pill state.
+ */
+export function syncHotkeyPillForStatus(_message, _tone = 'neutral') {
+  if (isFocusedMacDesktopMode()) return;
+  setHotkeyPill('', 'idle', false);
 }
 
 

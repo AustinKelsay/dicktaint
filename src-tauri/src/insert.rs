@@ -1,10 +1,14 @@
 //! Paste dictated text into the focused field via macOS Accessibility APIs.
 
+use crate::state::FocusedFieldInsertPermissionStatus;
+#[cfg(target_os = "macos")]
 use crate::state::{
-    FocusedFieldInsertPermissionStatus, KEYCODE_COMMAND, KEYCODE_V, MACOS_COMMAND_FLAG_MASK,
-    CG_EVENT_TAP_LOCATION_HID, CGEventFlags, CGEventRef,
+    KEYCODE_COMMAND, KEYCODE_V, MACOS_COMMAND_FLAG_MASK, CG_EVENT_TAP_LOCATION_HID, CGEventFlags,
+    CGEventRef,
 };
+#[cfg(target_os = "macos")]
 use std::thread;
+#[cfg(target_os = "macos")]
 use std::time::Duration;
 #[cfg(target_os = "macos")]
 use std::ffi::c_void;
@@ -14,6 +18,7 @@ use objc2::rc::Retained;
 use objc2_app_kit::{NSPasteboard, NSPasteboardTypeString};
 #[cfg(target_os = "macos")]
 use objc2_foundation::NSString;
+#[cfg(target_os = "macos")]
 use std::process::Command;
 
 #[cfg(target_os = "macos")]
@@ -108,6 +113,7 @@ pub(crate) fn focused_field_insert_permission_status(
         },
     }
 }
+#[cfg(target_os = "macos")]
 fn write_text_to_general_pasteboard(
     text: &str,
 ) -> Result<(Retained<NSPasteboard>, Option<String>), String> {
