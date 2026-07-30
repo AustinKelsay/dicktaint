@@ -10,7 +10,7 @@ use super::pill::sync_pill_for_backend_state;
 #[cfg(target_os = "macos")]
 use super::tray::sync_macos_tray;
 
-pub(crate) fn parse_truthy_env(value: &str) -> bool {
+fn parse_truthy_env(value: &str) -> bool {
     let normalized = value.trim().to_ascii_lowercase();
     !matches!(normalized.as_str(), "" | "0" | "false" | "no" | "off")
 }
@@ -43,7 +43,7 @@ pub(crate) fn current_background_ui_preferences(
     Ok(resolve_background_ui_preferences(&settings))
 }
 
-pub(crate) fn current_backend_dictation_status(
+pub(super) fn current_backend_dictation_status(
     app: &tauri::AppHandle,
 ) -> Result<BackendDictationStatus, String> {
     app.state::<DictationState>()
@@ -53,7 +53,7 @@ pub(crate) fn current_backend_dictation_status(
         .map(|guard| *guard)
 }
 
-pub(crate) fn current_backend_error_message(app: &tauri::AppHandle) -> Result<Option<String>, String> {
+fn current_backend_error_message(app: &tauri::AppHandle) -> Result<Option<String>, String> {
     app.state::<DictationState>()
         .last_error_message
         .lock()
@@ -61,7 +61,7 @@ pub(crate) fn current_backend_error_message(app: &tauri::AppHandle) -> Result<Op
         .map(|guard| guard.clone())
 }
 
-pub(crate) fn set_backend_dictation_status(
+pub(super) fn set_backend_dictation_status(
     app: &tauri::AppHandle,
     status: BackendDictationStatus,
     error: Option<String>,
@@ -86,13 +86,13 @@ pub(crate) fn set_backend_dictation_status(
     Ok(())
 }
 
-pub(crate) fn main_window_is_visible(app: &tauri::AppHandle) -> bool {
+pub(super) fn main_window_is_visible(app: &tauri::AppHandle) -> bool {
     app.get_webview_window("main")
         .and_then(|window| window.is_visible().ok())
         .unwrap_or(false)
 }
 
-pub(crate) fn should_show_tray_icon(preferences: BackgroundUiPreferences, main_window_visible: bool) -> bool {
+pub(super) fn should_show_tray_icon(preferences: BackgroundUiPreferences, main_window_visible: bool) -> bool {
     match preferences.menu_bar_mode {
         MenuBarMode::Always => true,
         MenuBarMode::BackgroundOnly => !main_window_visible,

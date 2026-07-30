@@ -11,10 +11,10 @@ use crate::hotkey_overlay::{
 };
 use crate::insert::{focused_field_insert_permission_status, insert_text_into_focused_field_impl};
 use crate::models::{
-    build_onboarding_payload, download_whisper_model, find_whisper_model_spec,
-    model_path_for_spec, pick_best_installed_model, save_local_settings, system_memory_gb,
-    whisper_model_catalog,
+    download_whisper_model, find_whisper_model_spec, model_path_for_spec,
+    pick_best_installed_model, save_local_settings, system_memory_gb, whisper_model_catalog,
 };
+use crate::onboarding::build_onboarding_payload;
 use crate::state::{
     parse_close_action, parse_menu_bar_mode, parse_pill_visibility_mode, AppConfig,
     BackgroundUiPreferencesPayload, DictationModelDeletion, DictationModelSelection,
@@ -195,7 +195,7 @@ pub(crate) fn clear_dictation_trigger(
     Ok(dictation_trigger_payload(&settings, runtime))
 }
 
-pub(crate) fn persist_background_ui_preferences_update<F>(
+fn persist_background_ui_preferences_update<F>(
     app: &tauri::AppHandle,
     model_state: &LocalModelState,
     update: F,

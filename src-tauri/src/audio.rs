@@ -20,7 +20,7 @@ use std::time::{Duration, Instant};
 use tauri::{Emitter, Manager};
 
 
-pub(crate) fn downmix_samples<T, F>(data: &[T], channels: usize, to_f32: F) -> Vec<f32>
+fn downmix_samples<T, F>(data: &[T], channels: usize, to_f32: F) -> Vec<f32>
 where
     T: Copy,
     F: Fn(T) -> f32,
@@ -38,7 +38,7 @@ where
     mono
 }
 
-pub(crate) fn store_captured_samples(target: &Arc<Mutex<Vec<f32>>>, samples: &[f32]) {
+fn store_captured_samples(target: &Arc<Mutex<Vec<f32>>>, samples: &[f32]) {
     if samples.is_empty() {
         return;
     }
@@ -48,13 +48,13 @@ pub(crate) fn store_captured_samples(target: &Arc<Mutex<Vec<f32>>>, samples: &[f
     }
 }
 
-pub(crate) fn audio_level_from_stats(stats: AudioSignalStats) -> f32 {
+fn audio_level_from_stats(stats: AudioSignalStats) -> f32 {
     let peak = (stats.peak_abs / 0.18).clamp(0.0, 1.0);
     let rms = (stats.rms / 0.06).clamp(0.0, 1.0);
     ((peak * 0.68) + (rms * 0.32)).clamp(0.0, 1.0)
 }
 
-pub(crate) fn waveform_bins_from_samples(samples: &[f32], count: usize) -> Vec<f32> {
+fn waveform_bins_from_samples(samples: &[f32], count: usize) -> Vec<f32> {
     if count == 0 {
         return Vec::new();
     }
@@ -84,7 +84,7 @@ pub(crate) fn waveform_bins_from_samples(samples: &[f32], count: usize) -> Vec<f
 }
 
 impl LiveAudioMeter {
-    pub(crate) fn emit_samples(&self, samples: &[f32], sample_rate: u32) {
+    fn emit_samples(&self, samples: &[f32], sample_rate: u32) {
         if samples.is_empty() || sample_rate == 0 {
             return;
         }
@@ -123,7 +123,7 @@ impl LiveAudioMeter {
     }
 }
 
-pub(crate) fn handle_input_chunk<T, F>(
+fn handle_input_chunk<T, F>(
     data: &[T],
     channels: usize,
     target: &Arc<Mutex<Vec<f32>>>,
@@ -143,7 +143,7 @@ pub(crate) fn handle_input_chunk<T, F>(
     meter.emit_samples(&mono, sample_rate);
 }
 
-pub(crate) fn sample_format_rank(sample_format: SampleFormat) -> u8 {
+fn sample_format_rank(sample_format: SampleFormat) -> u8 {
     match sample_format {
         SampleFormat::F32 => 3,
         SampleFormat::I16 => 2,
@@ -152,7 +152,7 @@ pub(crate) fn sample_format_rank(sample_format: SampleFormat) -> u8 {
     }
 }
 
-pub(crate) fn choose_input_config(device: &cpal::Device) -> Result<cpal::SupportedStreamConfig, String> {
+fn choose_input_config(device: &cpal::Device) -> Result<cpal::SupportedStreamConfig, String> {
     if let Ok(default_config) = device.default_input_config() {
         return Ok(default_config);
     }
@@ -187,7 +187,7 @@ pub(crate) fn choose_input_config(device: &cpal::Device) -> Result<cpal::Support
     })
 }
 
-pub(crate) fn device_name(device: &cpal::Device, fallback: &str) -> String {
+fn device_name(device: &cpal::Device, fallback: &str) -> String {
     device.name().unwrap_or_else(|_| fallback.to_string())
 }
 
@@ -223,7 +223,7 @@ pub(crate) fn list_input_devices() -> Vec<DictationInputDevice> {
     devices
 }
 
-pub(crate) fn create_input_stream_for_device(
+fn create_input_stream_for_device(
     device: &cpal::Device,
     device_name: &str,
     samples: Arc<Mutex<Vec<f32>>>,
@@ -312,14 +312,14 @@ pub(crate) fn create_input_stream_for_device(
     Ok((stream, sample_rate))
 }
 
-pub(crate) fn stop_and_drop_input_stream(stream: Stream) {
+fn stop_and_drop_input_stream(stream: Stream) {
     if let Err(error) = stream.pause() {
         log::warn!("Failed to pause microphone stream before drop: {error}");
     }
     drop(stream);
 }
 
-pub(crate) fn ordered_input_device_candidate_names(
+fn ordered_input_device_candidate_names(
     preferred_input_name: Option<&str>,
     default_name: Option<&str>,
     available_names: &[String],
@@ -359,12 +359,12 @@ pub(crate) fn ordered_input_device_candidate_names(
 }
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
-pub(crate) enum InputStreamProbeOutcome {
+enum InputStreamProbeOutcome {
     NonSilentFrames,
     SilentFrames,
 }
 
-pub(crate) fn probe_input_stream_activity(
+fn probe_input_stream_activity(
     samples: &Arc<Mutex<Vec<f32>>>,
     start_len: usize,
     sample_rate: u32,
@@ -416,7 +416,7 @@ pub(crate) fn probe_input_stream_activity(
     }
 }
 
-pub(crate) fn wait_for_non_silent_input(
+fn wait_for_non_silent_input(
     samples: &Arc<Mutex<Vec<f32>>>,
     start_len: usize,
     sample_rate: u32,
@@ -442,7 +442,7 @@ pub(crate) fn wait_for_non_silent_input(
 }
 
 #[cfg(target_os = "macos")]
-pub(crate) fn microphone_media_type() -> Result<&'static objc2_av_foundation::AVMediaType, String> {
+fn microphone_media_type() -> Result<&'static objc2_av_foundation::AVMediaType, String> {
     unsafe {
         AVMediaTypeAudio.ok_or_else(|| {
             "AVFoundation did not expose AVMediaTypeAudio on this macOS build.".to_string()
@@ -451,17 +451,17 @@ pub(crate) fn microphone_media_type() -> Result<&'static objc2_av_foundation::AV
 }
 
 #[cfg(target_os = "macos")]
-pub(crate) fn microphone_permission_denied_error() -> String {
+fn microphone_permission_denied_error() -> String {
     "Microphone permission is denied for this app. In macOS Settings > Privacy & Security > Microphone, allow dicktaint and relaunch the app.".to_string()
 }
 
 #[cfg(target_os = "macos")]
-pub(crate) fn microphone_permission_restricted_error() -> String {
+fn microphone_permission_restricted_error() -> String {
     "Microphone access is restricted by macOS for this app. Check Privacy & Security > Microphone or system policy restrictions and retry.".to_string()
 }
 
 #[cfg(target_os = "macos")]
-pub(crate) fn should_focus_main_window_for_microphone_prompt(status: AVAuthorizationStatus) -> bool {
+fn should_focus_main_window_for_microphone_prompt(status: AVAuthorizationStatus) -> bool {
     status == AVAuthorizationStatus::NotDetermined
 }
 
@@ -530,7 +530,7 @@ pub(crate) fn ensure_microphone_access_authorized(app: &tauri::AppHandle) -> Res
 pub(crate) fn ensure_microphone_access_authorized(_app: &tauri::AppHandle) -> Result<(), String> {
     Ok(())
 }
-pub(crate) fn create_input_stream(
+fn create_input_stream(
     samples: Arc<Mutex<Vec<f32>>>,
     meter: LiveAudioMeter,
 ) -> Result<(Stream, u32, String), String> {
@@ -659,4 +659,108 @@ pub(crate) fn spawn_recording_thread(
     };
 
     Ok((stop_tx, handle, sample_rate, input_device_name))
+}
+
+
+
+#[cfg(test)]
+mod tests {
+    use super::{
+        ordered_input_device_candidate_names, probe_input_stream_activity,
+        wait_for_non_silent_input, InputStreamProbeOutcome,
+    };
+    use std::{
+        sync::{Arc, Mutex},
+        time::Duration,
+    };
+
+    #[cfg(target_os = "macos")]
+    use super::should_focus_main_window_for_microphone_prompt;
+    #[cfg(target_os = "macos")]
+    use objc2_av_foundation::AVAuthorizationStatus;
+
+    #[test]
+    fn silent_stream_probe_accepts_zeroed_frames_when_frames_exist() {
+        let samples = Arc::new(Mutex::new(vec![0.0_f32; 4096]));
+        let outcome = probe_input_stream_activity(
+            &samples,
+            0,
+            16_000,
+            "Austin's AirPods",
+            Duration::ZERO,
+            Duration::ZERO,
+        )
+        .unwrap();
+        assert_eq!(outcome, InputStreamProbeOutcome::SilentFrames);
+        wait_for_non_silent_input(&samples, 0, 16_000, "Austin's AirPods").unwrap();
+    }
+
+    #[test]
+    fn silent_stream_probe_accepts_nonzero_frames() {
+        let samples = Arc::new(Mutex::new(vec![0.0_f32, 0.02, -0.01, 0.0]));
+        let outcome = probe_input_stream_activity(
+            &samples,
+            0,
+            16_000,
+            "MacBook Pro Microphone",
+            Duration::ZERO,
+            Duration::ZERO,
+        )
+        .unwrap();
+        assert_eq!(outcome, InputStreamProbeOutcome::NonSilentFrames);
+        wait_for_non_silent_input(&samples, 0, 16_000, "MacBook Pro Microphone").unwrap();
+    }
+
+    #[test]
+    fn silent_stream_probe_rejects_missing_frames() {
+        let samples = Arc::new(Mutex::new(Vec::<f32>::new()));
+        let error = probe_input_stream_activity(
+            &samples,
+            0,
+            16_000,
+            "MacBook Pro Microphone",
+            Duration::ZERO,
+            Duration::ZERO,
+        )
+        .unwrap_err();
+        assert!(error.contains("did not deliver any audio frames"));
+    }
+
+    #[test]
+    fn preferred_default_input_uses_default_handle_and_dedupes_names() {
+        let ordered = ordered_input_device_candidate_names(
+            Some("MacBook Pro Microphone"),
+            Some("MacBook Pro Microphone"),
+            &[
+                "MacBook Pro Microphone".to_string(),
+                "USB Mic".to_string(),
+                "MacBook Pro Microphone".to_string(),
+            ],
+        );
+
+        assert_eq!(
+            ordered,
+            vec![
+                "MacBook Pro Microphone".to_string(),
+                "USB Mic".to_string()
+            ]
+        );
+    }
+
+    #[cfg(target_os = "macos")]
+    #[test]
+    fn microphone_permission_prompt_only_focuses_for_not_determined_status() {
+        assert!(should_focus_main_window_for_microphone_prompt(
+            AVAuthorizationStatus::NotDetermined
+        ));
+        assert!(!should_focus_main_window_for_microphone_prompt(
+            AVAuthorizationStatus::Authorized
+        ));
+        assert!(!should_focus_main_window_for_microphone_prompt(
+            AVAuthorizationStatus::Denied
+        ));
+        assert!(!should_focus_main_window_for_microphone_prompt(
+            AVAuthorizationStatus::Restricted
+        ));
+    }
 }

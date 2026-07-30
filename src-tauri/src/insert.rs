@@ -43,17 +43,17 @@ extern "C" {
 
 
 #[cfg(target_os = "macos")]
-pub(crate) fn macos_accessibility_permission_granted() -> bool {
+fn macos_accessibility_permission_granted() -> bool {
     unsafe { AXIsProcessTrusted() }
 }
 
 #[cfg(not(target_os = "macos"))]
-pub(crate) fn macos_accessibility_permission_granted() -> bool {
+fn macos_accessibility_permission_granted() -> bool {
     false
 }
 
 #[cfg(target_os = "macos")]
-pub(crate) fn open_accessibility_settings() -> Result<(), String> {
+fn open_accessibility_settings() -> Result<(), String> {
     let status = Command::new("open")
         .arg("x-apple.systempreferences:com.apple.preference.security?Privacy_Accessibility")
         .status()
@@ -108,7 +108,7 @@ pub(crate) fn focused_field_insert_permission_status(
         },
     }
 }
-pub(crate) fn write_text_to_general_pasteboard(
+fn write_text_to_general_pasteboard(
     text: &str,
 ) -> Result<(Retained<NSPasteboard>, Option<String>), String> {
     let pasteboard = NSPasteboard::generalPasteboard();
@@ -125,7 +125,7 @@ pub(crate) fn write_text_to_general_pasteboard(
 }
 
 #[cfg(target_os = "macos")]
-pub(crate) fn restore_general_pasteboard(
+fn restore_general_pasteboard(
     pasteboard: &NSPasteboard,
     snapshot: Option<String>,
 ) -> Result<(), String> {
@@ -146,7 +146,7 @@ pub(crate) fn restore_general_pasteboard(
 }
 
 #[cfg(target_os = "macos")]
-pub(crate) fn post_keyboard_event(keycode: u16, key_down: bool, flags: CGEventFlags) -> Result<(), String> {
+fn post_keyboard_event(keycode: u16, key_down: bool, flags: CGEventFlags) -> Result<(), String> {
     let event = unsafe { CGEventCreateKeyboardEvent(std::ptr::null(), keycode, key_down) };
     if event.is_null() {
         return Err(format!(
@@ -163,7 +163,7 @@ pub(crate) fn post_keyboard_event(keycode: u16, key_down: bool, flags: CGEventFl
 }
 
 #[cfg(target_os = "macos")]
-pub(crate) fn post_command_v_paste() -> Result<(), String> {
+fn post_command_v_paste() -> Result<(), String> {
     post_keyboard_event(KEYCODE_COMMAND, true, MACOS_COMMAND_FLAG_MASK)?;
     post_keyboard_event(KEYCODE_V, true, MACOS_COMMAND_FLAG_MASK)?;
     post_keyboard_event(KEYCODE_V, false, MACOS_COMMAND_FLAG_MASK)?;

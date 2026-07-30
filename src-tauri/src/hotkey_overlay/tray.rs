@@ -17,7 +17,7 @@ use super::background_ui::{
 };
 use super::emit_dictation_state;
 
-pub(crate) fn tray_primary_action_label(status: BackendDictationStatus) -> &'static str {
+fn tray_primary_action_label(status: BackendDictationStatus) -> &'static str {
     match status {
         BackendDictationStatus::Listening => "Stop + Transcribe",
         BackendDictationStatus::Processing => "Transcribing...",
@@ -25,15 +25,15 @@ pub(crate) fn tray_primary_action_label(status: BackendDictationStatus) -> &'sta
     }
 }
 
-pub(crate) fn tray_primary_action_enabled(status: BackendDictationStatus) -> bool {
+fn tray_primary_action_enabled(status: BackendDictationStatus) -> bool {
     status != BackendDictationStatus::Processing
 }
 
-pub(crate) fn tray_force_stop_enabled(status: BackendDictationStatus) -> bool {
+fn tray_force_stop_enabled(status: BackendDictationStatus) -> bool {
     status == BackendDictationStatus::Listening
 }
 
-pub(crate) fn tray_title_for_backend_status(status: BackendDictationStatus) -> &'static str {
+fn tray_title_for_backend_status(status: BackendDictationStatus) -> &'static str {
     match status {
         BackendDictationStatus::Idle => "DT",
         BackendDictationStatus::Listening => "REC",
@@ -42,7 +42,7 @@ pub(crate) fn tray_title_for_backend_status(status: BackendDictationStatus) -> &
     }
 }
 
-pub(crate) fn destroy_macos_tray_runtime(app: &tauri::AppHandle) -> Result<(), String> {
+fn destroy_macos_tray_runtime(app: &tauri::AppHandle) -> Result<(), String> {
     let tray_state = app.state::<TrayState>();
     let mut guard = tray_state
         .runtime
@@ -52,7 +52,7 @@ pub(crate) fn destroy_macos_tray_runtime(app: &tauri::AppHandle) -> Result<(), S
     Ok(())
 }
 
-pub(crate) fn handle_tray_menu_event(app: &tauri::AppHandle, menu_id: &tauri::menu::MenuId) {
+fn handle_tray_menu_event(app: &tauri::AppHandle, menu_id: &tauri::menu::MenuId) {
     if menu_id == TRAY_MENU_STATUS_ID {
         return;
     }
@@ -108,7 +108,7 @@ pub(crate) fn handle_tray_menu_event(app: &tauri::AppHandle, menu_id: &tauri::me
     });
 }
 
-pub(crate) fn ensure_macos_tray_runtime(
+fn ensure_macos_tray_runtime(
     app: &tauri::AppHandle,
     status: BackendDictationStatus,
 ) -> Result<(), String> {
@@ -175,7 +175,7 @@ pub(crate) fn ensure_macos_tray_runtime(
     Ok(())
 }
 
-pub(crate) fn sync_macos_tray(app: &tauri::AppHandle, status: BackendDictationStatus) -> Result<(), String> {
+pub(super) fn sync_macos_tray(app: &tauri::AppHandle, status: BackendDictationStatus) -> Result<(), String> {
     let preferences = current_background_ui_preferences(app)?;
     if preferences.menu_bar_mode == MenuBarMode::Off {
         return destroy_macos_tray_runtime(app);
@@ -224,4 +224,43 @@ pub(crate) fn sync_macos_tray(app: &tauri::AppHandle, status: BackendDictationSt
         ))
         .map_err(|e| format!("Failed to update tray visibility: {e}"))?;
     Ok(())
+}
+
+
+
+#[cfg(test)]
+mod tests {
+    use super::{
+        tray_force_stop_enabled, tray_primary_action_enabled, tray_primary_action_label,
+    };
+    use crate::state::BackendDictationStatus;
+
+    #[test]
+    fn tray_mapping_reflects_backend_status() {
+        assert_eq!(BackendDictationStatus::Idle.tray_label(), "Idle");
+        assert_eq!(BackendDictationStatus::Listening.tray_label(), "Listening");
+        assert_eq!(
+            BackendDictationStatus::Processing.tray_label(),
+            "Transcribing"
+        );
+        assert_eq!(BackendDictationStatus::Error.tray_label(), "Error");
+
+        assert_eq!(
+            tray_primary_action_label(BackendDictationStatus::Idle),
+            "Start Dictation"
+        );
+        assert_eq!(
+            tray_primary_action_label(BackendDictationStatus::Listening),
+            "Stop + Transcribe"
+        );
+        assert_eq!(
+            tray_primary_action_label(BackendDictationStatus::Processing),
+            "Transcribing..."
+        );
+        assert!(!tray_primary_action_enabled(
+            BackendDictationStatus::Processing
+        ));
+        assert!(tray_force_stop_enabled(BackendDictationStatus::Listening));
+        assert!(!tray_force_stop_enabled(BackendDictationStatus::Idle));
+    }
 }

@@ -43,14 +43,14 @@ extern "C" {
     fn CFRelease(cf: *const c_void);
 }
 
-pub(crate) struct MacFnCallbackContext {
+struct MacFnCallbackContext {
     app: tauri::AppHandle,
     enabled: AtomicBool,
     fn_down: AtomicBool,
     tap: AtomicPtr<c_void>,
 }
 
-pub(crate) struct MacFnGlobalListener {
+pub(super) struct MacFnGlobalListener {
     tap: CFMachPortRef,
     source: CFRunLoopSourceRef,
     callback_ctx: Arc<MacFnCallbackContext>,
@@ -60,16 +60,16 @@ pub(crate) struct MacFnGlobalListener {
 unsafe impl Send for MacFnGlobalListener {}
 unsafe impl Sync for MacFnGlobalListener {}
 
-pub(crate) fn macos_listener_disable_should_dispatch_stop(was_fn_down: bool) -> bool {
+fn macos_listener_disable_should_dispatch_stop(was_fn_down: bool) -> bool {
     was_fn_down
 }
 
-pub(crate) fn macos_tap_disable_should_dispatch_stop(was_fn_down: bool) -> bool {
+fn macos_tap_disable_should_dispatch_stop(was_fn_down: bool) -> bool {
     was_fn_down
 }
 
 impl MacFnGlobalListener {
-    pub(crate) fn new(app: &tauri::AppHandle) -> Result<Self, String> {
+    pub(super) fn new(app: &tauri::AppHandle) -> Result<Self, String> {
         let callback_ctx = Arc::new(MacFnCallbackContext {
             app: app.clone(),
             enabled: AtomicBool::new(false),
@@ -126,7 +126,7 @@ impl MacFnGlobalListener {
         })
     }
 
-    pub(crate) fn set_enabled(&self, enabled: bool) {
+    pub(super) fn set_enabled(&self, enabled: bool) {
         self.callback_ctx.enabled.store(enabled, Ordering::SeqCst);
         if !enabled {
             let was_fn_down = self.callback_ctx.fn_down.swap(false, Ordering::SeqCst);
@@ -205,4 +205,25 @@ unsafe extern "C" fn macos_fn_event_tap_callback(
     }
 
     event
+}
+
+
+
+#[cfg(test)]
+mod tests {
+    use super::{
+        macos_listener_disable_should_dispatch_stop, macos_tap_disable_should_dispatch_stop,
+    };
+
+    #[test]
+    fn listener_disable_dispatches_stop_when_fn_was_down() {
+        assert!(macos_listener_disable_should_dispatch_stop(true));
+        assert!(!macos_listener_disable_should_dispatch_stop(false));
+    }
+
+    #[test]
+    fn tap_disable_dispatches_stop_when_fn_was_down() {
+        assert!(macos_tap_disable_should_dispatch_stop(true));
+        assert!(!macos_tap_disable_should_dispatch_stop(false));
+    }
 }

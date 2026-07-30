@@ -12,7 +12,7 @@ mod tray;
 
 pub(crate) use background_ui::{
     background_ui_preferences_payload, current_background_ui_preferences,
-    set_backend_dictation_status, should_start_hidden, show_main_window, sync_background_ui,
+    should_start_hidden, show_main_window, sync_background_ui,
 };
 pub(crate) use pill::create_pill_overlay_windows;
 pub(crate) use trigger::{
@@ -22,24 +22,13 @@ pub(crate) use trigger::{
     GlobalHotkeyState,
 };
 
-#[cfg(all(test, target_os = "macos"))]
-pub(crate) use macos_fn::{
-    macos_listener_disable_should_dispatch_stop, macos_tap_disable_should_dispatch_stop,
-};
-#[cfg(test)]
-pub(crate) use pill::pill_should_be_visible_for_backend_state;
-#[cfg(test)]
-pub(crate) use trigger::{runtime_details_for_trigger, HotkeyDeliveryMode};
-#[cfg(all(test, target_os = "macos"))]
-pub(crate) use tray::{
-    tray_force_stop_enabled, tray_primary_action_enabled, tray_primary_action_label,
-};
-
 use crate::dictation_session::{is_benign_session_error, is_running, start, stop};
 use crate::state::{
     BackendDictationStatus, BackendHotkeyAction, DICTATION_STATE_EVENT, DictationStatePayload,
 };
 use tauri::Emitter;
+
+use background_ui::set_backend_dictation_status;
 
 /// Persists backend status, syncs overlay/tray UI, and emits the dictation state event.
 pub(crate) fn emit_dictation_state(

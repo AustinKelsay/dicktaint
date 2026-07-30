@@ -21,7 +21,8 @@
 | Module | Owns |
 | --- | --- |
 | `whisper_cli` | Path resolution, probes, sidecar candidates |
-| `models` | Catalog, download, settings persistence, onboarding payload |
+| `models` | Catalog, download, settings persistence, path resolution |
+| `onboarding` | Assembles readiness DTO from models/hotkey/insert/audio/whisper |
 | `audio` | Mic capture, resample, sanitize, WAV write |
 | `transcribe` | Whisper invoke + transcript normalization |
 | `hotkey_overlay` | Facade: dictation UI coordination + re-exports |

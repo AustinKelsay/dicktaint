@@ -320,7 +320,7 @@ pub(crate) fn parse_pill_visibility_mode(value: &str) -> Result<PillVisibilityMo
 }
 
 /// Resolves pill visibility from settings; invalid or missing values default to ActiveOnly.
-pub(crate) fn resolve_pill_visibility_mode(settings: &LocalSettings) -> PillVisibilityMode {
+fn resolve_pill_visibility_mode(settings: &LocalSettings) -> PillVisibilityMode {
     match settings
         .pill_visibility_mode
         .as_deref()
@@ -369,7 +369,7 @@ pub(crate) fn parse_menu_bar_mode(value: &str) -> Result<MenuBarMode, String> {
 }
 
 /// Resolves menu bar mode from settings; invalid or missing values default to Always.
-pub(crate) fn resolve_menu_bar_mode(settings: &LocalSettings) -> MenuBarMode {
+fn resolve_menu_bar_mode(settings: &LocalSettings) -> MenuBarMode {
     match settings
         .menu_bar_mode
         .as_deref()
@@ -415,7 +415,7 @@ pub(crate) fn parse_close_action(value: &str) -> Result<CloseAction, String> {
 }
 
 /// Resolves close action from settings. Menu bar Off forces Quit; otherwise defaults to HideToTray.
-pub(crate) fn resolve_close_action(settings: &LocalSettings, menu_bar_mode: MenuBarMode) -> CloseAction {
+fn resolve_close_action(settings: &LocalSettings, menu_bar_mode: MenuBarMode) -> CloseAction {
     if menu_bar_mode == MenuBarMode::Off {
         return CloseAction::Quit;
     }
@@ -455,9 +455,9 @@ pub(crate) fn resolve_background_ui_preferences(settings: &LocalSettings) -> Bac
 }
 
 #[cfg(target_os = "macos")]
-pub(crate) type AppMenuItem = MenuItem<tauri::Wry>;
+type AppMenuItem = MenuItem<tauri::Wry>;
 #[cfg(target_os = "macos")]
-pub(crate) type AppTrayIcon = tauri::tray::TrayIcon<tauri::Wry>;
+type AppTrayIcon = tauri::tray::TrayIcon<tauri::Wry>;
 
 #[cfg(target_os = "macos")]
 pub(crate) struct TrayRuntimeState {

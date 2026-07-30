@@ -17,7 +17,7 @@ use super::trigger::{
     current_trigger_runtime_details, default_dictation_trigger,
 };
 
-pub(crate) fn active_hotkey_label(app: &tauri::AppHandle) -> String {
+fn active_hotkey_label(app: &tauri::AppHandle) -> String {
     let hotkey_state = app.state::<GlobalHotkeyState>();
     let trigger = current_registered_hotkey(hotkey_state.inner())
         .ok()
@@ -30,7 +30,7 @@ pub(crate) fn active_hotkey_label(app: &tauri::AppHandle) -> String {
     }
 }
 
-pub(crate) fn idle_pill_message(app: &tauri::AppHandle) -> String {
+fn idle_pill_message(app: &tauri::AppHandle) -> String {
     let hotkey_state = app.state::<GlobalHotkeyState>();
     let runtime = current_trigger_runtime_details(hotkey_state.inner()).unwrap_or_default();
     let label = active_hotkey_label(app);
@@ -43,7 +43,7 @@ pub(crate) fn idle_pill_message(app: &tauri::AppHandle) -> String {
     }
 }
 
-pub(crate) fn pill_should_be_visible_for_backend_state(
+fn pill_should_be_visible_for_backend_state(
     status: BackendDictationStatus,
     mode: PillVisibilityMode,
     has_error: bool,
@@ -60,7 +60,7 @@ pub(crate) fn pill_should_be_visible_for_backend_state(
     }
 }
 
-pub(crate) fn emit_pill_status(
+fn emit_pill_status(
     app: &tauri::AppHandle,
     message: impl Into<String>,
     state: impl Into<String>,
@@ -77,7 +77,7 @@ pub(crate) fn emit_pill_status(
     .ok();
 }
 
-pub(crate) fn sync_pill_for_backend_state(
+pub(super) fn sync_pill_for_backend_state(
     app: &tauri::AppHandle,
     status: BackendDictationStatus,
     error: Option<&str>,
@@ -131,13 +131,13 @@ pub(crate) fn sync_pill_for_backend_state(
 }
 
 #[cfg(target_os = "macos")]
-pub(crate) fn pill_window_width_for_monitor(monitor: &tauri::Monitor) -> f64 {
+fn pill_window_width_for_monitor(monitor: &tauri::Monitor) -> f64 {
     let clamped_scale = monitor.scale_factor().clamp(1.0, 2.0);
     PILL_WINDOW_MIN_WIDTH + (clamped_scale - 1.0) * (PILL_WINDOW_BASE_WIDTH - PILL_WINDOW_MIN_WIDTH)
 }
 
 #[cfg(target_os = "macos")]
-pub(crate) fn create_pill_overlay_window_for_monitor(
+fn create_pill_overlay_window_for_monitor(
     app: &tauri::AppHandle,
     label: &str,
     monitor: &tauri::Monitor,
@@ -200,4 +200,51 @@ pub(crate) fn create_pill_overlay_windows(app: &tauri::AppHandle) -> Result<(), 
 #[cfg(not(target_os = "macos"))]
 pub(crate) fn create_pill_overlay_windows(_app: &tauri::AppHandle) -> Result<(), String> {
     Ok(())
+}
+
+
+
+#[cfg(test)]
+mod tests {
+    use super::pill_should_be_visible_for_backend_state;
+    use crate::state::{BackendDictationStatus, PillVisibilityMode};
+
+    #[test]
+    fn pill_visibility_modes_map_expected_states() {
+        assert!(!pill_should_be_visible_for_backend_state(
+            BackendDictationStatus::Idle,
+            PillVisibilityMode::ActiveOnly,
+            false,
+        ));
+        assert!(pill_should_be_visible_for_backend_state(
+            BackendDictationStatus::Listening,
+            PillVisibilityMode::ActiveOnly,
+            false,
+        ));
+        assert!(pill_should_be_visible_for_backend_state(
+            BackendDictationStatus::Processing,
+            PillVisibilityMode::ActiveOnly,
+            false,
+        ));
+        assert!(!pill_should_be_visible_for_backend_state(
+            BackendDictationStatus::Error,
+            PillVisibilityMode::ActiveOnly,
+            false,
+        ));
+        assert!(pill_should_be_visible_for_backend_state(
+            BackendDictationStatus::Error,
+            PillVisibilityMode::ActiveOnly,
+            true,
+        ));
+        assert!(!pill_should_be_visible_for_backend_state(
+            BackendDictationStatus::Listening,
+            PillVisibilityMode::Off,
+            true,
+        ));
+        assert!(pill_should_be_visible_for_backend_state(
+            BackendDictationStatus::Idle,
+            PillVisibilityMode::Always,
+            false,
+        ));
+    }
 }

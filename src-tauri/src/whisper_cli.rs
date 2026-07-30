@@ -45,7 +45,7 @@ pub(crate) fn ensure_whisper_cli_available(whisper_cli_path: &str) -> Result<(),
     ))
 }
 
-pub(crate) fn can_execute_command(executable: &str) -> bool {
+fn can_execute_command(executable: &str) -> bool {
     let path = match validate_whisper_cli_candidate(executable) {
         Ok(path) => path,
         Err(_) => return false,
@@ -55,17 +55,17 @@ pub(crate) fn can_execute_command(executable: &str) -> bool {
         .unwrap_or(false)
 }
 
-pub(crate) fn run_help_probe(executable: &Path) -> Result<Output, std::io::Error> {
+fn run_help_probe(executable: &Path) -> Result<Output, std::io::Error> {
     Command::new(executable).arg("--help").output()
 }
 
-pub(crate) fn help_probe_looks_like_whisper_cli(output: &Output) -> bool {
+fn help_probe_looks_like_whisper_cli(output: &Output) -> bool {
     let stdout = String::from_utf8_lossy(&output.stdout);
     let stderr = String::from_utf8_lossy(&output.stderr);
     whisper_help_text_looks_valid(&stdout, &stderr)
 }
 
-pub(crate) fn help_probe_summary(output: &Output) -> String {
+fn help_probe_summary(output: &Output) -> String {
     let stderr = String::from_utf8_lossy(&output.stderr);
     if let Some(line) = stderr.lines().map(str::trim).find(|line| !line.is_empty()) {
         return line.to_string();
@@ -79,7 +79,7 @@ pub(crate) fn help_probe_summary(output: &Output) -> String {
     "no output".to_string()
 }
 
-pub(crate) fn whisper_help_text_looks_valid(stdout: &str, stderr: &str) -> bool {
+fn whisper_help_text_looks_valid(stdout: &str, stderr: &str) -> bool {
     let normalized = format!("{stdout}\n{stderr}").trim().to_ascii_lowercase();
     if normalized.is_empty() {
         return false;
@@ -99,7 +99,7 @@ pub(crate) fn whisper_help_text_looks_valid(stdout: &str, stderr: &str) -> bool 
     has_usage && has_model_flag
 }
 
-pub(crate) fn validate_whisper_cli_candidate(candidate: &str) -> Result<PathBuf, String> {
+fn validate_whisper_cli_candidate(candidate: &str) -> Result<PathBuf, String> {
     let resolved_path = resolve_command_path(candidate).ok_or_else(|| {
         if is_explicit_path(candidate) {
             format!(
@@ -153,7 +153,7 @@ pub(crate) fn validate_whisper_cli_candidate(candidate: &str) -> Result<PathBuf,
     Ok(resolved_path)
 }
 
-pub(crate) fn resolve_command_path(candidate: &str) -> Option<PathBuf> {
+fn resolve_command_path(candidate: &str) -> Option<PathBuf> {
     let trimmed = candidate.trim();
     if trimmed.is_empty() {
         return None;
@@ -216,11 +216,11 @@ pub(crate) fn resolve_command_path(candidate: &str) -> Option<PathBuf> {
     None
 }
 
-pub(crate) fn is_explicit_path(value: &str) -> bool {
+fn is_explicit_path(value: &str) -> bool {
     Path::new(value).is_absolute() || value.contains('/') || value.contains('\\')
 }
 
-pub(crate) fn preferred_arch_variants() -> Vec<&'static str> {
+fn preferred_arch_variants() -> Vec<&'static str> {
     let primary = std::env::consts::ARCH;
     let mut variants = vec![primary];
 
@@ -236,7 +236,7 @@ pub(crate) fn preferred_arch_variants() -> Vec<&'static str> {
     variants
 }
 
-pub(crate) fn preferred_whisper_cli_names() -> Vec<String> {
+fn preferred_whisper_cli_names() -> Vec<String> {
     let os = std::env::consts::OS;
     let mut names = Vec::<String>::new();
 
@@ -262,7 +262,7 @@ pub(crate) fn preferred_whisper_cli_names() -> Vec<String> {
     names
 }
 
-pub(crate) fn find_whisper_cli_in_dir(dir: &Path) -> Option<PathBuf> {
+fn find_whisper_cli_in_dir(dir: &Path) -> Option<PathBuf> {
     for name in preferred_whisper_cli_names() {
         let preferred = dir.join(name);
         if preferred.is_file() {
@@ -310,7 +310,7 @@ pub(crate) fn resolve_bundled_whisper_cli_path(app: &tauri::AppHandle) -> Option
     None
 }
 
-pub(crate) fn local_dev_sidecar_candidates() -> Vec<String> {
+fn local_dev_sidecar_candidates() -> Vec<String> {
     let binaries_dir = PathBuf::from(env!("CARGO_MANIFEST_DIR")).join("binaries");
     preferred_whisper_cli_names()
         .into_iter()
@@ -318,7 +318,7 @@ pub(crate) fn local_dev_sidecar_candidates() -> Vec<String> {
         .collect()
 }
 
-pub(crate) fn candidate_whisper_cli_paths(configured_path: &str) -> Vec<String> {
+fn candidate_whisper_cli_paths(configured_path: &str) -> Vec<String> {
     let mut candidates = Vec::<String>::new();
 
     if !configured_path.trim().is_empty() {
@@ -361,4 +361,30 @@ pub(crate) fn detect_whisper_cli_path(configured_path: &str) -> Option<String> {
     candidate_whisper_cli_paths(configured_path)
         .into_iter()
         .find(|candidate| can_execute_command(candidate))
+}
+
+
+
+#[cfg(test)]
+mod tests {
+    use super::{preferred_whisper_cli_names, whisper_help_text_looks_valid};
+
+    #[test]
+    fn whisper_help_text_accepts_real_help_snippet() {
+        let stdout = "usage: whisper-cli [options] file0.wav\n  -m FNAME  model path";
+        assert!(whisper_help_text_looks_valid(stdout, ""));
+    }
+
+    #[test]
+    fn whisper_help_text_rejects_placeholder_snippet() {
+        let stderr =
+            "Bundled whisper-cli placeholder. Replace with a real whisper-cli sidecar binary.";
+        assert!(!whisper_help_text_looks_valid("", stderr));
+    }
+
+    #[test]
+    fn preferred_whisper_cli_names_include_generic_fallback() {
+        let names = preferred_whisper_cli_names();
+        assert!(names.iter().any(|name| name == "whisper-cli"));
+    }
 }

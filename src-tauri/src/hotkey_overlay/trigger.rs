@@ -41,10 +41,10 @@ pub(crate) struct TriggerRuntimeDetails {
 
 #[derive(Default)]
 pub(crate) struct GlobalHotkeyState {
-    pub(crate) registered_trigger: Mutex<Option<String>>,
-    pub(crate) runtime_details: Mutex<TriggerRuntimeDetails>,
+    registered_trigger: Mutex<Option<String>>,
+    runtime_details: Mutex<TriggerRuntimeDetails>,
     #[cfg(target_os = "macos")]
-    pub(crate) macos_fn_listener: Mutex<Option<MacFnGlobalListener>>,
+    macos_fn_listener: Mutex<Option<MacFnGlobalListener>>,
 }
 
 impl Default for TriggerRuntimeDetails {
@@ -57,7 +57,7 @@ impl Default for TriggerRuntimeDetails {
     }
 }
 
-pub(crate) fn canonicalize_trigger_modifier(token: &str) -> Option<&'static str> {
+fn canonicalize_trigger_modifier(token: &str) -> Option<&'static str> {
     match token.to_ascii_lowercase().as_str() {
         "cmdorctrl" | "commandorcontrol" | "mod" | "primary" => Some("CmdOrCtrl"),
         "cmd" | "command" => Some("Cmd"),
@@ -69,7 +69,7 @@ pub(crate) fn canonicalize_trigger_modifier(token: &str) -> Option<&'static str>
     }
 }
 
-pub(crate) fn canonicalize_trigger_key(token: &str) -> Option<String> {
+fn canonicalize_trigger_key(token: &str) -> Option<String> {
     let trimmed = token.trim();
     let single_char = {
         let mut chars = trimmed.chars();
@@ -213,25 +213,25 @@ pub(crate) fn focused_field_insert_enabled(settings: &LocalSettings) -> bool {
     matches!(settings.focused_field_insert_enabled, Some(true))
 }
 
-pub(crate) fn global_toggle_status(trigger: &str) -> String {
+fn global_toggle_status(trigger: &str) -> String {
     format!("Press {trigger} anywhere to start or stop dictation.")
 }
 
-pub(crate) fn global_hold_status(trigger: &str) -> String {
+fn global_hold_status(trigger: &str) -> String {
     format!("Hold {trigger} anywhere to dictate, then release to transcribe.")
 }
 
-pub(crate) fn focused_window_hold_status(trigger: &str) -> String {
+fn focused_window_hold_status(trigger: &str) -> String {
     format!(
         "Hold {trigger} to dictate while dicktaint is focused. Grant Input Monitoring for global hold-to-talk."
     )
 }
 
-pub(crate) fn fn_permission_hint() -> String {
+fn fn_permission_hint() -> String {
     "System Settings > Privacy & Security > Input Monitoring: allow dicktaint (or Terminal while running tauri:dev), then relaunch dicktaint.".to_string()
 }
 
-pub(crate) fn set_trigger_runtime_details(
+fn set_trigger_runtime_details(
     hotkey_state: &GlobalHotkeyState,
     details: TriggerRuntimeDetails,
 ) -> Result<(), String> {
@@ -253,7 +253,7 @@ pub(crate) fn current_trigger_runtime_details(
         .map(|guard| guard.clone())
 }
 
-pub(crate) fn runtime_details_for_trigger(
+fn runtime_details_for_trigger(
     trigger: Option<&str>,
     mode: HotkeyDeliveryMode,
 ) -> TriggerRuntimeDetails {
@@ -321,7 +321,7 @@ pub(crate) fn dictation_trigger_payload(
 }
 
 #[cfg(not(any(target_os = "android", target_os = "ios")))]
-pub(crate) fn shortcut_from_dictation_trigger(trigger: &str) -> Result<Shortcut, String> {
+fn shortcut_from_dictation_trigger(trigger: &str) -> Result<Shortcut, String> {
     let normalized = normalize_dictation_trigger(trigger)?;
     let accelerator = normalized
         .replace("CmdOrCtrl", "CommandOrControl")
@@ -330,7 +330,7 @@ pub(crate) fn shortcut_from_dictation_trigger(trigger: &str) -> Result<Shortcut,
         .map_err(|e| format!("Could not parse hotkey '{normalized}' for global registration: {e}"))
 }
 
-pub(crate) fn set_registered_hotkey_state(
+fn set_registered_hotkey_state(
     hotkey_state: &GlobalHotkeyState,
     next: Option<String>,
 ) -> Result<(), String> {
@@ -342,7 +342,7 @@ pub(crate) fn set_registered_hotkey_state(
     Ok(())
 }
 
-pub(crate) fn update_hotkey_state(
+fn update_hotkey_state(
     hotkey_state: &GlobalHotkeyState,
     trigger: Option<String>,
     runtime: TriggerRuntimeDetails,
@@ -360,17 +360,17 @@ pub(crate) fn current_registered_hotkey(hotkey_state: &GlobalHotkeyState) -> Res
 }
 
 #[cfg(target_os = "macos")]
-pub(crate) fn should_register_global_hotkey(trigger: &str) -> bool {
+fn should_register_global_hotkey(trigger: &str) -> bool {
     trigger != "Fn"
 }
 
 #[cfg(not(target_os = "macos"))]
-pub(crate) fn should_register_global_hotkey(_trigger: &str) -> bool {
+fn should_register_global_hotkey(_trigger: &str) -> bool {
     true
 }
 
 #[cfg(target_os = "macos")]
-pub(crate) fn set_macos_fn_listener_enabled(
+fn set_macos_fn_listener_enabled(
     app: &tauri::AppHandle,
     hotkey_state: &GlobalHotkeyState,
     enabled: bool,
@@ -580,4 +580,120 @@ pub(crate) fn apply_registered_hotkey(
     };
     update_hotkey_state(hotkey_state, next, runtime.clone())?;
     Ok(runtime)
+}
+
+
+
+#[cfg(test)]
+mod tests {
+    use super::{
+        default_dictation_trigger, focused_field_insert_enabled, normalize_dictation_trigger,
+        onboarding_runtime_details, resolve_effective_dictation_trigger,
+        runtime_details_for_trigger, HotkeyDeliveryMode,
+    };
+    use crate::state::LocalSettings;
+
+    #[test]
+    fn normalize_dictation_trigger_accepts_valid_combo() {
+        assert_eq!(
+            normalize_dictation_trigger("cmdorctrl + shift + d").unwrap(),
+            "CmdOrCtrl+Shift+D".to_string()
+        );
+    }
+
+    #[test]
+    fn normalize_dictation_trigger_accepts_fn_key() {
+        assert_eq!(normalize_dictation_trigger("fn").unwrap(), "Fn".to_string());
+        assert_eq!(
+            normalize_dictation_trigger("globe").unwrap(),
+            "Fn".to_string()
+        );
+    }
+
+    #[test]
+    fn normalize_dictation_trigger_rejects_fn_with_modifiers() {
+        assert!(normalize_dictation_trigger("Shift+Fn").is_err());
+    }
+
+    #[test]
+    fn normalize_dictation_trigger_rejects_missing_modifier() {
+        assert!(normalize_dictation_trigger("D").is_err());
+    }
+
+    #[test]
+    fn normalize_dictation_trigger_rejects_multiple_main_keys() {
+        assert!(normalize_dictation_trigger("Ctrl+K+J").is_err());
+    }
+
+    #[test]
+    fn resolve_effective_trigger_defaults_when_unset() {
+        let settings = LocalSettings::default();
+        assert_eq!(
+            resolve_effective_dictation_trigger(&settings),
+            Some(default_dictation_trigger())
+        );
+    }
+
+    #[test]
+    fn resolve_effective_trigger_honors_explicit_disable() {
+        let settings = LocalSettings {
+            dictation_trigger_enabled: Some(false),
+            ..LocalSettings::default()
+        };
+        assert_eq!(resolve_effective_dictation_trigger(&settings), None);
+    }
+
+    #[test]
+    fn resolve_effective_trigger_uses_saved_value() {
+        let settings = LocalSettings {
+            dictation_trigger: Some("CmdOrCtrl+Shift+K".to_string()),
+            dictation_trigger_enabled: Some(true),
+            ..LocalSettings::default()
+        };
+        assert_eq!(
+            resolve_effective_dictation_trigger(&settings),
+            Some("CmdOrCtrl+Shift+K".to_string())
+        );
+    }
+
+    #[test]
+    fn focused_field_insert_defaults_to_disabled() {
+        let settings = LocalSettings::default();
+        assert!(!focused_field_insert_enabled(&settings));
+    }
+
+    #[test]
+    fn focused_field_insert_uses_explicit_enabled_setting() {
+        let settings = LocalSettings {
+            focused_field_insert_enabled: Some(true),
+            ..LocalSettings::default()
+        };
+        assert!(focused_field_insert_enabled(&settings));
+    }
+
+    #[test]
+    fn runtime_details_report_fn_permission_fallback() {
+        let runtime =
+            runtime_details_for_trigger(Some("Fn"), HotkeyDeliveryMode::FocusedWindowHold);
+        assert_eq!(runtime.mode.as_str(), "focused-window-hold");
+        assert!(runtime.status.contains("focused"));
+        assert!(runtime.permission_hint.is_some());
+    }
+
+    #[test]
+    fn onboarding_runtime_prefers_registered_global_fn_state() {
+        let registered_runtime =
+            runtime_details_for_trigger(Some("Fn"), HotkeyDeliveryMode::GlobalHold);
+        let runtime = onboarding_runtime_details(Some("Fn"), Some("Fn"), Some(&registered_runtime));
+        assert_eq!(runtime.mode.as_str(), "global-hold");
+        assert!(runtime.status.contains("anywhere"));
+    }
+
+    #[test]
+    fn onboarding_runtime_falls_back_when_fn_runtime_is_unknown() {
+        let runtime = onboarding_runtime_details(Some("Fn"), None, None);
+        assert_eq!(runtime.mode.as_str(), "focused-window-hold");
+        assert!(runtime.status.contains("focused"));
+        assert!(runtime.permission_hint.is_some());
+    }
 }

@@ -9,7 +9,7 @@ use std::process::Command;
 use std::time::{SystemTime, UNIX_EPOCH};
 
 
-pub(crate) fn resample_linear(samples: &[f32], source_rate: u32, target_rate: u32) -> Vec<f32> {
+fn resample_linear(samples: &[f32], source_rate: u32, target_rate: u32) -> Vec<f32> {
     if samples.is_empty() || source_rate == 0 {
         return Vec::new();
     }
@@ -34,7 +34,7 @@ pub(crate) fn resample_linear(samples: &[f32], source_rate: u32, target_rate: u3
     out
 }
 
-pub(crate) fn write_wav(path: &PathBuf, samples: &[f32], sample_rate: u32) -> Result<(), String> {
+fn write_wav(path: &PathBuf, samples: &[f32], sample_rate: u32) -> Result<(), String> {
     let spec = hound::WavSpec {
         channels: 1,
         sample_rate,
@@ -84,11 +84,11 @@ pub(crate) fn analyze_audio_signal(samples: &[f32], sample_rate: u32) -> AudioSi
     }
 }
 
-pub(crate) fn audio_signal_is_too_quiet(stats: AudioSignalStats) -> bool {
+fn audio_signal_is_too_quiet(stats: AudioSignalStats) -> bool {
     stats.peak_abs < MIN_TRANSCRIPTION_AUDIO_PEAK && stats.rms < MIN_TRANSCRIPTION_AUDIO_RMS
 }
 
-pub(crate) fn normalize_audio_gain(samples: Vec<f32>, stats: AudioSignalStats) -> Vec<f32> {
+fn normalize_audio_gain(samples: Vec<f32>, stats: AudioSignalStats) -> Vec<f32> {
     if stats.peak_abs <= 0.0 {
         return samples;
     }
@@ -104,14 +104,14 @@ pub(crate) fn normalize_audio_gain(samples: Vec<f32>, stats: AudioSignalStats) -
         .collect()
 }
 
-pub(crate) fn quiet_audio_error(stats: AudioSignalStats, input_device_name: &str) -> String {
+fn quiet_audio_error(stats: AudioSignalStats, input_device_name: &str) -> String {
     format!(
         "Captured audio from '{}' was too quiet to transcribe (peak {:.4}, rms {:.4}, {:.1}s). Check macOS Sound > Input, confirm the selected microphone, and retry.",
         input_device_name, stats.peak_abs, stats.rms, stats.duration_secs
     )
 }
 
-pub(crate) fn is_transcript_artifact_token(token: &str) -> bool {
+fn is_transcript_artifact_token(token: &str) -> bool {
     let normalized = token.trim_matches(|ch: char| !ch.is_ascii_alphanumeric() && ch != '_');
     let upper = normalized.to_ascii_uppercase();
     matches!(
@@ -120,7 +120,7 @@ pub(crate) fn is_transcript_artifact_token(token: &str) -> bool {
     )
 }
 
-pub(crate) fn normalize_transcript_text(raw: &str) -> String {
+fn normalize_transcript_text(raw: &str) -> String {
     raw.split_whitespace()
         .filter(|token| !is_transcript_artifact_token(token))
         .collect::<Vec<_>>()
@@ -214,4 +214,64 @@ pub(crate) fn transcribe_samples(
     }
 
     Ok(cleaned)
+}
+
+
+
+#[cfg(test)]
+mod tests {
+    use super::{
+        analyze_audio_signal, audio_signal_is_too_quiet, normalize_audio_gain, quiet_audio_error,
+        resample_linear,
+    };
+
+    #[test]
+    fn resample_linear_returns_same_when_rate_matches() {
+        let source = vec![0.0_f32, 0.5, -0.5, 1.0];
+        let out = resample_linear(&source, 16_000, 16_000);
+        assert_eq!(out, source);
+    }
+
+    #[test]
+    fn resample_linear_produces_output_when_rate_changes() {
+        let source = vec![0.0_f32, 1.0, 0.0, -1.0];
+        let out = resample_linear(&source, 8_000, 16_000);
+        assert!(out.len() > source.len());
+        assert!(out.iter().all(|sample| sample.is_finite()));
+    }
+
+    #[test]
+    fn analyze_audio_signal_reports_peak_rms_and_duration() {
+        let samples = vec![0.0_f32, 0.25, -0.5, 0.5];
+        let stats = analyze_audio_signal(&samples, 8_000);
+        assert!((stats.peak_abs - 0.5).abs() < 0.0001);
+        assert!(stats.rms > 0.0);
+        assert!(stats.duration_secs > 0.0);
+    }
+
+    #[test]
+    fn quiet_audio_detection_flags_near_silent_capture() {
+        let samples = vec![0.0002_f32; 16_000];
+        let stats = analyze_audio_signal(&samples, 16_000);
+        assert!(audio_signal_is_too_quiet(stats));
+        assert!(quiet_audio_error(stats, "MacBook Pro Microphone").contains("too quiet"));
+    }
+
+    #[test]
+    fn normalize_audio_gain_boosts_quiet_but_valid_audio() {
+        let samples = vec![0.01_f32, -0.02, 0.03, -0.04];
+        let stats = analyze_audio_signal(&samples, 16_000);
+        assert!(!audio_signal_is_too_quiet(stats));
+        let boosted = normalize_audio_gain(samples.clone(), stats);
+        let boosted_peak = boosted
+            .iter()
+            .map(|sample| sample.abs())
+            .fold(0.0_f32, f32::max);
+        let original_peak = samples
+            .iter()
+            .map(|sample| sample.abs())
+            .fold(0.0_f32, f32::max);
+        assert!(boosted_peak > original_peak);
+        assert!(boosted_peak <= 0.85);
+    }
 }
