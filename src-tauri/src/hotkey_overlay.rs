@@ -1,7 +1,7 @@
 //! Global hotkeys, pill overlay windows, menu bar tray, and background UI sync.
 
-use crate::commands::{
-    cancel_native_dictation_if_active, start_native_dictation_inner, stop_native_dictation_inner,
+use crate::dictation_session::{
+    cancel_if_active, current_active_session_id, is_benign_session_error, is_running, start, stop,
 };
 use crate::state::{
     BackendDictationStatus, BackendHotkeyAction, CloseAction,
@@ -544,7 +544,7 @@ pub(crate) fn handle_tray_menu_event(app: &tauri::AppHandle, menu_id: &tauri::me
     }
 
     if menu_id == TRAY_MENU_FORCE_STOP_ID {
-        if let Err(error) = cancel_native_dictation_if_active(app) {
+        if let Err(error) = cancel_if_active(app) {
             emit_dictation_state(
                 app,
                 "error",
@@ -558,7 +558,7 @@ pub(crate) fn handle_tray_menu_event(app: &tauri::AppHandle, menu_id: &tauri::me
     }
 
     if menu_id == TRAY_MENU_QUIT_ID {
-        if let Err(error) = cancel_native_dictation_if_active(app) {
+        if let Err(error) = cancel_if_active(app) {
             log::warn!("Tray quit mic teardown failed: {error}");
         }
         app.exit(0);
@@ -572,21 +572,16 @@ pub(crate) fn handle_tray_menu_event(app: &tauri::AppHandle, menu_id: &tauri::me
     let handle = app.clone();
     tauri::async_runtime::spawn(async move {
         let result = match current_backend_dictation_status(&handle) {
-            Ok(BackendDictationStatus::Listening) => stop_native_dictation_inner(handle.clone())
-                .await
-                .map(|_| ()),
+            Ok(BackendDictationStatus::Listening) => stop(handle.clone()).await.map(|_| ()),
             Ok(BackendDictationStatus::Processing) => Ok(()),
             Ok(BackendDictationStatus::Idle | BackendDictationStatus::Error) => {
-                start_native_dictation_inner(&handle).map(|_| ())
+                start(&handle).map(|_| ())
             }
             Err(error) => Err(error),
         };
 
         if let Err(error) = result {
-            let trimmed = error.trim();
-            let benign =
-                trimmed == "Dictation already running." || trimmed == "Dictation is not running.";
-            if !benign {
+            if !is_benign_session_error(&error) {
                 log::warn!("Tray dictation action failed: {error}");
                 emit_dictation_state(&handle, "error", Some(error), None, None);
             }
@@ -753,49 +748,29 @@ pub(crate) fn emit_dictation_state(
     .ok();
 }
 
-pub(crate) fn current_active_session_id(app: &tauri::AppHandle) -> Result<Option<u64>, String> {
-    let dictation = app.state::<DictationState>();
-    dictation
-        .active_recording
-        .lock()
-        .map_err(|_| "Failed to lock dictation state".to_string())
-        .map(|guard| guard.as_ref().map(|recording| recording.session_id))
-}
-
-pub(crate) fn dictation_is_running(app: &tauri::AppHandle) -> Result<bool, String> {
-    current_active_session_id(app).map(|value| value.is_some())
-}
-
 pub(crate) fn dispatch_backend_hotkey_action(app: &tauri::AppHandle, action: BackendHotkeyAction) {
     let handle = app.clone();
     tauri::async_runtime::spawn(async move {
         let result: Result<(), String> = match action {
-            BackendHotkeyAction::Toggle => match dictation_is_running(&handle) {
-                Ok(true) => stop_native_dictation_inner(handle.clone())
-                    .await
-                    .map(|_| ()),
-                Ok(false) => start_native_dictation_inner(&handle).map(|_| ()),
+            BackendHotkeyAction::Toggle => match is_running(&handle) {
+                Ok(true) => stop(handle.clone()).await.map(|_| ()),
+                Ok(false) => start(&handle).map(|_| ()),
                 Err(error) => Err(error),
             },
-            BackendHotkeyAction::HoldStart => match dictation_is_running(&handle) {
+            BackendHotkeyAction::HoldStart => match is_running(&handle) {
                 Ok(true) => Ok(()),
-                Ok(false) => start_native_dictation_inner(&handle).map(|_| ()),
+                Ok(false) => start(&handle).map(|_| ()),
                 Err(error) => Err(error),
             },
-            BackendHotkeyAction::HoldStop => match dictation_is_running(&handle) {
-                Ok(true) => stop_native_dictation_inner(handle.clone())
-                    .await
-                    .map(|_| ()),
+            BackendHotkeyAction::HoldStop => match is_running(&handle) {
+                Ok(true) => stop(handle.clone()).await.map(|_| ()),
                 Ok(false) => Ok(()),
                 Err(error) => Err(error),
             },
         };
 
         if let Err(error) = result {
-            let trimmed = error.trim();
-            let benign =
-                trimmed == "Dictation already running." || trimmed == "Dictation is not running.";
-            if !benign {
+            if !is_benign_session_error(&error) {
                 log::warn!("Global hotkey action failed: {error}");
                 emit_dictation_state(&handle, "error", Some(error), None, None);
             }

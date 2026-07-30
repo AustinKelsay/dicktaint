@@ -2,6 +2,7 @@
 
 mod audio;
 mod commands;
+mod dictation_session;
 mod hotkey_overlay;
 mod insert;
 mod models;
@@ -10,13 +11,13 @@ mod transcribe;
 mod whisper_cli;
 
 use commands::{
-    cancel_native_dictation, cancel_native_dictation_if_active, clear_dictation_trigger,
-    delete_dictation_model, get_dictation_onboarding, get_dictation_trigger,
-    insert_text_into_focused_field, install_dictation_model, open_whisper_setup_page,
-    set_close_action, set_dictation_trigger, set_focused_field_insert_enabled,
-    set_menu_bar_mode, set_pill_visibility_mode, set_preferred_input_device,
-    start_native_dictation, stop_native_dictation,
+    cancel_native_dictation, clear_dictation_trigger, delete_dictation_model,
+    get_dictation_onboarding, get_dictation_trigger, insert_text_into_focused_field,
+    install_dictation_model, open_whisper_setup_page, set_close_action, set_dictation_trigger,
+    set_focused_field_insert_enabled, set_menu_bar_mode, set_pill_visibility_mode,
+    set_preferred_input_device, start_native_dictation, stop_native_dictation,
 };
+use dictation_session::cancel_if_active;
 use hotkey_overlay::{
     GlobalHotkeyState,
     apply_registered_hotkey, create_pill_overlay_windows, current_background_ui_preferences,
@@ -553,7 +554,7 @@ fn main() {
         #[cfg(target_os = "macos")]
         tauri::RunEvent::Reopen { .. } => show_main_window(app_handle),
         tauri::RunEvent::ExitRequested { .. } | tauri::RunEvent::Exit => {
-            if let Err(error) = cancel_native_dictation_if_active(app_handle) {
+            if let Err(error) = cancel_if_active(app_handle) {
                 log::warn!("Failed to cancel active dictation during app exit: {error}");
             }
         }
