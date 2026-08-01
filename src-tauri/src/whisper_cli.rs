@@ -314,6 +314,7 @@ pub(crate) fn resolve_bundled_whisper_cli_path(app: &tauri::AppHandle) -> Option
     }
 
     // In tauri:dev, sidecar binaries usually live in src-tauri/binaries.
+    #[cfg(debug_assertions)]
     candidate_dirs.push(PathBuf::from(env!("CARGO_MANIFEST_DIR")).join("binaries"));
 
     let mut deduped = Vec::<PathBuf>::new();
@@ -332,12 +333,18 @@ pub(crate) fn resolve_bundled_whisper_cli_path(app: &tauri::AppHandle) -> Option
     None
 }
 
+#[cfg(debug_assertions)]
 fn local_dev_sidecar_candidates() -> Vec<String> {
     let binaries_dir = PathBuf::from(env!("CARGO_MANIFEST_DIR")).join("binaries");
     preferred_whisper_cli_names()
         .into_iter()
         .map(|name| binaries_dir.join(name).to_string_lossy().to_string())
         .collect()
+}
+
+#[cfg(not(debug_assertions))]
+fn local_dev_sidecar_candidates() -> Vec<String> {
+    Vec::new()
 }
 
 fn candidate_whisper_cli_paths(configured_path: &str) -> Vec<String> {

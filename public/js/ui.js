@@ -23,8 +23,10 @@ export function setUiMode(mode) {
 
 
 export function setStatus(message, tone = 'neutral') {
-  dom.statusEl.textContent = message;
-  dom.statusEl.dataset.tone = tone;
+  if (dom.statusEl) {
+    dom.statusEl.textContent = message;
+    dom.statusEl.dataset.tone = tone;
+  }
   syncHotkeyPillForStatus(message, tone);
 }
 
@@ -229,21 +231,27 @@ export function syncControls() {
   const hasPendingHotkey = Boolean(normalizedPending);
   const savedIsDefault = Boolean(normalizedSaved && state.defaultDictationHotkey && normalizedSaved === state.defaultDictationHotkey);
 
-  dom.startDictationBtn.disabled = (
-    lockControls
-    || !hasCaptureSupport
-    || state.isDictating
-    || state.isStartingDictation
-    || state.nativeStopRequestInFlight
-    || dictationModelMissing
-  );
-  dom.stopDictationBtn.disabled = (
-    lockControls
-    || !hasCaptureSupport
-    || state.nativeStopRequestInFlight
-    || (!state.isDictating && !state.isStartingDictation)
-  );
-  dom.clearTranscriptBtn.disabled = lockControls || state.nativeStopRequestInFlight;
+  if (dom.startDictationBtn) {
+    dom.startDictationBtn.disabled = (
+      lockControls
+      || !hasCaptureSupport
+      || state.isDictating
+      || state.isStartingDictation
+      || state.nativeStopRequestInFlight
+      || dictationModelMissing
+    );
+  }
+  if (dom.stopDictationBtn) {
+    dom.stopDictationBtn.disabled = (
+      lockControls
+      || !hasCaptureSupport
+      || state.nativeStopRequestInFlight
+      || (!state.isDictating && !state.isStartingDictation)
+    );
+  }
+  if (dom.clearTranscriptBtn) {
+    dom.clearTranscriptBtn.disabled = lockControls || state.nativeStopRequestInFlight;
+  }
 
   if (dom.installDictationModelBtn) {
     dom.installDictationModelBtn.disabled = (
@@ -301,7 +309,7 @@ export function syncControls() {
     if (isNativeDesktopMode()) {
       dom.quickDictationFab.hidden = true; // pill window handles this in native desktop mode
     } else {
-      dom.quickDictationFab.disabled = dom.startDictationBtn.disabled && dom.stopDictationBtn.disabled;
+      dom.quickDictationFab.disabled = Boolean(dom.startDictationBtn?.disabled && dom.stopDictationBtn?.disabled);
       dom.quickDictationFab.setAttribute('aria-label',
         state.isDictating || state.isStartingDictation ? 'Stop dictation' : 'Start dictation');
     }

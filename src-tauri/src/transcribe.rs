@@ -7,7 +7,10 @@ use crate::state::{
 use std::fs;
 use std::path::{Path, PathBuf};
 use std::process::Command;
+use std::sync::atomic::{AtomicU64, Ordering};
 use std::time::{SystemTime, UNIX_EPOCH};
+
+static TRANSCRIPTION_TEMP_DIR_COUNTER: AtomicU64 = AtomicU64::new(0);
 
 /// Owns a unique temp directory for one transcription and removes it on drop.
 struct TranscriptionTempDir {
@@ -16,22 +19,38 @@ struct TranscriptionTempDir {
 
 impl TranscriptionTempDir {
     /// Creates a unique directory under the system temp dir for this transcription.
+    ///
+    /// Uses an atomic counter plus `create_dir` (fails if the path already exists) and
+    /// retries a few times so concurrent transcriptions cannot collide.
     fn create() -> Result<Self, String> {
-        let tick = SystemTime::now()
-            .duration_since(UNIX_EPOCH)
-            .map(|d| d.as_millis())
-            .unwrap_or(0);
-        let path = std::env::temp_dir().join(format!(
-            "dicktaint-transcribe-{}-{tick}",
-            std::process::id()
-        ));
-        fs::create_dir_all(&path).map_err(|e| {
-            format!(
-                "Failed to create transcription temp directory {}: {e}",
-                path.display()
-            )
-        })?;
-        Ok(Self { path })
+        const MAX_ATTEMPTS: u32 = 8;
+        let pid = std::process::id();
+
+        for _ in 0..MAX_ATTEMPTS {
+            let tick = SystemTime::now()
+                .duration_since(UNIX_EPOCH)
+                .map(|d| d.as_nanos())
+                .unwrap_or(0);
+            let counter = TRANSCRIPTION_TEMP_DIR_COUNTER.fetch_add(1, Ordering::Relaxed);
+            let path = std::env::temp_dir().join(format!(
+                "dicktaint-transcribe-{pid}-{tick}-{counter}"
+            ));
+            match fs::create_dir(&path) {
+                Ok(()) => return Ok(Self { path }),
+                Err(error) if error.kind() == std::io::ErrorKind::AlreadyExists => continue,
+                Err(error) => {
+                    return Err(format!(
+                        "Failed to create transcription temp directory {}: {error}",
+                        path.display()
+                    ));
+                }
+            }
+        }
+
+        Err(
+            "Failed to create a unique transcription temp directory after several attempts"
+                .to_string(),
+        )
     }
 
     fn path(&self) -> &Path {

@@ -36,7 +36,10 @@ export function buildDictationModelLabel(model) {
   const fit = model.recommended
     ? 'Recommended'
     : (model.likely_runnable ? 'Likely runnable' : 'Heavy for this machine');
-  const local = model.installed ? 'Installed' : `${model.approx_size_gb} GB`;
+  const sizeValue = Number(model.approx_size_gb);
+  const local = model.installed
+    ? 'Installed'
+    : (Number.isFinite(sizeValue) ? `${sizeValue} GB` : 'size unknown');
   return `${modelDisplayName(model)} • ${local} • ${fit}`;
 }
 
@@ -108,9 +111,11 @@ export async function installSelectedDictationModel() {
       setDictationModelStatus(`Switching to ${modelDisplayName(selected)}...`, 'neutral');
       setStatus(`Switching active model to ${modelDisplayName(selected)}...`, 'working');
     } else {
-      setDictationModelBusy(`Downloading ${modelDisplayName(selected)} (~${selected.approx_size_gb} GB). Keep this window open...`);
+      const sizeValue = Number(selected.approx_size_gb);
+      const sizeLabel = Number.isFinite(sizeValue) ? `~${sizeValue} GB` : 'size unknown';
+      setDictationModelBusy(`Downloading ${modelDisplayName(selected)} (${sizeLabel}). Keep this window open...`);
       setDictationModelStatus(
-        `Downloading ${modelDisplayName(selected)} (~${selected.approx_size_gb} GB). Keep this window open while it downloads...`,
+        `Downloading ${modelDisplayName(selected)} (${sizeLabel}). Keep this window open while it downloads...`,
         'neutral'
       );
       setStatus(`Downloading ${modelDisplayName(selected)} model...`, 'working');

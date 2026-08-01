@@ -294,7 +294,7 @@ pub(crate) fn build_model_options(
         .iter()
         .map(|spec| {
             let path = model_path_for_spec(models_dir, *spec);
-            let installed = path.exists();
+            let installed = model_file_looks_installed(&path, *spec);
             let likely_runnable = total_memory_gb >= spec.min_ram_gb;
             let recommended = recommended_model_id.is_some_and(|id| id == spec.id);
             let is_selected = selected_model_id.is_some_and(|id| id == spec.id);
@@ -333,7 +333,7 @@ pub(crate) fn pick_best_installed_model(
         .filter(|spec| !exclude_model_id.is_some_and(|exclude| exclude == spec.id))
         .filter_map(|spec| {
             let path = model_path_for_spec(models_dir, spec);
-            if path.exists() {
+            if model_file_looks_installed(&path, spec) {
                 Some((spec, path))
             } else {
                 None
@@ -366,6 +366,7 @@ pub(crate) fn resolve_active_model_path(
         .settings
         .lock()
         .map_err(|_| "Failed to lock local model settings".to_string())?;
+    let selected_model_id = settings.selected_model_id.clone();
     let saved_path = settings
         .selected_model_path
         .as_deref()
@@ -377,7 +378,17 @@ pub(crate) fn resolve_active_model_path(
         })?;
 
     let path = PathBuf::from(saved_path);
-    if !path.exists() {
+    if let Some(spec) = selected_model_id
+        .as_deref()
+        .and_then(find_whisper_model_spec)
+    {
+        if !model_file_looks_installed(&path, spec) {
+            return Err(format!(
+                "Selected dictation model file is missing or incomplete: {}. Reinstall/select a model in onboarding.",
+                path.display()
+            ));
+        }
+    } else if !path.exists() {
         return Err(format!(
             "Selected dictation model file is missing: {}. Reinstall/select a model in onboarding.",
             path.display()
@@ -412,7 +423,17 @@ pub(crate) fn download_whisper_model(model_spec: WhisperModelSpec, target_path: 
         .output();
 
     match output {
-        Ok(result) if result.status.success() && target_path.exists() => Ok(()),
+        Ok(result) if result.status.success() => {
+            if model_file_looks_installed(target_path, model_spec) {
+                Ok(())
+            } else {
+                cleanup_partial_model_download(target_path);
+                Err(format!(
+                    "Model download completed but file is missing or too small at {}.",
+                    target_path.display()
+                ))
+            }
+        }
         Ok(result) => {
             cleanup_partial_model_download(target_path);
             let stderr = String::from_utf8_lossy(&result.stderr).trim().to_string();

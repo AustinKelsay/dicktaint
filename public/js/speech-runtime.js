@@ -14,6 +14,7 @@ export function scheduleRecognitionRestart() {
 
   // Browser speech engines can end between utterances; auto-restart keeps hands-free flow.
   state.restartTimer = setTimeout(() => {
+    state.restartTimer = null;
     if (!state.recognition || !state.shouldKeepDictating || state.isStartingDictation || state.isDictating) return;
 
     try {

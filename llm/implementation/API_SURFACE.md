@@ -69,7 +69,7 @@ Event channels:
 - frontend local fallback only: `dictation:hotkey-triggered` payload `{ pressed }`
 - backend to frontend (and overlay): `dictation:state-changed` payload `{ state, error?, transcript?, session_id? }`
   - dictation session `state` vocabulary: `idle` | `listening` | `processing` | `error`
-- backend to frontend/overlay: `dictation:audio-level` payload `{ level, bars?, session_id? }`
+- backend to frontend/overlay: `dictation:audio-level` payload `{ session_id, peak_abs, rms, level, bars }` (always present; matches `DictationAudioLevelPayload`)
 - backend/frontend to overlay: `dicktaint://pill-status` payload `{ message, state, visible }`
   - pill UI `state` vocabulary (distinct from dictation session states): `idle` | `working` | `live` | `ok` | `error`
 - event name constants: SPA in `public/js/constants.js`; overlay duplicates strings in `public/pill.js`

@@ -124,7 +124,7 @@ export function initSettingsListeners() {
       state.pendingDictationHotkey = String(event?.currentTarget?.value || '').trim();
       state.isCapturingDictationHotkey = false;
       if (!state.pendingDictationHotkey) {
-        setDictationHotkeyStatus(`Hotkey disabled. Default: ${state.defaultDictationHotkey}.`, 'neutral');
+        setDictationHotkeyStatus(`Hotkey disabled. Default: ${state.defaultDictationHotkey || DEFAULT_DICTATION_HOTKEY}.`, 'neutral');
       } else {
         setDictationHotkeyStatus(`Pending hotkey: ${state.pendingDictationHotkey}. Click "Save Hotkey" to apply.`, 'neutral');
       }

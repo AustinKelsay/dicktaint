@@ -302,10 +302,14 @@ fn create_input_stream_for_device(
     if let Err(error) =
         wait_for_non_silent_input(&samples, probe_start_len, sample_rate, device_name)
     {
+        // Pause before truncating so the stream callback cannot append after we roll back.
+        if let Err(pause_error) = stream.pause() {
+            log::warn!("Failed to pause microphone stream after probe failure: {pause_error}");
+        }
         if let Ok(mut guard) = samples.lock() {
             guard.truncate(probe_start_len);
         }
-        stop_and_drop_input_stream(stream);
+        drop(stream);
         return Err(error);
     }
 
@@ -380,26 +384,22 @@ fn probe_input_stream_activity(
     let mut saw_any_frames = false;
 
     loop {
-        let observed = if let Ok(guard) = samples.lock() {
+        let captured = if let Ok(guard) = samples.lock() {
             if guard.len() <= start_len {
                 None
             } else {
-                let captured = &guard[start_len..];
-                Some((
-                    captured.len(),
-                    analyze_audio_signal(captured, sample_rate).peak_abs,
-                ))
+                Some(guard[start_len..].to_vec())
             }
         } else {
             None
         };
 
-        if let Some((captured_len, peak_abs)) = observed {
+        if let Some(captured) = captured {
             saw_any_frames = true;
+            let peak_abs = analyze_audio_signal(&captured, sample_rate).peak_abs;
             if peak_abs > 0.0 {
                 return Ok(InputStreamProbeOutcome::NonSilentFrames);
             }
-            let _ = captured_len;
         }
 
         if Instant::now() >= deadline {

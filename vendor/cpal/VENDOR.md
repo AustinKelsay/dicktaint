@@ -1,6 +1,7 @@
 # Vendored `cpal` (dicktaint)
 
-This tree is a local path dependency, not an upstream submodule checkout for convenience.
+This tree is a local Cargo path dependency under `vendor/cpal`, patched into the
+workspace via `[patch.crates-io]`. It is not an upstream git submodule.
 
 ## Why it exists
 

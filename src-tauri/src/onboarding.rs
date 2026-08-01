@@ -10,7 +10,9 @@ use crate::hotkey_overlay::{
     resolve_effective_dictation_trigger,
 };
 use crate::insert::focused_field_insert_permission_status;
-use crate::models::{build_device_profile, build_model_options};
+use crate::models::{
+    build_device_profile, build_model_options, find_whisper_model_spec, model_file_looks_installed,
+};
 use crate::state::{
     resolve_background_ui_preferences, AppConfig, DictationOnboardingPayload, LocalModelState,
 };
@@ -48,11 +50,13 @@ pub(crate) fn build_onboarding_payload(
     let selected_model_exists = if override_model_path.is_some() {
         override_model_exists
     } else {
-        settings
-            .selected_model_path
-            .as_deref()
-            .map(|value| Path::new(value).exists())
-            .unwrap_or(false)
+        match (
+            settings.selected_model_id.as_deref().and_then(find_whisper_model_spec),
+            settings.selected_model_path.as_deref(),
+        ) {
+            (Some(spec), Some(path)) => model_file_looks_installed(Path::new(path), spec),
+            _ => false,
+        }
     };
     let selected_model_id = if override_model_path.is_some() {
         Some("env-override".to_string())
