@@ -79,6 +79,11 @@ while IFS= read -r anchor; do
   case "$anchor" in
     *'*'*|*/|llm|public|docs|scripts|tests|src-tauri) continue ;;
   esac
+  # Reject path traversal before existence check.
+  if [[ "$anchor" == *'/..'* || "$anchor" == '..'* || "$anchor" == *'/..' || "$anchor" == '..' ]]; then
+    note_fail "Source anchor path contains '..' component: $anchor"
+    continue
+  fi
   if [[ ! -e "$anchor" ]]; then
     note_fail "Missing repo-relative source anchor path: $anchor"
   fi

@@ -280,6 +280,9 @@ export function handleNativeDictationStatePayload(payload) {
     || payloadSessionId === state.activeNativeSessionId;
 
   if (s === 'listening') {
+    // Ignore late listening events from a superseded session; allow first
+    // listening when activeNativeSessionId is still null (sessionMatchesCurrent).
+    if (!sessionMatchesCurrent) return;
     state.activeNativeSessionId = payloadSessionId || state.activeNativeSessionId;
     state.isStartingDictation = false;
     setDictationState(true);

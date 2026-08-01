@@ -4,9 +4,46 @@ use crate::state::{
     AudioSignalStats, MAX_TRANSCRIPTION_AUDIO_GAIN, MIN_TRANSCRIPTION_AUDIO_PEAK,
     MIN_TRANSCRIPTION_AUDIO_RMS, TARGET_TRANSCRIPTION_AUDIO_PEAK, WHISPER_SAMPLE_RATE,
 };
-use std::path::PathBuf;
+use std::fs;
+use std::path::{Path, PathBuf};
 use std::process::Command;
 use std::time::{SystemTime, UNIX_EPOCH};
+
+/// Owns a unique temp directory for one transcription and removes it on drop.
+struct TranscriptionTempDir {
+    path: PathBuf,
+}
+
+impl TranscriptionTempDir {
+    /// Creates a unique directory under the system temp dir for this transcription.
+    fn create() -> Result<Self, String> {
+        let tick = SystemTime::now()
+            .duration_since(UNIX_EPOCH)
+            .map(|d| d.as_millis())
+            .unwrap_or(0);
+        let path = std::env::temp_dir().join(format!(
+            "dicktaint-transcribe-{}-{tick}",
+            std::process::id()
+        ));
+        fs::create_dir_all(&path).map_err(|e| {
+            format!(
+                "Failed to create transcription temp directory {}: {e}",
+                path.display()
+            )
+        })?;
+        Ok(Self { path })
+    }
+
+    fn path(&self) -> &Path {
+        &self.path
+    }
+}
+
+impl Drop for TranscriptionTempDir {
+    fn drop(&mut self) {
+        let _ = fs::remove_dir_all(&self.path);
+    }
+}
 
 
 fn resample_linear(samples: &[f32], source_rate: u32, target_rate: u32) -> Vec<f32> {
@@ -150,14 +187,9 @@ pub(crate) fn transcribe_samples(
     }
     let prepared = normalize_audio_gain(prepared, signal);
 
-    let tick = SystemTime::now()
-        .duration_since(UNIX_EPOCH)
-        .map(|d| d.as_millis())
-        .unwrap_or(0);
-    let temp_dir = std::env::temp_dir();
-    let base_name = format!("dicktaint-{}-{tick}", std::process::id());
-    let wav_path = temp_dir.join(format!("{base_name}.wav"));
-    let out_prefix = temp_dir.join(format!("{base_name}-transcript"));
+    let temp_dir = TranscriptionTempDir::create()?;
+    let wav_path = temp_dir.path().join("audio.wav");
+    let out_prefix = temp_dir.path().join("transcript");
     let txt_path = out_prefix.with_extension("txt");
 
     write_wav(&wav_path, &prepared, WHISPER_SAMPLE_RATE)?;
@@ -193,8 +225,6 @@ pub(crate) fn transcribe_samples(
         if detail.is_empty() {
             detail.push_str("no error output");
         }
-        let _ = std::fs::remove_file(&wav_path);
-        let _ = std::fs::remove_file(&txt_path);
         return Err(format!("whisper-cli transcription failed: {detail}"));
     }
 
@@ -204,9 +234,6 @@ pub(crate) fn transcribe_samples(
             txt_path.display()
         )
     })?;
-
-    let _ = std::fs::remove_file(&wav_path);
-    let _ = std::fs::remove_file(&txt_path);
 
     let cleaned = normalize_transcript_text(&transcript);
     if cleaned.is_empty() {

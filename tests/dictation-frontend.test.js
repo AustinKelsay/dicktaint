@@ -641,6 +641,8 @@ describe('dictation frontend hotkey polish', () => {
       state: 'processing',
       session_id: 1
     });
+    // startNativeDesktopDictation clears the prior session id before the next listen event.
+    api.setNativeFlags({ activeNativeSessionId: null });
     api.handleNativeDictationStatePayload({
       state: 'listening',
       session_id: 2
@@ -655,6 +657,21 @@ describe('dictation frontend hotkey polish', () => {
     expect(state.isDictating).toBe(true);
     expect(state.activeNativeSessionId).toBe('2');
     expect(state.currentDraftText).toBe('first session');
+  });
+
+  it('ignores late listening events from a superseded session', () => {
+    api.handleNativeDictationStatePayload({
+      state: 'listening',
+      session_id: 2
+    });
+    api.handleNativeDictationStatePayload({
+      state: 'listening',
+      session_id: 1
+    });
+
+    const state = api.getState();
+    expect(state.isDictating).toBe(true);
+    expect(state.activeNativeSessionId).toBe('2');
   });
 
   it('renders live mic levels from native audio payloads and ignores stale sessions', () => {
@@ -790,6 +807,8 @@ describe('dictation frontend background UI settings', () => {
   });
 
   it('keeps dictation status rendering stable while background UI preferences change', () => {
+    // Clear any leftover session id from prior describes (module state is shared).
+    api.setNativeFlags({ activeNativeSessionId: null, isDictating: false });
     api.handleNativeDictationStatePayload({
       state: 'listening',
       session_id: 42

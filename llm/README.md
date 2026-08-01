@@ -54,7 +54,7 @@ Minimum checks after doc changes:
 
 1. Link/path check for all markdown docs.
 2. Command mention check for `bun run <script>` references against `package.json` scripts.
-3. File existence check for local absolute-path source anchors.
+3. File existence check for repository-relative source anchors.
 
 ## Related Docs
 

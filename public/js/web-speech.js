@@ -8,8 +8,8 @@ export function describeSpeechError(errorCode) {
   if (errorCode === 'not-allowed' || errorCode === 'service-not-allowed') {
     if (state.hasMicrophoneAccess) {
       return isFocusedMacDesktopMode()
-        ? 'Speech state.recognition permission denied. In macOS Settings > Privacy & Security > Speech Recognition, allow this app/terminal and relaunch.'
-        : 'Speech state.recognition permission denied by browser/runtime. Allow speech state.recognition and retry.';
+        ? 'Speech recognition permission denied. In macOS Settings > Privacy & Security > Speech Recognition, allow this app/terminal and relaunch.'
+        : 'Speech recognition permission denied by browser/runtime. Allow speech recognition and retry.';
     }
 
     return isFocusedMacDesktopMode()
@@ -26,15 +26,15 @@ export function describeSpeechError(errorCode) {
   }
 
   if (errorCode === 'network') {
-    return 'Speech state.recognition service was unreachable. Check connectivity or try again in web mode.';
+    return 'Speech recognition service was unreachable. Check connectivity or try again in web mode.';
   }
 
   if (errorCode === 'aborted') {
-    return 'Speech state.recognition stopped unexpectedly.';
+    return 'Speech recognition stopped unexpectedly.';
   }
 
   if (errorCode === 'language-not-supported') {
-    return 'Speech state.recognition does not support the configured language.';
+    return 'Speech recognition does not support the configured language.';
   }
 
   return errorCode || 'unknown';
@@ -44,4 +44,3 @@ export function describeSpeechError(errorCode) {
 export function isFatalSpeechError(errorCode) {
   return ['not-allowed', 'service-not-allowed', 'audio-capture', 'network', 'language-not-supported'].includes(errorCode);
 }
-

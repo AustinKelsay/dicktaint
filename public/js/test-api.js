@@ -146,6 +146,9 @@ export function createTestApi() {
       if (typeof next.pendingNativeStartTrigger === 'string' || next.pendingNativeStartTrigger === null) {
         state.pendingNativeStartTrigger = next.pendingNativeStartTrigger;
       }
+      if (typeof next.activeNativeSessionId === 'string' || next.activeNativeSessionId === null) {
+        state.activeNativeSessionId = next.activeNativeSessionId;
+      }
       if (typeof next.shouldKeepDictating === 'boolean') {
         state.shouldKeepDictating = next.shouldKeepDictating;
       }

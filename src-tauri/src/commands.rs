@@ -11,7 +11,7 @@ use crate::hotkey_overlay::{
 };
 use crate::insert::{focused_field_insert_permission_status, insert_text_into_focused_field_impl};
 use crate::models::{
-    download_whisper_model, find_whisper_model_spec, model_path_for_spec,
+    download_whisper_model, find_whisper_model_spec, model_file_looks_installed, model_path_for_spec,
     pick_best_installed_model, save_local_settings, system_memory_gb, whisper_model_catalog,
 };
 use crate::onboarding::build_onboarding_payload;
@@ -391,11 +391,15 @@ pub(crate) async fn install_dictation_model(
             })?;
 
             let target_path = model_path_for_spec(&models_dir, model_spec);
-            if !target_path.exists() {
+            if target_path.exists() && !model_file_looks_installed(&target_path, model_spec) {
+                let _ = fs::remove_file(&target_path);
+            }
+            if !model_file_looks_installed(&target_path, model_spec) {
                 download_whisper_model(model_spec, &target_path)?;
-                if !target_path.exists() {
+                if !model_file_looks_installed(&target_path, model_spec) {
+                    let _ = fs::remove_file(&target_path);
                     return Err(format!(
-                        "Model download completed but file is still missing at {}.",
+                        "Model download completed but file is missing or too small at {}.",
                         target_path.display()
                     ));
                 }

@@ -68,7 +68,7 @@ export async function saveFocusedFieldInsertSetting(enabled) {
       state.focusedFieldInsertEnabled
         ? (state.focusedFieldInsertPermissionGranted
           ? 'Focused-field insertion enabled.'
-          : state.focusedFieldInsertPermissionStatus)
+          : (state.focusedFieldInsertPermissionStatus || 'Focused-field insertion needs Accessibility permission.'))
         : 'Focused-field insertion disabled.',
       state.focusedFieldInsertEnabled && !state.focusedFieldInsertPermissionGranted ? 'error' : 'ok'
     );

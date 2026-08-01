@@ -2,7 +2,7 @@
 
 A local AI dictation tool suitable for the most private chats and dirtiest language.
 
-Current MVP focus: **macOS desktop** + iPhone (iOS) mobile.
+Current MVP focus: **macOS desktop**. iPhone/iOS is a future track.
 
 ## Documentation map
 

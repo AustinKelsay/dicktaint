@@ -101,15 +101,30 @@ pub(crate) async fn stop(app: tauri::AppHandle) -> Result<String, String> {
         return Err("Audio capture thread crashed.".to_string());
     }
 
-    let captured_samples = recording
-        .samples
-        .lock()
-        .map_err(|_| "Failed to read captured audio".to_string())?
-        .clone();
+    let captured_samples = match recording.samples.lock() {
+        Ok(guard) => guard.clone(),
+        Err(_) => {
+            let message = "Failed to read captured audio".to_string();
+            emit_dictation_state(
+                &app,
+                "error",
+                Some(message.clone()),
+                None,
+                Some(session_id),
+            );
+            return Err(message);
+        }
+    };
     let model_path = {
         let config = app.state::<AppConfig>();
         let model_state = app.state::<LocalModelState>();
-        resolve_active_model_path(config.inner(), model_state.inner())?
+        match resolve_active_model_path(config.inner(), model_state.inner()) {
+            Ok(path) => path,
+            Err(error) => {
+                emit_dictation_state(&app, "error", Some(error.clone()), None, Some(session_id));
+                return Err(error);
+            }
+        }
     };
     let configured_whisper_cli_path = {
         let config = app.state::<AppConfig>();

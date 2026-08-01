@@ -4,10 +4,23 @@ use crate::state::DEFAULT_WHISPER_CLI_PATH;
 use std::fs;
 use std::path::{Path, PathBuf};
 use std::process::{Command, Output};
+use std::sync::{Mutex, OnceLock};
 #[cfg(unix)]
 use std::os::unix::fs::PermissionsExt;
 use tauri::Manager;
 
+/// Cache of successful whisper-cli detections: `(preferred_key, resolved_path)`.
+fn whisper_cli_cache() -> &'static Mutex<Option<(String, String)>> {
+    static CACHE: OnceLock<Mutex<Option<(String, String)>>> = OnceLock::new();
+    CACHE.get_or_init(|| Mutex::new(None))
+}
+
+/// Clears the successful whisper-cli path cache so the next resolve re-probes.
+pub(crate) fn invalidate_whisper_cli_cache() {
+    if let Ok(mut guard) = whisper_cli_cache().lock() {
+        *guard = None;
+    }
+}
 
 pub(crate) fn resolve_whisper_cli_path(override_path: Option<&str>, bundled_path: Option<&str>) -> String {
     let preferred = if let Some(path) = override_path.map(str::trim).filter(|v| !v.is_empty()) {
@@ -22,21 +35,30 @@ pub(crate) fn resolve_whisper_cli_path(override_path: Option<&str>, bundled_path
 }
 
 pub(crate) fn ensure_whisper_cli_available(whisper_cli_path: &str) -> Result<(), String> {
-    let executable = validate_whisper_cli_candidate(whisper_cli_path).map_err(|detail| {
-        format!(
-            "Could not execute '{whisper_cli_path}': {detail}. Install whisper.cpp (whisper-cli) or set WHISPER_CLI_PATH."
-        )
-    })?;
-    let output = run_help_probe(&executable).map_err(|e| {
-        format!(
-            "Could not execute '{whisper_cli_path}' (resolved to {}): {e}. Install whisper.cpp (whisper-cli) or set WHISPER_CLI_PATH.",
-            executable.display()
-        )
-    })?;
+    let executable = match validate_whisper_cli_candidate(whisper_cli_path) {
+        Ok(path) => path,
+        Err(detail) => {
+            invalidate_whisper_cli_cache();
+            return Err(format!(
+                "Could not execute '{whisper_cli_path}': {detail}. Install whisper.cpp (whisper-cli) or set WHISPER_CLI_PATH."
+            ));
+        }
+    };
+    let output = match run_help_probe(&executable) {
+        Ok(output) => output,
+        Err(e) => {
+            invalidate_whisper_cli_cache();
+            return Err(format!(
+                "Could not execute '{whisper_cli_path}' (resolved to {}): {e}. Install whisper.cpp (whisper-cli) or set WHISPER_CLI_PATH.",
+                executable.display()
+            ));
+        }
+    };
     if help_probe_looks_like_whisper_cli(&output) {
         return Ok(());
     }
 
+    invalidate_whisper_cli_cache();
     let probe_summary = help_probe_summary(&output);
     Err(format!(
         "Could not execute '{whisper_cli_path}' (resolved to {}): probe exited with status {} and did not return recognizable whisper-cli help output ({probe_summary}). Install whisper.cpp (whisper-cli) or set WHISPER_CLI_PATH.",
@@ -358,9 +380,26 @@ fn candidate_whisper_cli_paths(configured_path: &str) -> Vec<String> {
 }
 
 pub(crate) fn detect_whisper_cli_path(configured_path: &str) -> Option<String> {
-    candidate_whisper_cli_paths(configured_path)
+    let cache_key = configured_path.trim().to_string();
+    if let Ok(guard) = whisper_cli_cache().lock() {
+        if let Some((cached_key, cached_path)) = guard.as_ref() {
+            if *cached_key == cache_key {
+                return Some(cached_path.clone());
+            }
+        }
+    }
+
+    let found = candidate_whisper_cli_paths(configured_path)
         .into_iter()
-        .find(|candidate| can_execute_command(candidate))
+        .find(|candidate| can_execute_command(candidate));
+
+    if let Some(ref path) = found {
+        if let Ok(mut guard) = whisper_cli_cache().lock() {
+            *guard = Some((cache_key, path.clone()));
+        }
+    }
+
+    found
 }
 
 

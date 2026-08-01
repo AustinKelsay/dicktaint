@@ -10,7 +10,7 @@ Accepted
 
 ## Decision
 
-1. Split Rust into domain modules under `src-tauri/src/` (`whisper_cli`, `models`, `audio`, `transcribe`, `hotkey_overlay`, `insert`, `state`, `commands`) with a thin `main.rs` entry. Prefer `pub(crate)` and keep Tauri command names stable.
+1. Split Rust into domain modules under `src-tauri/src/` (`whisper_cli`, `models`, `audio`, `transcribe`, `hotkey_overlay`, `insert`, `state`, `commands`, `dictation_session`, `onboarding`) with a thin `main.rs` entry. Prefer `pub(crate)` and keep Tauri command names stable.
 2. Split the SPA into ES modules under `public/js/` loaded via `type="module"` from `public/app.js`. No bundler in this pass.
 3. Keep behavior identical: same Tauri commands, events, settings schema, and UI flows.
 

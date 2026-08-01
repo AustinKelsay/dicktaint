@@ -73,7 +73,9 @@ export async function copyTextToClipboard(text) {
   const trimmed = String(text || '').trim();
   if (!trimmed) return false;
 
-  const tauriClipboard = window.__TAURI__?.clipboard
+  const tauriClipboard = window.__TAURI__?.clipboardManager
+    || window.TAURI?.clipboardManager
+    || window.__TAURI__?.clipboard
     || window.__TAURI__?.plugins?.clipboard
     || null;
   if (typeof tauriClipboard?.writeText === 'function') {

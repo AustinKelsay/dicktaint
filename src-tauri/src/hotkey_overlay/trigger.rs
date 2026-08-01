@@ -161,6 +161,14 @@ pub(crate) fn normalize_dictation_trigger(trigger: &str) -> Result<String, Strin
         if !modifiers.is_empty() {
             return Err("Fn trigger must be used by itself.".to_string());
         }
+        #[cfg(not(target_os = "macos"))]
+        {
+            return Err(
+                "Fn trigger is only supported on macOS. Use a modifier+key combo instead."
+                    .to_string(),
+            );
+        }
+        #[cfg(target_os = "macos")]
         return Ok("Fn".to_string());
     }
 
@@ -601,6 +609,7 @@ mod tests {
         );
     }
 
+    #[cfg(target_os = "macos")]
     #[test]
     fn normalize_dictation_trigger_accepts_fn_key() {
         assert_eq!(normalize_dictation_trigger("fn").unwrap(), "Fn".to_string());
@@ -608,6 +617,14 @@ mod tests {
             normalize_dictation_trigger("globe").unwrap(),
             "Fn".to_string()
         );
+    }
+
+    #[cfg(not(target_os = "macos"))]
+    #[test]
+    fn normalize_dictation_trigger_rejects_fn_on_non_macos() {
+        let err = normalize_dictation_trigger("fn").unwrap_err();
+        assert!(err.contains("macOS"));
+        assert!(normalize_dictation_trigger("globe").is_err());
     }
 
     #[test]

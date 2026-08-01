@@ -12,6 +12,8 @@
 
   let state = 'idle';
   let currentSessionId = null;
+  /** Guards click/hotkey start/stop so overlapping invokes cannot race. */
+  let actionInFlight = false;
 
   /**
    * Clamps a numeric level into the inclusive [0, 1] range.
@@ -146,17 +148,43 @@
     return window.__TAURI__?.core?.invoke ?? window.__TAURI__?.tauri?.invoke ?? null;
   }
 
+  /**
+   * @param {unknown} error
+   * @returns {boolean}
+   */
+  function isDictationAlreadyRunningError(error) {
+    const message = String(error?.message || error || '').toLowerCase();
+    return message.includes('dictation already running');
+  }
+
   click.addEventListener('click', async () => {
-    if (state === 'processing') return;
+    if (state === 'processing' || actionInFlight) return;
     const invoke = getInvoke();
     if (!invoke) return;
     if (state === 'idle') {
-      try { await invoke('start_native_dictation'); setState('listening'); }
-      catch (e) { console.error(e); setState('error'); }
+      actionInFlight = true;
+      try {
+        await invoke('start_native_dictation');
+        setState('listening');
+      } catch (e) {
+        console.error(e);
+        // Concurrent start while already running: keep/restore listening, not error.
+        if (isDictationAlreadyRunningError(e)) setState('listening');
+        else setState('error');
+      } finally {
+        actionInFlight = false;
+      }
     } else if (state === 'listening') {
+      actionInFlight = true;
       setState('processing');
-      try { await invoke('stop_native_dictation'); }
-      catch (e) { console.error(e); setState('error'); }
+      try {
+        await invoke('stop_native_dictation');
+      } catch (e) {
+        console.error(e);
+        setState('error');
+      } finally {
+        actionInFlight = false;
+      }
     }
   });
 
@@ -181,7 +209,10 @@
       if (state !== 'listening') return;
       setMeter(payload?.level, payload?.bars);
     }).catch(() => {});
-    ev.listen('dictation:hotkey-triggered', () => { if (state !== 'processing') click.click(); }).catch(() => {});
+    ev.listen('dictation:hotkey-triggered', () => {
+      if (state === 'processing' || actionInFlight) return;
+      click.click();
+    }).catch(() => {});
   }
 
   setState('idle', { visible: false });

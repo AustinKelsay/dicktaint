@@ -228,6 +228,29 @@ pub(crate) fn model_path_for_spec(models_dir: &Path, spec: WhisperModelSpec) -> 
     models_dir.join(spec.file_name)
 }
 
+/// Returns true when `path` exists and is large enough to look like a complete model file.
+///
+/// Minimum size is `max(1_048_576, approx_size_gb * 0.4 * 1e9)` bytes so tiny/partial
+/// downloads are not treated as installed.
+pub(crate) fn model_file_looks_installed(path: &Path, spec: WhisperModelSpec) -> bool {
+    let Ok(metadata) = fs::metadata(path) else {
+        return false;
+    };
+    if !metadata.is_file() {
+        return false;
+    }
+    let min_from_spec = ((f64::from(spec.approx_size_gb) * 0.4) * 1e9) as u64;
+    let min_bytes = min_from_spec.max(1_048_576);
+    metadata.len() >= min_bytes
+}
+
+/// Removes a partial/failed model download when present.
+fn cleanup_partial_model_download(target_path: &Path) {
+    if target_path.exists() {
+        let _ = fs::remove_file(target_path);
+    }
+}
+
 fn model_fit_level(spec: WhisperModelSpec, total_memory_gb: u64) -> u8 {
     if total_memory_gb >= spec.recommended_ram_gb {
         2
@@ -372,17 +395,16 @@ pub(crate) fn download_whisper_model(model_spec: WhisperModelSpec, target_path: 
     );
 
     #[cfg(target_os = "windows")]
-    let output = Command::new("powershell")
-        .args([
-            "-NoProfile",
-            "-Command",
-            "Invoke-WebRequest",
-            "-Uri",
-            &model_url,
-            "-OutFile",
-            &target_str,
-        ])
-        .output();
+    let output = {
+        // Single quoted -Command string so paths with spaces survive PowerShell parsing.
+        let escaped_url = model_url.replace('\'', "''");
+        let escaped_out = target_str.replace('\'', "''");
+        let ps_command =
+            format!("Invoke-WebRequest -Uri '{escaped_url}' -OutFile '{escaped_out}'");
+        Command::new("powershell")
+            .args(["-NoProfile", "-Command", &ps_command])
+            .output()
+    };
 
     #[cfg(not(target_os = "windows"))]
     let output = Command::new("curl")
@@ -392,6 +414,7 @@ pub(crate) fn download_whisper_model(model_spec: WhisperModelSpec, target_path: 
     match output {
         Ok(result) if result.status.success() && target_path.exists() => Ok(()),
         Ok(result) => {
+            cleanup_partial_model_download(target_path);
             let stderr = String::from_utf8_lossy(&result.stderr).trim().to_string();
             let stdout = String::from_utf8_lossy(&result.stdout).trim().to_string();
             let detail = if !stderr.is_empty() {
@@ -406,8 +429,11 @@ pub(crate) fn download_whisper_model(model_spec: WhisperModelSpec, target_path: 
                 model_spec.id, model_url, detail
             ))
         }
-        Err(e) => Err(format!(
-            "Could not start model download command. Install curl or PowerShell support and retry: {e}"
-        )),
+        Err(e) => {
+            cleanup_partial_model_download(target_path);
+            Err(format!(
+                "Could not start model download command. Install curl or PowerShell support and retry: {e}"
+            ))
+        }
     }
 }
