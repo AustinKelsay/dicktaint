@@ -1,5 +1,19 @@
 # Changelog
 
+## v0.3.11 - 2026-08-02
+
+### Highlights
+
+- completed modular cleanup tiers A–C: domain-module Rust/JS split, dictation_session seam, hotkey_overlay deep modules, ESM cycle breaks, and critical-path test coverage
+- hardened dictation reliability: stop failures no longer stick in listening, model install validates file size, whisper-cli detection is cached, transcription uses RAII temp dirs
+- fixed overlay double-start races, speech-error copy leaks, focused-field status fallbacks, and non-macOS insert compile gates
+
+### Release Notes
+
+- this release follows `v0.3.10` and ships the post-module-split cleanup (PR #20) after CodeRabbit rounds
+- staging tip was healed to track `main` before merge; iPhone/iOS remains a future track
+- deferred follow-ups (not in this cut): whisper-cli process timeouts, Accessibility settings reopen debounce, realtime audio callback redesign, release-workflow token hardening
+
 ## v0.3.10 - 2026-03-30
 
 ### Highlights
