@@ -147,8 +147,13 @@ pub(crate) fn set_dictation_trigger(
         }
         return Err(error);
     }
+    // Build the payload before dropping the settings lock. sync_background_ui →
+    // sync_pill → current_background_ui_preferences also locks settings; holding
+    // the mutex across that call deadlocks the main thread (Tauri IPC runs here).
+    let payload = dictation_trigger_payload(&settings, runtime);
+    drop(settings);
     sync_background_ui(&app);
-    Ok(dictation_trigger_payload(&settings, runtime))
+    Ok(payload)
 }
 
 #[tauri::command]
@@ -191,8 +196,10 @@ pub(crate) fn clear_dictation_trigger(
         }
         return Err(error);
     }
+    let payload = dictation_trigger_payload(&settings, runtime);
+    drop(settings);
     sync_background_ui(&app);
-    Ok(dictation_trigger_payload(&settings, runtime))
+    Ok(payload)
 }
 
 fn persist_background_ui_preferences_update<F>(

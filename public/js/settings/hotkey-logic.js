@@ -178,8 +178,14 @@ export function eventKeyToken(event) {
  */
 export function buildHotkeyFromEvent(event) {
   const key = eventKeyToken(event);
-  if (!key) return null;
-  if (key === 'Fn') return 'Fn';
+  // WKWebView often omits code=Fn for Globe/Fn; getModifierState still reports it.
+  const fnPressed = key === 'Fn'
+    || String(event.key || '').toLowerCase() === 'fn'
+    || Boolean(event.getModifierState?.('Fn'));
+  if (fnPressed && !event.metaKey && !event.ctrlKey && !event.altKey && !event.shiftKey) {
+    return 'Fn';
+  }
+  if (!key || key === 'Fn') return null;
 
   const keyName = String(event.key || '').toLowerCase();
   if (['shift', 'control', 'meta', 'alt', 'super'].includes(keyName)) return null;

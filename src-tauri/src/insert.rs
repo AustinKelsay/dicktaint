@@ -70,6 +70,45 @@ fn open_accessibility_settings() -> Result<(), String> {
     }
 }
 
+/// Minimum gap between Accessibility Settings reopen attempts.
+///
+/// Paste attempts used to call `open` on every failed insert, which felt like a
+/// permission loop when the Accessibility toggle looked on but TCC still denied
+/// the current ad-hoc binary (`AXIsProcessTrusted` false after rebuild/re-sign).
+#[cfg(target_os = "macos")]
+const ACCESSIBILITY_SETTINGS_REOPEN_COOLDOWN: Duration = Duration::from_secs(60);
+
+#[cfg(target_os = "macos")]
+fn maybe_open_accessibility_settings() -> bool {
+    use std::sync::Mutex;
+    use std::time::Instant;
+
+    static LAST_OPENED: Mutex<Option<Instant>> = Mutex::new(None);
+
+    let mut guard = match LAST_OPENED.lock() {
+        Ok(guard) => guard,
+        Err(_) => {
+            log::warn!("Failed to lock Accessibility settings reopen cooldown");
+            return false;
+        }
+    };
+
+    if guard.is_some_and(|last| last.elapsed() < ACCESSIBILITY_SETTINGS_REOPEN_COOLDOWN) {
+        return false;
+    }
+
+    match open_accessibility_settings() {
+        Ok(()) => {
+            *guard = Some(Instant::now());
+            true
+        }
+        Err(error) => {
+            log::warn!("Failed to open Accessibility settings: {error}");
+            false
+        }
+    }
+}
+
 pub(crate) fn focused_field_insert_permission_status(
     enabled: bool,
     prompt_if_missing: bool,
@@ -90,16 +129,21 @@ pub(crate) fn focused_field_insert_permission_status(
             };
         }
 
-        if prompt_if_missing {
-            if let Err(error) = open_accessibility_settings() {
-                log::warn!("Failed to open Accessibility settings: {error}");
-            }
-        }
+        let opened = if prompt_if_missing {
+            maybe_open_accessibility_settings()
+        } else {
+            false
+        };
 
         return FocusedFieldInsertPermissionStatus {
             granted: false,
-            status: "Focused-field insertion needs Accessibility permission. Opened System Settings > Privacy & Security > Accessibility. Allow dicktaint, then retry the paste."
-                .to_string(),
+            status: if opened {
+                "Focused-field insertion needs Accessibility permission. Opened System Settings > Privacy & Security > Accessibility. Remove dicktaint if it is already listed, add /Applications/dicktaint.app again, enable it, then relaunch dicktaint."
+                    .to_string()
+            } else {
+                "Focused-field insertion needs Accessibility permission. In System Settings > Privacy & Security > Accessibility, remove dicktaint if listed, add /Applications/dicktaint.app again, enable it, then relaunch dicktaint."
+                    .to_string()
+            },
         };
     }
 
@@ -184,7 +228,9 @@ pub(crate) fn insert_text_into_focused_field_impl(text: &str) -> Result<(), Stri
         return Ok(());
     }
 
-    let permission = focused_field_insert_permission_status(true, true);
+    // Do not reopen Settings on every paste — only surface the status. Enabling
+    // the setting (and the cooldown helper) is what prompts System Settings.
+    let permission = focused_field_insert_permission_status(true, false);
     if !permission.granted {
         return Err(permission.status);
     }
