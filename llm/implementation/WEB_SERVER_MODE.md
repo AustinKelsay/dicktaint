@@ -24,8 +24,8 @@ Out of scope:
 
 ## Source Anchors
 
-- `/Users/plebdev/Desktop/code/dicktaint/server.js`
-- `/Users/plebdev/Desktop/code/dicktaint/tests/server.test.js`
+- `server.js`
+- `tests/server.test.js`
 
 ## Contract
 

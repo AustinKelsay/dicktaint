@@ -74,12 +74,22 @@ while IFS= read -r cmd; do
   fi
 done < <(rg -o "bun run [a-zA-Z0-9:_-]+" README.md llm/*.md llm/context/*.md llm/implementation/*.md llm/workflow/*.md docs/*.md | awk '{print $3}' | sort -u)
 
-# 4) Absolute local source anchors must exist.
+# 4) Repo-relative source anchors that look like concrete file paths must exist.
 while IFS= read -r anchor; do
-  if [[ "$anchor" == /Users/plebdev/Desktop/code/dicktaint* ]] && [[ ! -e "$anchor" ]]; then
-    note_fail "Missing absolute source anchor path: $anchor"
+  case "$anchor" in
+    *'*'*|*/|llm|public|docs|scripts|tests|src-tauri) continue ;;
+  esac
+  # Reject path traversal before existence check.
+  if [[ "$anchor" == *'/..'* || "$anchor" == '..'* || "$anchor" == *'/..' || "$anchor" == '..' ]]; then
+    note_fail "Source anchor path contains '..' component: $anchor"
+    continue
   fi
-done < <(rg -o '/Users/plebdev/Desktop/code/dicktaint[^` )"]+' README.md llm/*.md llm/context/*.md llm/implementation/*.md llm/workflow/*.md docs/*.md | sort -u)
+  if [[ ! -e "$anchor" ]]; then
+    note_fail "Missing repo-relative source anchor path: $anchor"
+  fi
+done < <(rg -N -o '`([^`]+)`' llm/README.md llm/context/*.md llm/implementation/*.md llm/workflow/*.md llm/STANDARDS.md | \
+  sed -E 's/.*`([^`]+)`.*/\1/' | \
+  rg '^(server\.js|public/|src-tauri/|scripts/|package\.json|tests/|llm/)' | sort -u)
 
 if [[ "$FAILED" -ne 0 ]]; then
   echo "Documentation verification failed."

@@ -2,7 +2,7 @@
 
 ## Status Snapshot
 
-- Date: 2026-03-21
+- Date: 2026-07-30
 - Product focus: private local-first dictation
 - MVP platform priority: macOS desktop, then iPhone iOS, then web fallback
 
@@ -25,10 +25,17 @@ Out of scope:
 
 ## Source Anchors
 
-- `/Users/plebdev/Desktop/code/dicktaint/public/app.js`
-- `/Users/plebdev/Desktop/code/dicktaint/server.js`
-- `/Users/plebdev/Desktop/code/dicktaint/src-tauri/src/main.rs`
-- `/Users/plebdev/Desktop/code/dicktaint/src-tauri/tauri.conf.json`
+- `public/app.js` (ESM entry)
+- `public/js/platform.js`
+- `public/js/events.js`
+- `public/pill.html`
+- `public/pill.js`
+- `server.js`
+- `src-tauri/src/main.rs` (thin entry)
+- `src-tauri/src/commands.rs`
+- `src-tauri/src/hotkey_overlay/mod.rs`
+- `src-tauri/src/state.rs`
+- `src-tauri/tauri.conf.json`
 
 ## Current State
 
@@ -57,9 +64,10 @@ Key policy:
 
 Validate this document when any of these change:
 
-1. app runtime mode detection in `/Users/plebdev/Desktop/code/dicktaint/public/app.js`
-2. command/event registrations in `/Users/plebdev/Desktop/code/dicktaint/src-tauri/src/main.rs`
-3. desktop bundle/runtime config in `/Users/plebdev/Desktop/code/dicktaint/src-tauri/tauri.conf.json`
+1. app runtime mode detection in `public/js/platform.js` (bootstrapped from `public/app.js`)
+2. command/event registrations across `src-tauri/src/commands.rs` and `src-tauri/src/hotkey_overlay/mod.rs`
+3. desktop bundle/runtime config in `src-tauri/tauri.conf.json`
+4. overlay runtime in `public/pill.html` / `public/pill.js`
 
 ## Related Docs
 

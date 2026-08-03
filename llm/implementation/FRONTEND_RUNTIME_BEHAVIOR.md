@@ -2,8 +2,9 @@
 
 ## Status Snapshot
 
-- Date: 2026-02-20
-- Frontend runtime split is implemented in `public/app.js`
+- Date: 2026-07-30
+- Frontend runtime split: `public/app.js` ESM entry loads domain modules under `public/js/`
+- Overlay runtime is separate: `public/pill.html` loads `public/pill.js`
 
 ## Purpose
 
@@ -24,15 +25,34 @@ Out of scope:
 
 ## Source Anchors
 
-- `/Users/plebdev/Desktop/code/dicktaint/public/app.js`
-- `/Users/plebdev/Desktop/code/dicktaint/public/index.html`
-- `/Users/plebdev/Desktop/code/dicktaint/public/pill.js`
+- `public/app.js` (ESM entry)
+- `public/js/platform.js`
+- `public/js/events.js`
+- `public/js/ui.js`
+- `public/js/native-dictation.js`
+- `public/js/onboarding/index.js`
+- `public/js/constants.js`
+- `public/js/state.js`
+- `public/index.html`
+- `public/pill.html`
+- `public/pill.js`
 
 ## Contract
 
+Mutable SPA state (`public/js/state.js`) is grouped behind a single `state` export:
+
+- `webSpeech` — browser recognition handle, restart timer, keep-dictating, mic access
+- `nativeSession` — native session ids, pending start-after-stop, Fn/hotkey in-flight flags
+- `onboarding` — models list, current onboarding payload, install/delete busy, device profile, setup mode
+- `settingsPrefs` — hotkey, pill/menu/close, focused-field insert, preferred input device, save busy flags
+- `uiBusy` — `isDictating` / `isStartingDictation`, live waveform level/bars
+- top-level transcript fields — `currentDraftText`, `dictationHistory`, `dictationHistorySeq`
+
+Flat property names (`state.isDictating`, etc.) remain aliases onto those slices so existing modules keep working.
+
 Runtime routing:
 
-- `isFocusedMacDesktopMode()` -> native desktop dictation command path
+- `isFocusedMacDesktopMode()` (`public/js/platform.js`) -> native desktop dictation command path
 - web path -> browser speech recognition when supported
 - non-mac native desktop -> unsupported desktop messaging path
 
@@ -58,20 +78,22 @@ Browser speech path:
 
 Status to overlay mapping:
 
-- `setStatus()` calls overlay sync and emits `dicktaint://pill-status`
+- `setStatus()` in `public/js/ui.js` calls overlay sync and emits `dicktaint://pill-status`
+- overlay listeners and audio-level waveform live in `public/pill.js`
 
 Invariants:
 
 - runtime mode is authoritative for command path selection
-- UI controls reflect lock/busy/setup states through `syncControls()`
+- UI controls reflect lock/busy/setup states through `syncControls()` in `public/js/ui.js`
 
 ## Verification
 
-Re-verify after `public/app.js` changes:
+Re-verify after `public/js/` or `public/pill.js` changes:
 
 1. mac desktop: onboarding gate, start/stop flow, status updates
 2. web mode: speech path and manual input fallback
 3. overlay event emission for status changes
+4. overlay waveform updates while listening (`dictation:audio-level`)
 
 ## Related Docs
 

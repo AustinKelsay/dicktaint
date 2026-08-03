@@ -24,10 +24,10 @@ Out of scope:
 
 ## Source Anchors
 
-- `/Users/plebdev/Desktop/code/dicktaint/package.json`
-- `/Users/plebdev/Desktop/code/dicktaint/scripts/build-whisper-sidecar.sh`
-- `/Users/plebdev/Desktop/code/dicktaint/scripts/smoke-whisper-sidecar.sh`
-- `/Users/plebdev/Desktop/code/dicktaint/scripts/verify-docs.sh`
+- `package.json`
+- `scripts/build-whisper-sidecar.sh`
+- `scripts/smoke-whisper-sidecar.sh`
+- `scripts/verify-docs.sh`
 
 ## Runbook
 
@@ -71,7 +71,7 @@ Recommended daily sequence (desktop-heavy work):
 
 ## Verification
 
-This runbook is valid when all listed scripts exist in `/Users/plebdev/Desktop/code/dicktaint/package.json` and execute in the current environment.
+This runbook is valid when all listed scripts exist in `package.json` and execute in the current environment.
 
 ## Related Docs
 

@@ -24,8 +24,12 @@ Out of scope:
 
 ## Source Anchors
 
-- `/Users/plebdev/Desktop/code/dicktaint/src-tauri/src/main.rs`
-- `/Users/plebdev/Desktop/code/dicktaint/public/app.js`
+- `src-tauri/src/main.rs` (thin entry)
+- `src-tauri/src/commands.rs`
+- `src-tauri/src/hotkey_overlay/mod.rs`
+- `src-tauri/src/state.rs`
+- `public/app.js` (ESM entry)
+- `public/js/`
 
 ## Contract
 

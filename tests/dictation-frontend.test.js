@@ -1,4 +1,6 @@
-const { describe, it, expect, beforeEach, afterEach } = require('bun:test');
+const path = require('node:path');
+const { pathToFileURL } = require('node:url');
+const { describe, it, expect, beforeEach, afterEach, jest } = require('bun:test');
 
 class MockElement {
   constructor(id = '', tagName = 'DIV') {
@@ -202,6 +204,7 @@ function createMockDom({ nativeDesktop = false, onboardingPayload = null, invoke
   const documentListeners = new Map();
   const clipboardCalls = [];
   const invokeCalls = [];
+  const emitCalls = [];
   const backgroundPreferences = {
     pill_visibility_mode: onboardingPayload?.pill_visibility_mode || 'active-only',
     menu_bar_mode: onboardingPayload?.menu_bar_mode || 'always',
@@ -209,6 +212,60 @@ function createMockDom({ nativeDesktop = false, onboardingPayload = null, invoke
   };
   if (backgroundPreferences.menu_bar_mode === 'off') {
     backgroundPreferences.close_action = 'quit';
+  }
+
+  const defaultModels = [
+    {
+      id: 'base-en',
+      display_name: 'Whisper Base (English)',
+      approx_size_gb: 0.15,
+      speed_note: 'Fast',
+      quality_note: 'Balanced',
+      installed: true,
+      recommended: true,
+      likely_runnable: true
+    },
+    {
+      id: 'small-en',
+      display_name: 'Whisper Small (English)',
+      approx_size_gb: 0.5,
+      speed_note: 'Balanced',
+      quality_note: 'Higher quality',
+      installed: false,
+      recommended: false,
+      likely_runnable: true
+    }
+  ];
+
+  const onboardingState = {
+    onboarding_required: false,
+    selected_model_id: 'base-en',
+    selected_model_path: '/tmp/ggml-base.en.bin',
+    selected_model_exists: true,
+    available_input_devices: [],
+    preferred_input_device: null,
+    dictation_trigger: 'Fn',
+    default_dictation_trigger: 'Fn',
+    dictation_trigger_mode: 'global-hold',
+    dictation_trigger_status: 'Hold Fn anywhere to dictate, then release to transcribe.',
+    dictation_trigger_permission_hint: null,
+    focused_field_insert_enabled: false,
+    focused_field_insert_permission_granted: true,
+    focused_field_insert_permission_status: 'Accessibility permission granted. Finished transcripts can be pasted into the focused field of other apps.',
+    whisper_cli_available: true,
+    whisper_cli_path: '/usr/local/bin/whisper-cli',
+    models_dir: '/tmp/models',
+    device: {
+      total_memory_gb: 16,
+      logical_cpu_cores: 8,
+      architecture: 'aarch64',
+      os: 'macos'
+    },
+    models: defaultModels.map((model) => ({ ...model })),
+    ...(onboardingPayload || {})
+  };
+  if (Array.isArray(onboardingPayload?.models)) {
+    onboardingState.models = onboardingPayload.models.map((model) => ({ ...model }));
   }
 
   global.Element = MockElement;
@@ -240,62 +297,102 @@ function createMockDom({ nativeDesktop = false, onboardingPayload = null, invoke
     },
     execCommand(command) {
       return command === 'copy';
+    },
+    hasFocus() {
+      return false;
     }
   };
 
   const windowListeners = new Map();
   global.window = {
+    confirm: () => true,
     __TAURI__: nativeDesktop ? {
       core: {
         invoke: async (command, args = {}) => {
           invokeCalls.push({ command, args });
           if (typeof invokeHandler === 'function') {
-            const handled = await invokeHandler(command, args, { backgroundPreferences, invokeCalls });
+            const handled = await invokeHandler(command, args, {
+              backgroundPreferences,
+              invokeCalls,
+              onboardingState
+            });
             if (handled !== undefined) return handled;
           }
           if (command === 'get_dictation_onboarding') {
-            if (onboardingPayload) {
-              return {
-                ...onboardingPayload,
-                ...backgroundPreferences
-              };
-            }
             return {
-              onboarding_required: false,
-              selected_model_id: 'base-en',
-              selected_model_path: '/tmp/ggml-base.en.bin',
-              selected_model_exists: true,
-              dictation_trigger: 'Fn',
-              default_dictation_trigger: 'Fn',
-              dictation_trigger_mode: 'global-hold',
-              dictation_trigger_status: 'Hold Fn anywhere to dictate, then release to transcribe.',
-              dictation_trigger_permission_hint: null,
+              ...onboardingState,
               ...backgroundPreferences,
-              focused_field_insert_enabled: false,
-              focused_field_insert_permission_granted: true,
-              focused_field_insert_permission_status: 'Accessibility permission granted. Finished transcripts can be pasted into the focused field of other apps.',
-              whisper_cli_available: true,
-              whisper_cli_path: '/usr/local/bin/whisper-cli',
-              models_dir: '/tmp/models',
-              device: {
-                total_memory_gb: 16,
-                logical_cpu_cores: 8,
-                architecture: 'aarch64',
-                os: 'macos'
-              },
-              models: [
-                {
-                  id: 'base-en',
-                  display_name: 'Whisper Base (English)',
-                  approx_size_gb: 0.15,
-                  speed_note: 'Fast',
-                  quality_note: 'Balanced',
-                  installed: true,
-                  recommended: true,
-                  likely_runnable: true
-                }
-              ]
+              models: onboardingState.models.map((model) => ({ ...model }))
             };
+          }
+          if (command === 'set_dictation_trigger') {
+            const trigger = String(args.trigger || '').trim();
+            onboardingState.dictation_trigger = trigger;
+            onboardingState.dictation_trigger_mode = trigger === 'Fn' ? 'global-hold' : 'global-toggle';
+            onboardingState.dictation_trigger_status = trigger
+              ? `Hotkey set to ${trigger}.`
+              : 'Hotkey disabled.';
+            return {
+              trigger,
+              default_trigger: onboardingState.default_dictation_trigger,
+              trigger_mode: onboardingState.dictation_trigger_mode,
+              trigger_status: onboardingState.dictation_trigger_status,
+              trigger_permission_hint: onboardingState.dictation_trigger_permission_hint
+            };
+          }
+          if (command === 'clear_dictation_trigger') {
+            onboardingState.dictation_trigger = '';
+            onboardingState.dictation_trigger_mode = 'disabled';
+            onboardingState.dictation_trigger_status = 'Hotkey disabled.';
+            return {
+              trigger: '',
+              default_trigger: onboardingState.default_dictation_trigger,
+              trigger_mode: 'disabled',
+              trigger_status: 'Hotkey disabled.',
+              trigger_permission_hint: null
+            };
+          }
+          if (command === 'set_focused_field_insert_enabled') {
+            const enabled = Boolean(args.enabled);
+            onboardingState.focused_field_insert_enabled = enabled;
+            onboardingState.focused_field_insert_permission_granted = true;
+            onboardingState.focused_field_insert_permission_status = enabled
+              ? 'Accessibility permission granted. Finished transcripts can be pasted into the focused field of other apps.'
+              : 'Focused-field insertion is disabled.';
+            return {
+              focused_field_insert_enabled: enabled,
+              focused_field_insert_permission_granted: true,
+              focused_field_insert_permission_status: onboardingState.focused_field_insert_permission_status
+            };
+          }
+          if (command === 'insert_text_into_focused_field') {
+            return null;
+          }
+          if (command === 'install_dictation_model') {
+            const modelId = String(args.model || '').trim();
+            const model = onboardingState.models.find((item) => item.id === modelId);
+            if (model) model.installed = true;
+            onboardingState.selected_model_id = modelId;
+            onboardingState.selected_model_path = `/tmp/ggml-${modelId}.bin`;
+            onboardingState.selected_model_exists = true;
+            return null;
+          }
+          if (command === 'delete_dictation_model') {
+            const modelId = String(args.model || '').trim();
+            const model = onboardingState.models.find((item) => item.id === modelId);
+            if (model) model.installed = false;
+            if (onboardingState.selected_model_id === modelId) {
+              const fallback = onboardingState.models.find((item) => item.installed);
+              if (fallback) {
+                onboardingState.selected_model_id = fallback.id;
+                onboardingState.selected_model_path = `/tmp/ggml-${fallback.id}.bin`;
+                onboardingState.selected_model_exists = true;
+              } else {
+                onboardingState.selected_model_exists = false;
+                onboardingState.selected_model_path = '';
+              }
+            }
+            return null;
           }
           if (command === 'set_pill_visibility_mode') {
             backgroundPreferences.pill_visibility_mode = args.mode || 'active-only';
@@ -319,7 +416,9 @@ function createMockDom({ nativeDesktop = false, onboardingPayload = null, invoke
       },
       event: {
         listen: async () => () => {},
-        emit: async () => {}
+        emit: async (event, payload) => {
+          emitCalls.push({ event, payload });
+        }
       }
     } : null,
     navigator: global.navigator,
@@ -330,16 +429,26 @@ function createMockDom({ nativeDesktop = false, onboardingPayload = null, invoke
     open() {}
   };
 
-  return { clipboardCalls, invokeCalls };
+  return { clipboardCalls, invokeCalls, emitCalls, onboardingState };
 }
+
+const appModulePath = path.join(__dirname, '../public/app.js');
+let appModulePromise = null;
 
 async function loadAppWithTestApi() {
   global.__DICKTAINT_EXPOSE_TEST_API__ = true;
   delete global.__DICKTAINT_TEST_API__;
-  delete require.cache[require.resolve('../public/app.js')];
-  require('../public/app.js');
+  if (!appModulePromise) {
+    appModulePromise = import(pathToFileURL(appModulePath).href);
+  }
+  const appModule = await appModulePromise;
+  appModule.bootstrapApp();
   await Promise.resolve();
   await Promise.resolve();
+  if (!global.__DICKTAINT_TEST_API__) {
+    const { createTestApi } = await import(pathToFileURL(path.join(__dirname, '../public/js/test-api.js')).href);
+    global.__DICKTAINT_TEST_API__ = createTestApi();
+  }
   return global.__DICKTAINT_TEST_API__;
 }
 
@@ -532,6 +641,8 @@ describe('dictation frontend hotkey polish', () => {
       state: 'processing',
       session_id: 1
     });
+    // startNativeDesktopDictation clears the prior session id before the next listen event.
+    api.setNativeFlags({ activeNativeSessionId: null });
     api.handleNativeDictationStatePayload({
       state: 'listening',
       session_id: 2
@@ -546,6 +657,21 @@ describe('dictation frontend hotkey polish', () => {
     expect(state.isDictating).toBe(true);
     expect(state.activeNativeSessionId).toBe('2');
     expect(state.currentDraftText).toBe('first session');
+  });
+
+  it('ignores late listening events from a superseded session', () => {
+    api.handleNativeDictationStatePayload({
+      state: 'listening',
+      session_id: 2
+    });
+    api.handleNativeDictationStatePayload({
+      state: 'listening',
+      session_id: 1
+    });
+
+    const state = api.getState();
+    expect(state.isDictating).toBe(true);
+    expect(state.activeNativeSessionId).toBe('2');
   });
 
   it('renders live mic levels from native audio payloads and ignores stale sessions', () => {
@@ -681,6 +807,8 @@ describe('dictation frontend background UI settings', () => {
   });
 
   it('keeps dictation status rendering stable while background UI preferences change', () => {
+    // Clear any leftover session id from prior describes (module state is shared).
+    api.setNativeFlags({ activeNativeSessionId: null, isDictating: false });
     api.handleNativeDictationStatePayload({
       state: 'listening',
       session_id: 42
@@ -693,5 +821,427 @@ describe('dictation frontend background UI settings', () => {
 
     expect(api.getState().isDictating).toBe(true);
     expect(document.getElementById('status').textContent).toBe('Listening… click Stop to transcribe.');
+  });
+});
+
+describe('dictation frontend hotkey save/clear', () => {
+  let api;
+  let invokeCalls;
+
+  async function flushUi() {
+    await Promise.resolve();
+    await Promise.resolve();
+    await Promise.resolve();
+  }
+
+  beforeEach(async () => {
+    ({ invokeCalls } = createMockDom({ nativeDesktop: true }));
+    api = await loadAppWithTestApi();
+    await flushUi();
+    api.resetState();
+  });
+
+  afterEach(() => {
+    delete global.__DICKTAINT_TEST_API__;
+    delete global.__DICKTAINT_EXPOSE_TEST_API__;
+    delete global.window;
+    delete global.document;
+    delete global.navigator;
+    delete global.Element;
+  });
+
+  it('saves a hotkey combo through set_dictation_trigger and updates state', async () => {
+    await api.saveDictationHotkey('CmdOrCtrl+Shift+D');
+    await flushUi();
+
+    const saveCall = invokeCalls.find((call) => call.command === 'set_dictation_trigger');
+    expect(saveCall).toEqual({
+      command: 'set_dictation_trigger',
+      args: { trigger: 'CmdOrCtrl+Shift+D' }
+    });
+
+    const state = api.getState();
+    expect(state.savedDictationHotkey).toBe('CmdOrCtrl+Shift+D');
+    expect(state.dictationTriggerMode).toBe('global-toggle');
+    expect(document.getElementById('dictationHotkeyStatus').textContent).toContain('Current hotkey: CmdOrCtrl+Shift+D');
+  });
+
+  it('clears the saved hotkey through clear_dictation_trigger', async () => {
+    await api.saveDictationHotkey('Fn');
+    await flushUi();
+    await api.clearDictationHotkey();
+    await flushUi();
+
+    const clearCall = invokeCalls.find((call) => call.command === 'clear_dictation_trigger');
+    expect(clearCall).toEqual({
+      command: 'clear_dictation_trigger',
+      args: {}
+    });
+
+    const state = api.getState();
+    expect(state.savedDictationHotkey).toBeNull();
+    expect(state.dictationTriggerMode).toBe('disabled');
+    expect(document.getElementById('dictationHotkeyStatus').textContent).toContain('Hotkey disabled');
+  });
+
+  it('rejects invalid hotkey combos without invoking Tauri', async () => {
+    const before = invokeCalls.length;
+    await api.saveDictationHotkey('NotARealKeyCombo!!!');
+    await flushUi();
+
+    expect(invokeCalls.slice(before).some((call) => call.command === 'set_dictation_trigger')).toBe(false);
+    expect(document.getElementById('dictationHotkeyStatus').textContent.length).toBeGreaterThan(0);
+  });
+});
+
+describe('dictation frontend focused-field insert', () => {
+  let api;
+  let invokeCalls;
+
+  async function flushUi() {
+    await Promise.resolve();
+    await Promise.resolve();
+    await Promise.resolve();
+  }
+
+  beforeEach(async () => {
+    ({ invokeCalls } = createMockDom({ nativeDesktop: true }));
+    api = await loadAppWithTestApi();
+    await flushUi();
+    api.resetState();
+  });
+
+  afterEach(() => {
+    delete global.__DICKTAINT_TEST_API__;
+    delete global.__DICKTAINT_EXPOSE_TEST_API__;
+    delete global.window;
+    delete global.document;
+    delete global.navigator;
+    delete global.Element;
+  });
+
+  it('saves the focused-field insert toggle through Tauri', async () => {
+    await api.saveFocusedFieldInsertSetting(true);
+    await flushUi();
+
+    expect(invokeCalls.at(-1)).toEqual({
+      command: 'set_focused_field_insert_enabled',
+      args: { enabled: true }
+    });
+
+    const state = api.getState();
+    expect(state.focusedFieldInsertEnabled).toBe(true);
+    expect(state.focusedFieldInsertPermissionGranted).toBe(true);
+    expect(document.getElementById('focusedFieldInsertToggle').checked).toBe(true);
+  });
+
+  it('inserts finished transcripts into the focused field when enabled', async () => {
+    api.applyFocusedFieldInsertPayload({
+      focused_field_insert_enabled: true,
+      focused_field_insert_permission_granted: true,
+      focused_field_insert_permission_status: 'Accessibility permission granted.'
+    });
+
+    api.appendTranscriptChunk('paste me elsewhere', {
+      source: 'native',
+      nativeSessionId: 'session-insert-1'
+    });
+    await flushUi();
+
+    const insertCall = invokeCalls.find((call) => call.command === 'insert_text_into_focused_field');
+    expect(insertCall).toEqual({
+      command: 'insert_text_into_focused_field',
+      args: { text: 'paste me elsewhere' }
+    });
+  });
+
+  it('skips focused-field insert when the setting is disabled', async () => {
+    api.applyFocusedFieldInsertPayload({
+      focused_field_insert_enabled: false,
+      focused_field_insert_permission_granted: true,
+      focused_field_insert_permission_status: 'Focused-field insertion is disabled.'
+    });
+
+    const before = invokeCalls.length;
+    api.appendTranscriptChunk('stay local only', {
+      source: 'native',
+      nativeSessionId: 'session-insert-skip'
+    });
+    await flushUi();
+
+    expect(invokeCalls.slice(before).some((call) => call.command === 'insert_text_into_focused_field')).toBe(false);
+  });
+});
+
+describe('dictation frontend onboarding model install/delete', () => {
+  let api;
+  let invokeCalls;
+
+  async function flushUi() {
+    await Promise.resolve();
+    await Promise.resolve();
+    await Promise.resolve();
+    await Promise.resolve();
+  }
+
+  beforeEach(async () => {
+    ({ invokeCalls } = createMockDom({
+      nativeDesktop: true,
+      onboardingPayload: {
+        selected_model_id: 'base-en',
+        selected_model_exists: true,
+        whisper_cli_available: true,
+        models: [
+          {
+            id: 'base-en',
+            display_name: 'Whisper Base (English)',
+            approx_size_gb: 0.15,
+            speed_note: 'Fast',
+            quality_note: 'Balanced',
+            installed: true,
+            recommended: true,
+            likely_runnable: true
+          },
+          {
+            id: 'small-en',
+            display_name: 'Whisper Small (English)',
+            approx_size_gb: 0.5,
+            speed_note: 'Balanced',
+            quality_note: 'Higher quality',
+            installed: false,
+            recommended: false,
+            likely_runnable: true
+          }
+        ]
+      }
+    }));
+    api = await loadAppWithTestApi();
+    await flushUi();
+  });
+
+  afterEach(() => {
+    delete global.__DICKTAINT_TEST_API__;
+    delete global.__DICKTAINT_EXPOSE_TEST_API__;
+    delete global.window;
+    delete global.document;
+    delete global.navigator;
+    delete global.Element;
+  });
+
+  it('installs the selected model via install_dictation_model', async () => {
+    document.getElementById('dictationModelSelect').value = 'small-en';
+    await api.installSelectedDictationModel();
+    await flushUi();
+
+    const installCall = invokeCalls.find((call) => call.command === 'install_dictation_model');
+    expect(installCall).toEqual({
+      command: 'install_dictation_model',
+      args: { model: 'small-en' }
+    });
+    expect(invokeCalls.some((call) => call.command === 'get_dictation_onboarding')).toBe(true);
+    expect(api.getState().nativeDictationModelReady).toBe(true);
+  });
+
+  it('deletes the selected installed model via delete_dictation_model', async () => {
+    document.getElementById('dictationModelSelect').value = 'base-en';
+    global.window.confirm = () => true;
+
+    await api.deleteSelectedDictationModel();
+    await flushUi();
+
+    const deleteCall = invokeCalls.find((call) => call.command === 'delete_dictation_model');
+    expect(deleteCall).toEqual({
+      command: 'delete_dictation_model',
+      args: { model: 'base-en' }
+    });
+  });
+
+  it('does not delete when confirmation is canceled', async () => {
+    document.getElementById('dictationModelSelect').value = 'base-en';
+    global.window.confirm = () => false;
+    const before = invokeCalls.length;
+
+    await api.deleteSelectedDictationModel();
+    await flushUi();
+
+    expect(invokeCalls.slice(before).some((call) => call.command === 'delete_dictation_model')).toBe(false);
+  });
+});
+
+describe('dictation frontend web speech error/restart', () => {
+  let api;
+
+  beforeEach(async () => {
+    createMockDom();
+    api = await loadAppWithTestApi();
+    api.resetState();
+  });
+
+  afterEach(() => {
+    jest.useRealTimers();
+    api.clearRestartTimer();
+    delete global.__DICKTAINT_TEST_API__;
+    delete global.__DICKTAINT_EXPOSE_TEST_API__;
+    delete global.window;
+    delete global.document;
+    delete global.navigator;
+    delete global.Element;
+  });
+
+  it('classifies fatal vs restartable speech errors', () => {
+    expect(api.isFatalSpeechError('not-allowed')).toBe(true);
+    expect(api.isFatalSpeechError('audio-capture')).toBe(true);
+    expect(api.isFatalSpeechError('network')).toBe(true);
+    expect(api.isFatalSpeechError('language-not-supported')).toBe(true);
+    expect(api.isFatalSpeechError('no-speech')).toBe(false);
+    expect(api.isFatalSpeechError('aborted')).toBe(false);
+    expect(api.describeSpeechError('no-speech')).toContain('no speech');
+  });
+
+  it('schedules a recognition restart when dictation should continue', () => {
+    jest.useFakeTimers();
+    const starts = [];
+    api.setRecognition({
+      start() {
+        starts.push('start');
+      },
+      stop() {}
+    });
+    api.setNativeFlags({
+      shouldKeepDictating: true,
+      isDictating: false,
+      isStartingDictation: false
+    });
+
+    api.scheduleRecognitionRestart();
+    expect(api.getState().hasRestartTimer).toBe(true);
+    expect(starts).toHaveLength(0);
+
+    jest.advanceTimersByTime(250);
+    expect(starts).toEqual(['start']);
+    expect(document.body.dataset.mode).toBe('loading');
+    expect(document.getElementById('status').textContent).toBe('Reconnecting dictation...');
+  });
+
+  it('does not restart when a fatal-style keep flag is cleared', () => {
+    jest.useFakeTimers();
+    const starts = [];
+    api.setRecognition({
+      start() {
+        starts.push('start');
+      },
+      stop() {}
+    });
+    api.setNativeFlags({
+      shouldKeepDictating: false,
+      isDictating: false,
+      isStartingDictation: false
+    });
+
+    api.scheduleRecognitionRestart();
+    jest.advanceTimersByTime(250);
+    expect(starts).toHaveLength(0);
+  });
+});
+
+describe('dictation frontend overlay/pill payloads', () => {
+  let api;
+  let emitCalls;
+
+  beforeEach(async () => {
+    ({ emitCalls } = createMockDom({ nativeDesktop: true }));
+    api = await loadAppWithTestApi();
+    api.resetState();
+  });
+
+  afterEach(() => {
+    delete global.__DICKTAINT_TEST_API__;
+    delete global.__DICKTAINT_EXPOSE_TEST_API__;
+    delete global.window;
+    delete global.document;
+    delete global.navigator;
+    delete global.Element;
+  });
+
+  it('emits pill overlay status payloads through Tauri events', async () => {
+    await api.setHotkeyPill('Listening - release Fn / Globe', 'live', true);
+    await Promise.resolve();
+
+    expect(emitCalls.at(-1)).toEqual({
+      event: 'dicktaint://pill-status',
+      payload: {
+        message: 'Listening - release Fn / Globe',
+        state: 'live',
+        visible: true
+      }
+    });
+  });
+
+  it('handles processing then idle transcript payloads and resets session', () => {
+    api.handleNativeDictationStatePayload({
+      state: 'listening',
+      session_id: 7
+    });
+    api.handleNativeDictationStatePayload({
+      state: 'processing',
+      session_id: 7
+    });
+    expect(api.getState().isDictating).toBe(true);
+    expect(document.getElementById('status').textContent).toContain('Transcribing');
+
+    api.handleNativeDictationStatePayload({
+      state: 'idle',
+      session_id: 7,
+      transcript: 'finished phrase'
+    });
+
+    const state = api.getState();
+    expect(state.isDictating).toBe(false);
+    expect(state.activeNativeSessionId).toBeNull();
+    expect(state.currentDraftText).toBe('finished phrase');
+    expect(state.dictationHistory[0].text).toBe('finished phrase');
+  });
+
+  it('surfaces native dictation error payloads and clears the active session', () => {
+    api.handleNativeDictationStatePayload({
+      state: 'listening',
+      session_id: 9
+    });
+    api.handleNativeDictationStatePayload({
+      state: 'error',
+      session_id: 9,
+      error: 'mic unavailable'
+    });
+
+    const state = api.getState();
+    expect(state.isDictating).toBe(false);
+    expect(state.activeNativeSessionId).toBeNull();
+    expect(document.body.dataset.mode).toBe('error');
+    expect(document.getElementById('status').textContent).toContain('mic unavailable');
+  });
+
+  it('ignores audio-level payloads for stale sessions and applies matching ones', () => {
+    api.handleNativeDictationStatePayload({
+      state: 'listening',
+      session_id: 11
+    });
+
+    api.handleNativeDictationAudioLevelPayload({
+      session_id: 99,
+      level: 0.95,
+      bars: Array.from({ length: 12 }, () => 0.95)
+    });
+    expect(api.getState().liveAudioLevel).toBe(0);
+
+    api.handleNativeDictationAudioLevelPayload({
+      session_id: 11,
+      level: 0.2,
+      bars: [0.05, 0.1, 0.15, 0.2, 0.25, 0.3, 0.35, 0.4, 0.45, 0.5, 0.55, 0.6]
+    });
+
+    const state = api.getState();
+    expect(state.liveAudioLevel).toBe(0.2);
+    expect(state.waveformAudioState).toBe('ready');
+    expect(document.getElementById('dictationWaveBar0').style.getPropertyValue('--bar-level')).toBe('0.050');
   });
 });

@@ -24,8 +24,9 @@ Out of scope:
 
 ## Source Anchors
 
-- `/Users/plebdev/Desktop/code/dicktaint/src-tauri/src/main.rs`
-- `/Users/plebdev/Desktop/code/dicktaint/src-tauri/Cargo.toml`
+- `src-tauri/src/main.rs` (thin entry)
+- `src-tauri/src/` domain modules (`audio`, `commands`, `hotkey_overlay`, `insert`, `models`, `state`, `transcribe`, `whisper_cli`)
+- `src-tauri/Cargo.toml`
 
 ## Contract
 
@@ -46,6 +47,9 @@ Capture details:
 - input sample formats handled: `f32`, `i16`, `u16`
 - channel input is downmixed to mono
 - startup timeout for stream init: 5 seconds
+- audio I/O uses path-patched `cpal` (`vendor/cpal`) — macOS CoreAudio retain-cycle / idle-mic leak fix; see [`../../vendor/cpal/VENDOR.md`](../../vendor/cpal/VENDOR.md)
+
+Sidecar binaries (bundled `whisper-cli-*` real vs placeholder): [`../../src-tauri/binaries/README.md`](../../src-tauri/binaries/README.md)
 
 Normalization details:
 

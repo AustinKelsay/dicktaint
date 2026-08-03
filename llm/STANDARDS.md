@@ -2,7 +2,7 @@
 
 Status snapshot: 2026-02-17.
 
-This file defines the required format and verification bar for docs under `/Users/plebdev/Desktop/code/dicktaint/llm`.
+This file defines the required format and verification bar for docs under `llm`.
 
 ## Required Sections
 

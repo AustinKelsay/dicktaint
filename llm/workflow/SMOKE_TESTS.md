@@ -25,10 +25,14 @@ Out of scope:
 
 ## Source Anchors
 
-- `/Users/plebdev/Desktop/code/dicktaint/server.js`
-- `/Users/plebdev/Desktop/code/dicktaint/public/app.js`
-- `/Users/plebdev/Desktop/code/dicktaint/src-tauri/src/main.rs`
-- `/Users/plebdev/Desktop/code/dicktaint/scripts/smoke-whisper-sidecar.sh`
+- `server.js`
+- `public/app.js` (ESM entry)
+- `public/js/`
+- `src-tauri/src/main.rs` (thin entry)
+- `src-tauri/src/commands.rs`
+- `src-tauri/src/hotkey_overlay/mod.rs`
+- `src-tauri/src/state.rs`
+- `scripts/smoke-whisper-sidecar.sh`
 
 ## Runbook
 

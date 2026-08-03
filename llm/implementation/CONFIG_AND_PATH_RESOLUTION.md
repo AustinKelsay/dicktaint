@@ -24,9 +24,12 @@ Out of scope:
 
 ## Source Anchors
 
-- `/Users/plebdev/Desktop/code/dicktaint/src-tauri/src/main.rs`
-- `/Users/plebdev/Desktop/code/dicktaint/src-tauri/tauri.conf.json`
-- `/Users/plebdev/Desktop/code/dicktaint/package.json`
+- `src-tauri/src/main.rs` (thin entry)
+- `src-tauri/src/commands.rs`
+- `src-tauri/src/hotkey_overlay/mod.rs`
+- `src-tauri/src/state.rs`
+- `src-tauri/tauri.conf.json`
+- `package.json`
 
 ## Contract
 
@@ -43,6 +46,11 @@ CLI resolution order:
 2. bundled sidecar candidate path if present
 3. default `whisper-cli` command
 4. candidate probing through local sidecar and common OS install paths
+
+Bundled sidecar policy (real vs placeholder per target triple):
+
+- see [`../../src-tauri/binaries/README.md`](../../src-tauri/binaries/README.md)
+- validation rejects placeholder binaries (`--help` / probe behavior)
 
 CLI validation requirements:
 

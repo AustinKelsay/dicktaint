@@ -16,7 +16,7 @@ In scope:
 - required section checks for `llm/` docs
 - markdown link/path integrity checks
 - `bun run` command reference validation against `package.json`
-- absolute source-anchor path existence checks
+- repo-relative source-anchor path existence checks
 
 Out of scope:
 
@@ -24,9 +24,9 @@ Out of scope:
 
 ## Source Anchors
 
-- `/Users/plebdev/Desktop/code/dicktaint/scripts/verify-docs.sh`
-- `/Users/plebdev/Desktop/code/dicktaint/package.json`
-- `/Users/plebdev/Desktop/code/dicktaint/llm/STANDARDS.md`
+- `scripts/verify-docs.sh`
+- `package.json`
+- `llm/STANDARDS.md`
 
 ## Runbook
 
