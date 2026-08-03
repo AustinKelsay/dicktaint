@@ -24,6 +24,14 @@ extern "C" {
     ) -> CFMachPortRef;
     fn CGEventTapEnable(tap: CFMachPortRef, enable: bool);
     fn CGEventGetFlags(event: CGEventRef) -> CGEventFlags;
+    /// Returns whether this process may create listen-only event taps.
+    ///
+    /// `CGEventTapCreate` can still return a non-null tap when Input Monitoring
+    /// is denied; without this preflight the listener appears armed but never
+    /// receives `flagsChanged` events from other apps.
+    fn CGPreflightListenEventAccess() -> bool;
+    /// Prompts the user (and opens Input Monitoring settings) when access is missing.
+    fn CGRequestListenEventAccess() -> bool;
 }
 
 #[link(name = "CoreFoundation", kind = "framework")]
@@ -68,8 +76,33 @@ fn macos_tap_disable_should_dispatch_stop(was_fn_down: bool) -> bool {
     was_fn_down
 }
 
+/// Error shown when Input Monitoring (or tap creation) blocks global Fn hold.
+fn macos_fn_input_monitoring_error() -> String {
+    "Global Fn listener unavailable. macOS may be blocking event taps. Allow Input Monitoring for this app/terminal in System Settings > Privacy & Security > Input Monitoring.".to_string()
+}
+
+/**
+ * Returns whether macOS currently allows this process to listen for global key events.
+ *
+ * Calls `CGRequestListenEventAccess` when preflight fails so Settings can surface
+ * the Input Monitoring prompt. `CGEventTapCreate` alone is not a reliable signal.
+ */
+fn ensure_macos_listen_event_access() -> bool {
+    unsafe {
+        if CGPreflightListenEventAccess() {
+            return true;
+        }
+        let _ = CGRequestListenEventAccess();
+        CGPreflightListenEventAccess()
+    }
+}
+
 impl MacFnGlobalListener {
     pub(super) fn new(app: &tauri::AppHandle) -> Result<Self, String> {
+        if !ensure_macos_listen_event_access() {
+            return Err(macos_fn_input_monitoring_error());
+        }
+
         let callback_ctx = Arc::new(MacFnCallbackContext {
             app: app.clone(),
             enabled: AtomicBool::new(false),
@@ -93,7 +126,7 @@ impl MacFnGlobalListener {
             unsafe {
                 drop(Arc::from_raw(callback_ctx_raw));
             }
-            return Err("Global Fn listener unavailable. macOS may be blocking event taps. Allow Input Monitoring for this app/terminal in System Settings > Privacy & Security > Input Monitoring.".to_string());
+            return Err(macos_fn_input_monitoring_error());
         }
 
         callback_ctx
@@ -212,7 +245,8 @@ unsafe extern "C" fn macos_fn_event_tap_callback(
 #[cfg(test)]
 mod tests {
     use super::{
-        macos_listener_disable_should_dispatch_stop, macos_tap_disable_should_dispatch_stop,
+        macos_fn_input_monitoring_error, macos_listener_disable_should_dispatch_stop,
+        macos_tap_disable_should_dispatch_stop,
     };
 
     #[test]
@@ -225,5 +259,12 @@ mod tests {
     fn tap_disable_dispatches_stop_when_fn_was_down() {
         assert!(macos_tap_disable_should_dispatch_stop(true));
         assert!(!macos_tap_disable_should_dispatch_stop(false));
+    }
+
+    #[test]
+    fn input_monitoring_error_mentions_settings_path() {
+        let message = macos_fn_input_monitoring_error();
+        assert!(message.contains("Input Monitoring"));
+        assert!(message.contains("Privacy & Security"));
     }
 }
