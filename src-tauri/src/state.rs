@@ -501,11 +501,18 @@ pub(crate) const CG_EVENT_TAP_PLACEMENT_HEAD_INSERT: u32 = 0;
 #[cfg(target_os = "macos")]
 pub(crate) const CG_EVENT_TAP_OPTION_LISTEN_ONLY: u32 = 1;
 #[cfg(target_os = "macos")]
+pub(crate) const CG_EVENT_TYPE_KEY_DOWN: u32 = 10;
+#[cfg(target_os = "macos")]
+pub(crate) const CG_EVENT_TYPE_KEY_UP: u32 = 11;
+#[cfg(target_os = "macos")]
 pub(crate) const CG_EVENT_TYPE_FLAGS_CHANGED: u32 = 12;
 #[cfg(target_os = "macos")]
 pub(crate) const CG_EVENT_TYPE_TAP_DISABLED_BY_TIMEOUT: u32 = 0xFFFF_FFFE;
 #[cfg(target_os = "macos")]
 pub(crate) const CG_EVENT_TYPE_TAP_DISABLED_BY_USER_INPUT: u32 = 0xFFFF_FFFF;
+/// `kCGKeyboardEventKeycode` — virtual keycode field on keyboard events.
+#[cfg(target_os = "macos")]
+pub(crate) const CG_KEYBOARD_EVENT_KEYCODE: u32 = 9;
 
 #[cfg(target_os = "macos")]
 pub(crate) const MACOS_COMMAND_FLAG_MASK: CGEventFlags = 1 << 20;
@@ -517,6 +524,9 @@ pub(crate) const MACOS_NON_FN_MODIFIER_MASK: CGEventFlags = (1 << 17) | (1 << 18
 pub(crate) const KEYCODE_COMMAND: u16 = 0x37;
 #[cfg(target_os = "macos")]
 pub(crate) const KEYCODE_V: u16 = 0x09;
+/// Hardware Fn / Globe keycode (`NX_KEYTYPE` / ISO keyboard fn).
+#[cfg(target_os = "macos")]
+pub(crate) const KEYCODE_FN: i64 = 63;
 
 #[cfg(target_os = "macos")]
 pub(crate) type MacFnEventTapCallback =

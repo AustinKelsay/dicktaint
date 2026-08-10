@@ -185,7 +185,8 @@ export function applyNativeFnHoldState(pressed) {
     if (state.isDictating || state.isStartingDictation || state.nativeHotkeyActionInFlight) return;
     state.nativeHotkeyActionInFlight = true;
     setHotkeyPill('fn down - starting dictation...', 'working', true);
-    Promise.resolve(startNativeDesktopDictation('hotkey-hold'))
+    const startFn = state.startNativeDesktopDictationOverride || startNativeDesktopDictation;
+    Promise.resolve(startFn('hotkey-hold'))
       .catch(() => {})
       .finally(() => {
         state.nativeHotkeyActionInFlight = false;
@@ -216,13 +217,28 @@ export function applyNativeFnHoldState(pressed) {
 }
 
 
+/**
+ * Whether focused-window Fn key events should drive hold-to-talk.
+ *
+ * `global-hold` uses a CGEventTap, but that tap can appear armed while still
+ * receiving no hardware Fn events (Input Monitoring / ad-hoc resign). Keep the
+ * in-app path alive whenever Fn is the active trigger so hold still works at
+ * least while dicktaint is focused. Backend start/stop is idempotent, so dual
+ * delivery is safe.
+ */
+export function shouldHandleNativeFnHoldInFocusedWindow() {
+  if (state.activeHotkeySpec?.ok && state.activeHotkeySpec.key !== 'Fn') return false;
+  return state.dictationTriggerMode === 'focused-window-hold'
+    || state.dictationTriggerMode === 'global-hold';
+}
+
+
 export function handleNativeHoldKeydown(event) {
   if (!isFocusedMacDesktopMode()) return;
-  if (state.dictationTriggerMode !== 'focused-window-hold') return;
+  if (!shouldHandleNativeFnHoldInFocusedWindow()) return;
   if (event.repeat) return;
   if (event.metaKey || event.ctrlKey || event.altKey || event.shiftKey) return;
   if (!isNativeHoldHotkeyEvent(event)) return;
-  if (state.activeHotkeySpec?.ok && state.activeHotkeySpec.key !== 'Fn') return;
 
   event.preventDefault();
   event.stopPropagation();
@@ -232,9 +248,8 @@ export function handleNativeHoldKeydown(event) {
 
 export function handleNativeHoldKeyup(event) {
   if (!isFocusedMacDesktopMode()) return;
-  if (state.dictationTriggerMode !== 'focused-window-hold') return;
+  if (!shouldHandleNativeFnHoldInFocusedWindow()) return;
   if (!isNativeHoldHotkeyEvent(event)) return;
-  if (state.activeHotkeySpec?.ok && state.activeHotkeySpec.key !== 'Fn') return;
 
   event.preventDefault();
   event.stopPropagation();

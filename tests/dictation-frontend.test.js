@@ -632,6 +632,39 @@ describe('dictation frontend hotkey polish', () => {
     expect(api.summarizeHotkeyPillStatus('Listening...', 'live')).toBe('Listening - release Fn / Globe');
   });
 
+  it('still handles focused Fn hold when backend reports global-hold', async () => {
+    const starts = [];
+    api.applyDictationHotkeyPayload({
+      trigger: 'Fn',
+      default_trigger: 'Fn',
+      trigger_mode: 'global-hold',
+      trigger_status: 'Hold Fn anywhere to dictate, then release to transcribe.'
+    });
+    expect(api.shouldHandleNativeFnHoldInFocusedWindow()).toBe(true);
+
+    api.setStartNativeDesktopDictationOverride(async (trigger) => {
+      starts.push(trigger);
+    });
+
+    api.handleNativeHoldKeydown({
+      type: 'keydown',
+      key: 'Fn',
+      code: 'Fn',
+      repeat: false,
+      metaKey: false,
+      ctrlKey: false,
+      altKey: false,
+      shiftKey: false,
+      getModifierState: (name) => name === 'Fn',
+      preventDefault() {},
+      stopPropagation() {}
+    });
+    await Promise.resolve();
+    await Promise.resolve();
+
+    expect(starts).toEqual(['hotkey-hold']);
+  });
+
   it('keeps a newer live session active when an older transcript finishes later', () => {
     api.handleNativeDictationStatePayload({
       state: 'listening',
