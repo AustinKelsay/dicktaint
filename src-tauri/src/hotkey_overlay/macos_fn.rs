@@ -1,9 +1,13 @@
-//! macOS Fn/Globe global listener via CGEventTap FFI.
+//! macOS Fn/Globe global listener.
 //!
-//! Prefers a HID-level listen-only tap (more reliable for background Fn/Globe),
-//! falls back to a session tap, and treats Input Monitoring preflight as a soft
-//! prompt rather than a hard gate — preflight can report true while hardware
-//! events still never arrive after ad-hoc re-signing.
+//! Two delivery paths:
+//! 1. `NSEvent` global monitor — uses Accessibility (same grant as focused-field paste)
+//! 2. `CGEventTap` listen-only — uses Input Monitoring
+//!
+//! Focused-window Fn can work via WKWebView without either path. Background Fn
+//! needs at least one of these. Ad-hoc re-signs often leave CGEventTap silent
+//! even when `CGPreflightListenEventAccess` reports true, so the NSEvent path
+//! is the reliable background fallback when Accessibility is already granted.
 
 use crate::state::{BackendHotkeyAction, CFAllocatorRef, CFMachPortRef, CFRunLoopRef,
     CFRunLoopSourceRef, CFStringRef, CGEventFlags, CGEventMask, CGEventRef, CGEventTapProxy,
@@ -12,8 +16,13 @@ use crate::state::{BackendHotkeyAction, CFAllocatorRef, CFMachPortRef, CFRunLoop
     CG_EVENT_TYPE_FLAGS_CHANGED, CG_EVENT_TYPE_KEY_DOWN, CG_EVENT_TYPE_KEY_UP,
     CG_EVENT_TYPE_TAP_DISABLED_BY_TIMEOUT, CG_EVENT_TYPE_TAP_DISABLED_BY_USER_INPUT,
     CG_KEYBOARD_EVENT_KEYCODE, KEYCODE_FN, MACOS_FN_FLAG_MASK, MACOS_NON_FN_MODIFIER_MASK};
+use block2::RcBlock;
+use objc2::runtime::AnyObject;
+use objc2::rc::Retained;
+use objc2_app_kit::{NSEvent, NSEventMask, NSEventModifierFlags, NSEventType};
 use std::ffi::c_void;
 use std::process::Command;
+use std::ptr::NonNull;
 use std::sync::atomic::{AtomicBool, AtomicPtr, Ordering};
 use std::sync::{Arc, Mutex};
 use std::time::{Duration, Instant};
@@ -41,12 +50,7 @@ extern "C" {
     fn CGEventTapEnable(tap: CFMachPortRef, enable: bool);
     fn CGEventGetFlags(event: CGEventRef) -> CGEventFlags;
     fn CGEventGetIntegerValueField(event: CGEventRef, field: u32) -> i64;
-    /// Returns whether this process may create listen-only event taps.
-    ///
-    /// Not a hard gate: on some macOS builds this reports true while hardware
-    /// Fn events still never reach a listen-only tap after identity changes.
     fn CGPreflightListenEventAccess() -> bool;
-    /// Prompts the user (and opens Input Monitoring settings) when access is missing.
     fn CGRequestListenEventAccess() -> bool;
 }
 
@@ -67,6 +71,11 @@ extern "C" {
     fn CFRelease(cf: *const c_void);
 }
 
+#[link(name = "ApplicationServices", kind = "framework")]
+extern "C" {
+    fn AXIsProcessTrusted() -> bool;
+}
+
 struct MacFnCallbackContext {
     app: tauri::AppHandle,
     enabled: AtomicBool,
@@ -75,8 +84,11 @@ struct MacFnCallbackContext {
 }
 
 pub(super) struct MacFnGlobalListener {
-    tap: CFMachPortRef,
-    source: CFRunLoopSourceRef,
+    tap: Option<CFMachPortRef>,
+    source: Option<CFRunLoopSourceRef>,
+    nsevent_monitor: Option<Retained<AnyObject>>,
+    /// Keeps the NSEvent handler block alive for the monitor lifetime.
+    _nsevent_block: Option<RcBlock<dyn Fn(NonNull<NSEvent>)>>,
     callback_ctx: Arc<MacFnCallbackContext>,
     callback_ctx_raw: *const MacFnCallbackContext,
 }
@@ -92,9 +104,9 @@ fn macos_tap_disable_should_dispatch_stop(was_fn_down: bool) -> bool {
     was_fn_down
 }
 
-/// Error shown when Input Monitoring (or tap creation) blocks global Fn hold.
+/// Error shown when neither Accessibility nor Input Monitoring can arm global Fn.
 fn macos_fn_input_monitoring_error() -> String {
-    "Global Fn listener unavailable. macOS may be blocking event taps. Allow Input Monitoring for this app/terminal in System Settings > Privacy & Security > Input Monitoring.".to_string()
+    "Global Fn listener unavailable. Allow Accessibility (and Input Monitoring if listed) for dicktaint in System Settings > Privacy & Security, then relaunch dicktaint.".to_string()
 }
 
 /// Opens System Settings → Input Monitoring (rate-limited).
@@ -146,9 +158,6 @@ fn prompt_macos_listen_event_access_if_needed() {
 }
 
 /// Whether activation should rebuild an existing Fn tap.
-///
-/// Taps created before Input Monitoring is granted (or before an ad-hoc
-/// re-sign's new CDHash is allowed) stay silent for background Fn until rebuilt.
 pub(crate) fn should_refresh_fn_listener_after_activation(registered_trigger_is_fn: bool) -> bool {
     registered_trigger_is_fn
 }
@@ -177,9 +186,6 @@ fn macos_fn_event_mask() -> CGEventMask {
 
 /**
  * Creates a listen-only tap, preferring HID then session.
- *
- * HID sees hardware Fn/Globe more reliably for background hold-to-talk when
- * Input Monitoring / Accessibility allow it.
  */
 fn create_macos_fn_event_tap(user_info: *mut c_void) -> CFMachPortRef {
     let event_mask = macos_fn_event_mask();
@@ -207,7 +213,7 @@ fn create_macos_fn_event_tap(user_info: *mut c_void) -> CFMachPortRef {
     }
 }
 
-/// Resolves Fn/Globe pressed state from a flagsChanged or Fn keycode event.
+/// Resolves Fn/Globe pressed state from a CGEvent flagsChanged or Fn keycode event.
 fn fn_down_from_event(event_type: u32, event: CGEventRef) -> Option<bool> {
     if event.is_null() {
         return None;
@@ -234,6 +240,90 @@ fn fn_down_from_event(event_type: u32, event: CGEventRef) -> Option<bool> {
     None
 }
 
+/**
+ * Resolves Fn pressed state from NSEvent modifier flags / keycode.
+ *
+ * Uses `NSEventModifierFlagFunction` (Accessibility global monitor path), which
+ * is distinct from the CoreGraphics SecondaryFn bit used by CGEventTap.
+ */
+fn fn_down_from_nsevent(event: &NSEvent) -> Option<bool> {
+    let event_type = event.r#type();
+    if event_type == NSEventType::FlagsChanged {
+        let flags = event.modifierFlags();
+        let non_fn = NSEventModifierFlags::Shift
+            .union(NSEventModifierFlags::Control)
+            .union(NSEventModifierFlags::Option)
+            .union(NSEventModifierFlags::Command);
+        if flags.intersects(non_fn) {
+            return None;
+        }
+        return Some(flags.contains(NSEventModifierFlags::Function));
+    }
+
+    if event_type == NSEventType::KeyDown || event_type == NSEventType::KeyUp {
+        if i64::from(event.keyCode()) != KEYCODE_FN {
+            return None;
+        }
+        return Some(event_type == NSEventType::KeyDown);
+    }
+
+    None
+}
+
+/// Applies a Fn edge transition into HoldStart / HoldStop when enabled.
+fn apply_fn_down_state(callback_ctx: &MacFnCallbackContext, fn_down: bool) {
+    if !callback_ctx.enabled.load(Ordering::Relaxed) {
+        return;
+    }
+
+    let was_fn_down = callback_ctx.fn_down.swap(fn_down, Ordering::Relaxed);
+    if fn_down == was_fn_down {
+        return;
+    }
+
+    dispatch_backend_hotkey_action(
+        &callback_ctx.app,
+        if fn_down {
+            BackendHotkeyAction::HoldStart
+        } else {
+            BackendHotkeyAction::HoldStop
+        },
+    );
+}
+
+/// Installs an Accessibility-backed NSEvent global monitor for Fn/Globe.
+fn install_nsevent_fn_monitor(
+    callback_ctx: Arc<MacFnCallbackContext>,
+) -> (
+    Option<Retained<AnyObject>>,
+    Option<RcBlock<dyn Fn(NonNull<NSEvent>)>>,
+) {
+    if !unsafe { AXIsProcessTrusted() } {
+        log::warn!(
+            "Accessibility is not trusted; NSEvent global Fn monitor unavailable. Focused-field paste grant also covers background Fn hold."
+        );
+        return (None, None);
+    }
+
+    let block = RcBlock::new(move |event_ptr: NonNull<NSEvent>| {
+        let event = unsafe { event_ptr.as_ref() };
+        if let Some(fn_down) = fn_down_from_nsevent(event) {
+            apply_fn_down_state(&callback_ctx, fn_down);
+        }
+    });
+
+    let mask = NSEventMask::FlagsChanged
+        .union(NSEventMask::KeyDown)
+        .union(NSEventMask::KeyUp);
+    let monitor = NSEvent::addGlobalMonitorForEventsMatchingMask_handler(mask, &block);
+    if monitor.is_none() {
+        log::warn!(
+            "NSEvent.addGlobalMonitorForEvents returned nil; grant Accessibility for dicktaint."
+        );
+    }
+    (monitor, Some(block))
+}
+
 impl MacFnGlobalListener {
     pub(super) fn new(app: &tauri::AppHandle) -> Result<Self, String> {
         prompt_macos_listen_event_access_if_needed();
@@ -246,46 +336,64 @@ impl MacFnGlobalListener {
         });
         let callback_ctx_raw = Arc::into_raw(Arc::clone(&callback_ctx));
 
+        let (nsevent_monitor, nsevent_block) =
+            install_nsevent_fn_monitor(Arc::clone(&callback_ctx));
+
         let mut tap = create_macos_fn_event_tap(callback_ctx_raw as *mut c_void);
         if tap.is_null() {
-            // One more prompt + retry — first launch often needs the Settings toggle.
             unsafe {
                 let _ = CGRequestListenEventAccess();
             }
             tap = create_macos_fn_event_tap(callback_ctx_raw as *mut c_void);
         }
-        if tap.is_null() {
+
+        let mut source = std::ptr::null_mut();
+        if !tap.is_null() {
+            callback_ctx
+                .tap
+                .store(tap.cast::<c_void>(), Ordering::SeqCst);
+            source = unsafe { CFMachPortCreateRunLoopSource(kCFAllocatorDefault, tap, 0) };
+            if source.is_null() {
+                unsafe {
+                    CFMachPortInvalidate(tap);
+                    CFRelease(tap as *const c_void);
+                }
+                tap = std::ptr::null_mut();
+            } else {
+                unsafe {
+                    let run_loop = CFRunLoopGetMain();
+                    CFRunLoopAddSource(run_loop, source, kCFRunLoopCommonModes);
+                    CGEventTapEnable(tap, true);
+                }
+            }
+        }
+
+        let has_nsevent = nsevent_monitor.is_some();
+        let has_tap = !tap.is_null();
+        if !has_nsevent && !has_tap {
             unsafe {
                 drop(Arc::from_raw(callback_ctx_raw));
             }
             return Err(macos_fn_input_monitoring_error());
         }
 
-        callback_ctx
-            .tap
-            .store(tap.cast::<c_void>(), Ordering::SeqCst);
-
-        let source = unsafe { CFMachPortCreateRunLoopSource(kCFAllocatorDefault, tap, 0) };
-        if source.is_null() {
-            unsafe {
-                CFMachPortInvalidate(tap);
-                CFRelease(tap as *const c_void);
-                drop(Arc::from_raw(callback_ctx_raw));
-            }
-            return Err(
-                "Failed to create macOS run loop source for global Fn listener.".to_string(),
+        if has_nsevent && !has_tap {
+            log::info!(
+                "Global Fn hold armed via Accessibility NSEvent monitor (CGEventTap unavailable)."
             );
-        }
-
-        unsafe {
-            let run_loop = CFRunLoopGetMain();
-            CFRunLoopAddSource(run_loop, source, kCFRunLoopCommonModes);
-            CGEventTapEnable(tap, true);
+        } else if !has_nsevent && has_tap {
+            log::info!(
+                "Global Fn hold armed via CGEventTap only (Accessibility NSEvent monitor unavailable)."
+            );
+        } else {
+            log::info!("Global Fn hold armed via NSEvent monitor and CGEventTap.");
         }
 
         Ok(Self {
-            tap,
-            source,
+            tap: if has_tap { Some(tap) } else { None },
+            source: if has_tap { Some(source) } else { None },
+            nsevent_monitor,
+            _nsevent_block: nsevent_block,
             callback_ctx,
             callback_ctx_raw,
         })
@@ -307,13 +415,20 @@ impl MacFnGlobalListener {
 
 impl Drop for MacFnGlobalListener {
     fn drop(&mut self) {
-        unsafe {
-            let run_loop = CFRunLoopGetMain();
-            CFRunLoopRemoveSource(run_loop, self.source, kCFRunLoopCommonModes);
-            CFRelease(self.source as *const c_void);
+        if let Some(monitor) = self.nsevent_monitor.take() {
+            unsafe {
+                NSEvent::removeMonitor(&monitor);
+            }
+        }
 
-            CFMachPortInvalidate(self.tap);
-            CFRelease(self.tap as *const c_void);
+        unsafe {
+            if let (Some(source), Some(tap)) = (self.source.take(), self.tap.take()) {
+                let run_loop = CFRunLoopGetMain();
+                CFRunLoopRemoveSource(run_loop, source, kCFRunLoopCommonModes);
+                CFRelease(source as *const c_void);
+                CFMachPortInvalidate(tap);
+                CFRelease(tap as *const c_void);
+            }
 
             drop(Arc::from_raw(self.callback_ctx_raw));
         }
@@ -345,24 +460,8 @@ unsafe extern "C" fn macos_fn_event_tap_callback(
         return event;
     }
 
-    if !callback_ctx.enabled.load(Ordering::Relaxed) {
-        return event;
-    }
-
-    let Some(fn_down) = fn_down_from_event(event_type, event) else {
-        return event;
-    };
-
-    let was_fn_down = callback_ctx.fn_down.swap(fn_down, Ordering::Relaxed);
-    if fn_down != was_fn_down {
-        dispatch_backend_hotkey_action(
-            &callback_ctx.app,
-            if fn_down {
-                BackendHotkeyAction::HoldStart
-            } else {
-                BackendHotkeyAction::HoldStop
-            },
-        );
+    if let Some(fn_down) = fn_down_from_event(event_type, event) {
+        apply_fn_down_state(callback_ctx, fn_down);
     }
 
     event
@@ -393,7 +492,7 @@ mod tests {
     #[test]
     fn input_monitoring_error_mentions_settings_path() {
         let message = macos_fn_input_monitoring_error();
-        assert!(message.contains("Input Monitoring"));
+        assert!(message.contains("Accessibility") || message.contains("Input Monitoring"));
         assert!(message.contains("Privacy & Security"));
     }
 
@@ -407,7 +506,10 @@ mod tests {
 
     #[test]
     fn fn_down_from_event_ignores_null_event() {
-        assert_eq!(fn_down_from_event(CG_EVENT_TYPE_FLAGS_CHANGED, std::ptr::null()), None);
+        assert_eq!(
+            fn_down_from_event(CG_EVENT_TYPE_FLAGS_CHANGED, std::ptr::null()),
+            None
+        );
     }
 
     #[test]
@@ -415,5 +517,4 @@ mod tests {
         assert!(super::should_refresh_fn_listener_after_activation(true));
         assert!(!super::should_refresh_fn_listener_after_activation(false));
     }
-
 }
