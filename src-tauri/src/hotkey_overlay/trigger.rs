@@ -389,16 +389,65 @@ fn set_macos_fn_listener_enabled(
         .map_err(|_| "Failed to lock macOS Fn listener state".to_string())?;
 
     if enabled {
-        if guard.is_none() {
-            *guard = Some(MacFnGlobalListener::new(app)?);
+        // Always rebuild. Listen-only taps created before Input Monitoring is
+        // granted (or before an ad-hoc CDHash is allowed) never receive
+        // background Fn events until the tap is destroyed and recreated.
+        if let Some(listener) = guard.as_ref() {
+            listener.set_enabled(false);
         }
-    }
-
-    if let Some(listener) = guard.as_ref() {
-        listener.set_enabled(enabled);
+        *guard = None;
+        *guard = Some(MacFnGlobalListener::new(app)?);
+        if let Some(listener) = guard.as_ref() {
+            listener.set_enabled(true);
+        }
+    } else if let Some(listener) = guard.take() {
+        listener.set_enabled(false);
+        drop(listener);
     }
 
     Ok(())
+}
+
+/**
+ * Rebuilds the global Fn listener after the app becomes active again.
+ *
+ * Users typically toggle Input Monitoring in System Settings then return to
+ * dicktaint; without a recreate, the old silent tap stays installed.
+ */
+#[cfg(target_os = "macos")]
+pub(crate) fn refresh_macos_fn_listener_after_activation(
+    app: &tauri::AppHandle,
+    hotkey_state: &GlobalHotkeyState,
+) -> Result<(), String> {
+    use super::macos_fn::should_refresh_fn_listener_after_activation;
+
+    use super::macos_fn::claim_fn_listener_activation_refresh_slot;
+
+    let registered = current_registered_hotkey(hotkey_state)?;
+    if !should_refresh_fn_listener_after_activation(registered.as_deref() == Some("Fn")) {
+        return Ok(());
+    }
+    if !claim_fn_listener_activation_refresh_slot() {
+        return Ok(());
+    }
+
+    match set_macos_fn_listener_enabled(app, hotkey_state, true) {
+        Ok(()) => {
+            let runtime =
+                runtime_details_for_trigger(Some("Fn"), HotkeyDeliveryMode::GlobalHold);
+            update_hotkey_state(hotkey_state, Some("Fn".to_string()), runtime)?;
+            Ok(())
+        }
+        Err(error) => {
+            log::warn!(
+                "Failed to refresh global Fn listener after activation: {error}"
+            );
+            let runtime =
+                runtime_details_for_trigger(Some("Fn"), HotkeyDeliveryMode::FocusedWindowHold);
+            update_hotkey_state(hotkey_state, Some("Fn".to_string()), runtime)?;
+            Err(error)
+        }
+    }
 }
 
 #[cfg(not(any(target_os = "android", target_os = "ios")))]

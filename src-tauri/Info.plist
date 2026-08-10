@@ -6,5 +6,7 @@
   <string>dicktaint needs microphone access for live local dictation.</string>
   <key>NSSpeechRecognitionUsageDescription</key>
   <string>dicktaint needs speech recognition access to convert your voice into text locally.</string>
+  <key>NSInputMonitoringUsageDescription</key>
+  <string>dicktaint needs Input Monitoring so holding Fn / Globe can start dictation while other apps are focused.</string>
 </dict>
 </plist>

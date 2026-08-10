@@ -21,6 +21,8 @@ pub(crate) use trigger::{
     normalize_dictation_trigger, onboarding_runtime_details, resolve_effective_dictation_trigger,
     GlobalHotkeyState,
 };
+#[cfg(target_os = "macos")]
+pub(crate) use trigger::refresh_macos_fn_listener_after_activation;
 
 use crate::dictation_session::{is_benign_session_error, is_running, start, stop};
 use crate::state::{

@@ -13,10 +13,20 @@ use crate::state::{BackendHotkeyAction, CFAllocatorRef, CFMachPortRef, CFRunLoop
     CG_EVENT_TYPE_TAP_DISABLED_BY_TIMEOUT, CG_EVENT_TYPE_TAP_DISABLED_BY_USER_INPUT,
     CG_KEYBOARD_EVENT_KEYCODE, KEYCODE_FN, MACOS_FN_FLAG_MASK, MACOS_NON_FN_MODIFIER_MASK};
 use std::ffi::c_void;
+use std::process::Command;
 use std::sync::atomic::{AtomicBool, AtomicPtr, Ordering};
-use std::sync::Arc;
+use std::sync::{Arc, Mutex};
+use std::time::{Duration, Instant};
 
 use super::dispatch_backend_hotkey_action;
+
+/// Minimum gap between Input Monitoring Settings reopen attempts.
+const INPUT_MONITORING_SETTINGS_REOPEN_COOLDOWN: Duration = Duration::from_secs(60);
+/// Minimum gap between focus/reopen Fn tap rebuilds.
+const FN_LISTENER_ACTIVATION_REFRESH_COOLDOWN: Duration = Duration::from_secs(5);
+static LAST_INPUT_MONITORING_SETTINGS_OPEN: Mutex<Option<Instant>> = Mutex::new(None);
+static LAST_FN_LISTENER_ACTIVATION_REFRESH: Mutex<Option<Instant>> = Mutex::new(None);
+static DID_REQUEST_LISTEN_EVENT_ACCESS: AtomicBool = AtomicBool::new(false);
 
 #[link(name = "CoreGraphics", kind = "framework")]
 extern "C" {
@@ -87,13 +97,80 @@ fn macos_fn_input_monitoring_error() -> String {
     "Global Fn listener unavailable. macOS may be blocking event taps. Allow Input Monitoring for this app/terminal in System Settings > Privacy & Security > Input Monitoring.".to_string()
 }
 
-/// Soft-prompts for Input Monitoring when preflight says access is missing.
-fn prompt_macos_listen_event_access_if_needed() {
-    unsafe {
-        if !CGPreflightListenEventAccess() {
-            let _ = CGRequestListenEventAccess();
+/// Opens System Settings → Input Monitoring (rate-limited).
+fn open_input_monitoring_settings_debounced() {
+    let mut last_open = match LAST_INPUT_MONITORING_SETTINGS_OPEN.lock() {
+        Ok(guard) => guard,
+        Err(poisoned) => poisoned.into_inner(),
+    };
+    if let Some(opened_at) = *last_open {
+        if opened_at.elapsed() < INPUT_MONITORING_SETTINGS_REOPEN_COOLDOWN {
+            return;
         }
     }
+
+    let status = Command::new("open")
+        .arg("x-apple.systempreferences:com.apple.preference.security?Privacy_ListenEvent")
+        .status();
+    match status {
+        Ok(code) if code.success() => {
+            *last_open = Some(Instant::now());
+        }
+        Ok(code) => {
+            log::warn!("Failed to open Input Monitoring settings (exit {code}).");
+        }
+        Err(error) => {
+            log::warn!("Failed to open Input Monitoring settings: {error}");
+        }
+    }
+}
+
+/**
+ * Requests Input Monitoring once per process and opens Settings when denied.
+ *
+ * The first request matters after ad-hoc re-signs: macOS keys the toggle to the
+ * new CDHash, and without a request the app may never appear under Input
+ * Monitoring even though `CGEventTapCreate` still returns a non-null (silent) tap.
+ */
+fn prompt_macos_listen_event_access_if_needed() {
+    let already_requested = DID_REQUEST_LISTEN_EVENT_ACCESS.swap(true, Ordering::SeqCst);
+    let granted = unsafe {
+        if !already_requested || !CGPreflightListenEventAccess() {
+            let _ = CGRequestListenEventAccess();
+        }
+        CGPreflightListenEventAccess()
+    };
+    if !granted {
+        open_input_monitoring_settings_debounced();
+    }
+}
+
+/// Whether activation should rebuild an existing Fn tap.
+///
+/// Taps created before Input Monitoring is granted (or before an ad-hoc
+/// re-sign's new CDHash is allowed) stay silent for background Fn until rebuilt.
+pub(crate) fn should_refresh_fn_listener_after_activation(registered_trigger_is_fn: bool) -> bool {
+    registered_trigger_is_fn
+}
+
+/// Rate-limits activation rebuilds so focus churn does not thrash the event tap.
+pub(crate) fn should_run_fn_listener_activation_refresh_now(now_elapsed_ok: bool) -> bool {
+    now_elapsed_ok
+}
+
+/// Returns whether the activation-refresh cooldown has elapsed.
+pub(crate) fn claim_fn_listener_activation_refresh_slot() -> bool {
+    let mut last = match LAST_FN_LISTENER_ACTIVATION_REFRESH.lock() {
+        Ok(guard) => guard,
+        Err(poisoned) => poisoned.into_inner(),
+    };
+    if let Some(refreshed_at) = *last {
+        if refreshed_at.elapsed() < FN_LISTENER_ACTIVATION_REFRESH_COOLDOWN {
+            return false;
+        }
+    }
+    *last = Some(Instant::now());
+    true
 }
 
 /// Event mask for Fn/Globe: modifier flag changes plus Fn keycode down/up.
@@ -336,5 +413,17 @@ mod tests {
     #[test]
     fn fn_down_from_event_ignores_null_event() {
         assert_eq!(fn_down_from_event(CG_EVENT_TYPE_FLAGS_CHANGED, std::ptr::null()), None);
+    }
+
+    #[test]
+    fn activation_refresh_only_when_fn_is_registered() {
+        assert!(super::should_refresh_fn_listener_after_activation(true));
+        assert!(!super::should_refresh_fn_listener_after_activation(false));
+    }
+
+    #[test]
+    fn activation_refresh_slot_helper_tracks_elapsed_flag() {
+        assert!(super::should_run_fn_listener_activation_refresh_now(true));
+        assert!(!super::should_run_fn_listener_activation_refresh_now(false));
     }
 }
