@@ -25,6 +25,8 @@ use hotkey_overlay::{
     dispatch_backend_hotkey_action, resolve_effective_dictation_trigger, should_start_hidden,
     show_main_window, sync_background_ui,
 };
+#[cfg(target_os = "macos")]
+use hotkey_overlay::refresh_macos_fn_listener_after_activation;
 use models::{load_local_settings, resolve_local_paths};
 use state::{
     AppConfig, BackendHotkeyAction, BackgroundUiPreferences, CloseAction, DictationState,
@@ -115,21 +117,33 @@ fn main() {
             if window.label() != "main" {
                 return;
             }
-            if let tauri::WindowEvent::CloseRequested { api, .. } = event {
-                let preferences = current_background_ui_preferences(window.app_handle()).unwrap_or(
-                    BackgroundUiPreferences {
-                        pill_visibility_mode: PillVisibilityMode::ActiveOnly,
-                        menu_bar_mode: MenuBarMode::Always,
-                        close_action: CloseAction::HideToTray,
-                    },
-                );
-                if preferences.close_action == CloseAction::HideToTray
-                    && preferences.menu_bar_mode != MenuBarMode::Off
-                {
-                    api.prevent_close();
-                    let _ = window.hide();
-                    sync_background_ui(window.app_handle());
+            match event {
+                #[cfg(target_os = "macos")]
+                tauri::WindowEvent::Focused(true) => {
+                    if let Err(error) = refresh_macos_fn_listener_after_activation(
+                        window.app_handle(),
+                        window.app_handle().state::<GlobalHotkeyState>().inner(),
+                    ) {
+                        log::warn!("Fn listener refresh on focus failed: {error}");
+                    }
                 }
+                tauri::WindowEvent::CloseRequested { api, .. } => {
+                    let preferences = current_background_ui_preferences(window.app_handle()).unwrap_or(
+                        BackgroundUiPreferences {
+                            pill_visibility_mode: PillVisibilityMode::ActiveOnly,
+                            menu_bar_mode: MenuBarMode::Always,
+                            close_action: CloseAction::HideToTray,
+                        },
+                    );
+                    if preferences.close_action == CloseAction::HideToTray
+                        && preferences.menu_bar_mode != MenuBarMode::Off
+                    {
+                        api.prevent_close();
+                        let _ = window.hide();
+                        sync_background_ui(window.app_handle());
+                    }
+                }
+                _ => {}
             }
         })
         .invoke_handler(tauri::generate_handler![
@@ -155,7 +169,15 @@ fn main() {
 
     app.run(|app_handle, event| match event {
         #[cfg(target_os = "macos")]
-        tauri::RunEvent::Reopen { .. } => show_main_window(app_handle),
+        tauri::RunEvent::Reopen { .. } => {
+            if let Err(error) = refresh_macos_fn_listener_after_activation(
+                app_handle,
+                app_handle.state::<GlobalHotkeyState>().inner(),
+            ) {
+                log::warn!("Fn listener refresh on reopen failed: {error}");
+            }
+            show_main_window(app_handle);
+        }
         tauri::RunEvent::ExitRequested { .. } | tauri::RunEvent::Exit => {
             if let Err(error) = cancel_if_active(app_handle) {
                 log::warn!("Failed to cancel active dictation during app exit: {error}");
