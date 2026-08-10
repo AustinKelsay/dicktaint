@@ -10,7 +10,10 @@ import { appendTranscriptChunk, setDraftTranscriptText } from './transcript.js';
 import { runDictationHistoryAction } from './history.js';
 import {
   queueNativeStartAfterCurrentStop,
-  maybeStartQueuedNativeDictation
+  maybeStartQueuedNativeDictation,
+  handleNativeHoldKeydown,
+  handleNativeHoldKeyup,
+  shouldHandleNativeFnHoldInFocusedWindow
 } from './native-dictation.js';
 import { applyDictationHotkeyPayload, saveDictationHotkey, clearDictationHotkey } from './settings/hotkeys.js';
 import { applyBackgroundUiPreferencesPayload } from './settings/background-ui.js';
@@ -134,6 +137,9 @@ export function createTestApi() {
     emitHotkeyPillOverlay,
     handleNativeDictationStatePayload,
     handleNativeDictationAudioLevelPayload,
+    handleNativeHoldKeydown,
+    handleNativeHoldKeyup,
+    shouldHandleNativeFnHoldInFocusedWindow,
     getState: getDictationTestState,
     resetState: resetDictationStateForTests,
     setNativeFlags(next = {}) {

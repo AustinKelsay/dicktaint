@@ -26,6 +26,7 @@ import { clearRestartTimer, scheduleRecognitionRestart } from './speech-runtime.
 import {
   applyNativeFnHoldState, handleNativeHoldKeydown, handleNativeHoldKeyup,
   handleNativeDictationStatePayload, handleNativeDictationAudioLevelPayload,
+  shouldHandleNativeFnHoldInFocusedWindow,
   startNativeDesktopDictation, stopNativeDesktopDictation, triggerDictationToggleFromHotkey
 } from './native-dictation.js';
 import {
@@ -55,8 +56,7 @@ export function initNativeListeners() {
   if (isNativeDesktopMode() && tauriEventApi?.listen) {
     tauriEventApi.listen(DICTATION_HOTKEY_EVENT, ({ payload }) => {
       if (state.isCapturingDictationHotkey) return;
-      if (state.dictationTriggerMode !== 'focused-window-hold') return;
-      if (state.activeHotkeySpec?.ok && state.activeHotkeySpec.key === 'Fn') {
+      if (shouldHandleNativeFnHoldInFocusedWindow()) {
         applyNativeFnHoldState(payload?.pressed !== false);
         return;
       }
