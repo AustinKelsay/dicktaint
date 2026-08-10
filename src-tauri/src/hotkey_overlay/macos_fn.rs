@@ -153,11 +153,6 @@ pub(crate) fn should_refresh_fn_listener_after_activation(registered_trigger_is_
     registered_trigger_is_fn
 }
 
-/// Rate-limits activation rebuilds so focus churn does not thrash the event tap.
-pub(crate) fn should_run_fn_listener_activation_refresh_now(now_elapsed_ok: bool) -> bool {
-    now_elapsed_ok
-}
-
 /// Returns whether the activation-refresh cooldown has elapsed.
 pub(crate) fn claim_fn_listener_activation_refresh_slot() -> bool {
     let mut last = match LAST_FN_LISTENER_ACTIVATION_REFRESH.lock() {
@@ -421,9 +416,4 @@ mod tests {
         assert!(!super::should_refresh_fn_listener_after_activation(false));
     }
 
-    #[test]
-    fn activation_refresh_slot_helper_tracks_elapsed_flag() {
-        assert!(super::should_run_fn_listener_activation_refresh_now(true));
-        assert!(!super::should_run_fn_listener_activation_refresh_now(false));
-    }
 }
