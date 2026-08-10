@@ -971,6 +971,48 @@ describe('dictation frontend focused-field insert', () => {
 
     expect(invokeCalls.slice(before).some((call) => call.command === 'insert_text_into_focused_field')).toBe(false);
   });
+
+  it('serializes focused-field inserts so a later transcript cannot overlap an earlier paste', async () => {
+    let releaseFirst;
+    const firstGate = new Promise((resolve) => {
+      releaseFirst = resolve;
+    });
+    const started = [];
+    const finished = [];
+
+    ({ invokeCalls } = createMockDom({
+      nativeDesktop: true,
+      invokeHandler: async (command, args) => {
+        if (command !== 'insert_text_into_focused_field') return undefined;
+        started.push(args.text);
+        if (args.text === 'first dictation') await firstGate;
+        finished.push(args.text);
+        return null;
+      }
+    }));
+    api = await loadAppWithTestApi();
+    await flushUi();
+    api.resetState();
+
+    api.applyFocusedFieldInsertPayload({
+      focused_field_insert_enabled: true,
+      focused_field_insert_permission_granted: true,
+      focused_field_insert_permission_status: 'Accessibility permission granted.'
+    });
+
+    const first = api.maybeInsertTranscriptIntoFocusedField('first dictation');
+    const second = api.maybeInsertTranscriptIntoFocusedField('second dictation');
+    await flushUi();
+
+    expect(started).toEqual(['first dictation']);
+    expect(finished).toEqual([]);
+
+    releaseFirst();
+    await Promise.all([first, second]);
+
+    expect(started).toEqual(['first dictation', 'second dictation']);
+    expect(finished).toEqual(['first dictation', 'second dictation']);
+  });
 });
 
 describe('dictation frontend onboarding model install/delete', () => {

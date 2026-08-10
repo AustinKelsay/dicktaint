@@ -1,5 +1,19 @@
 # Changelog
 
+## v0.3.12 - 2026-08-10
+
+### Highlights
+
+- fixed intermittent focused-field insert pasting a previous dictation instead of the latest transcript
+- serialized pasteboard write → Cmd+V → restore on both the frontend queue and a process-wide Rust lock
+- restored the prior clipboard only when it still holds the text we just pasted, and lengthened paste settle time
+
+### Release Notes
+
+- this patch follows `v0.3.11` (and the post-release hotkey/permission stability fix on `main`) and targets long-session focused-field paste races
+- affected symptom: transcription succeeds and history shows the latest text, but the frontmost field receives an older dictation ~30–50% of the time after prolonged use
+- overlapping fire-and-forget inserts could restore a prior pasteboard mid-cycle; inserts now run one at a time and refuse unsafe clipboard restores
+
 ## v0.3.11 - 2026-08-02
 
 ### Highlights

@@ -17,7 +17,8 @@ import { applyBackgroundUiPreferencesPayload } from './settings/background-ui.js
 import {
   applyFocusedFieldInsertPayload,
   saveFocusedFieldInsertSetting,
-  maybeInsertTranscriptIntoFocusedField
+  maybeInsertTranscriptIntoFocusedField,
+  resetFocusedFieldInsertQueueForTests
 } from './settings/focused-field-insert.js';
 import {
   installSelectedDictationModel,
@@ -69,6 +70,7 @@ export function getDictationTestState() {
 /** Resets mutable dictation state to a predictable baseline for isolated tests. */
 export function resetDictationStateForTests() {
   clearRestartTimer();
+  resetFocusedFieldInsertQueueForTests();
   state.dictationHistory = [];
   state.dictationHistorySeq = 0;
   state.isDictating = false;

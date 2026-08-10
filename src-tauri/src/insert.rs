@@ -1,4 +1,8 @@
 //! Paste dictated text into the focused field via macOS Accessibility APIs.
+//!
+//! Inserts temporarily own the general pasteboard, post Cmd+V, then restore the
+//! prior clipboard. Overlapping inserts used to race that cycle and paste a
+//! stale prior dictation — serialization + conditional restore prevent that.
 
 use crate::state::FocusedFieldInsertPermissionStatus;
 #[cfg(target_os = "macos")]
@@ -6,6 +10,8 @@ use crate::state::{
     KEYCODE_COMMAND, KEYCODE_V, MACOS_COMMAND_FLAG_MASK, CG_EVENT_TAP_LOCATION_HID, CGEventFlags,
     CGEventRef,
 };
+#[cfg(target_os = "macos")]
+use std::sync::Mutex;
 #[cfg(target_os = "macos")]
 use std::thread;
 #[cfg(target_os = "macos")]
@@ -20,6 +26,30 @@ use objc2_app_kit::{NSPasteboard, NSPasteboardTypeString};
 use objc2_foundation::NSString;
 #[cfg(target_os = "macos")]
 use std::process::Command;
+
+/// Process-wide lock so pasteboard write → Cmd+V → restore never overlaps.
+#[cfg(target_os = "macos")]
+static FOCUSED_FIELD_INSERT_LOCK: Mutex<()> = Mutex::new(());
+
+/// How long to wait after posting Cmd+V before restoring the prior clipboard.
+///
+/// 80ms was too short for some apps under load; restoring while paste was still
+/// reading left the previous dictation on the pasteboard for a late Cmd+V.
+#[cfg(target_os = "macos")]
+const PASTEBOARD_PASTE_SETTLE: Duration = Duration::from_millis(250);
+
+/// Returns whether restoring the pre-insert pasteboard snapshot is safe.
+///
+/// Only restore when the general pasteboard still holds exactly the text we
+/// placed for paste. If it already differs, another writer (user copy or a
+/// later insert) owns it — restoring would clobber them and can resurface a
+/// prior dictation for the next paste.
+pub(crate) fn should_restore_pasteboard_after_insert(
+    inserted_text: &str,
+    current_pasteboard_text: Option<&str>,
+) -> bool {
+    current_pasteboard_text == Some(inserted_text)
+}
 
 #[cfg(target_os = "macos")]
 #[link(name = "CoreGraphics", kind = "framework")]
@@ -177,8 +207,15 @@ fn write_text_to_general_pasteboard(
 #[cfg(target_os = "macos")]
 fn restore_general_pasteboard(
     pasteboard: &NSPasteboard,
+    inserted_text: &str,
     snapshot: Option<String>,
 ) -> Result<(), String> {
+    let current =
+        unsafe { pasteboard.stringForType(NSPasteboardTypeString) }.map(|value| value.to_string());
+    if !should_restore_pasteboard_after_insert(inserted_text, current.as_deref()) {
+        return Ok(());
+    }
+
     let Some(previous_text) = snapshot else {
         return Ok(());
     };
@@ -228,6 +265,11 @@ pub(crate) fn insert_text_into_focused_field_impl(text: &str) -> Result<(), Stri
         return Ok(());
     }
 
+    // Serialize pasteboard ownership across concurrent frontend / IPC callers.
+    let _guard = FOCUSED_FIELD_INSERT_LOCK
+        .lock()
+        .unwrap_or_else(|poisoned| poisoned.into_inner());
+
     // Do not reopen Settings on every paste — only surface the status. Enabling
     // the setting (and the cooldown helper) is what prompts System Settings.
     let permission = focused_field_insert_permission_status(true, false);
@@ -237,8 +279,8 @@ pub(crate) fn insert_text_into_focused_field_impl(text: &str) -> Result<(), Stri
 
     let (pasteboard, snapshot) = write_text_to_general_pasteboard(trimmed)?;
     let paste_result = post_command_v_paste();
-    thread::sleep(Duration::from_millis(80));
-    let restore_result = restore_general_pasteboard(&pasteboard, snapshot);
+    thread::sleep(PASTEBOARD_PASTE_SETTLE);
+    let restore_result = restore_general_pasteboard(&pasteboard, trimmed, snapshot);
 
     if let Err(error) = restore_result {
         log::warn!("{error}");
@@ -254,4 +296,22 @@ pub(crate) fn insert_text_into_focused_field_impl(text: &str) -> Result<(), Stri
 #[cfg(not(target_os = "macos"))]
 pub(crate) fn insert_text_into_focused_field_impl(_text: &str) -> Result<(), String> {
     Err("Focused field insertion is currently supported on macOS desktop only.".to_string())
+}
+
+#[cfg(test)]
+mod tests {
+    use super::should_restore_pasteboard_after_insert;
+
+    #[test]
+    fn restores_only_when_pasteboard_still_holds_inserted_text() {
+        assert!(should_restore_pasteboard_after_insert(
+            "latest dictation",
+            Some("latest dictation")
+        ));
+        assert!(!should_restore_pasteboard_after_insert(
+            "latest dictation",
+            Some("previous dictation")
+        ));
+        assert!(!should_restore_pasteboard_after_insert("latest dictation", None));
+    }
 }
