@@ -41,6 +41,7 @@ const webSpeech = {
 };
 
 const nativeSession = {
+  nativeStartRequestId: null,
   lastHotkeyToggleAtMs: 0,
   nativeHotkeyActionInFlight: false,
   nativeFnHoldActive: false,
@@ -116,6 +117,7 @@ aliasSliceFields(state, 'webSpeech', [
 ]);
 
 aliasSliceFields(state, 'nativeSession', [
+  'nativeStartRequestId',
   'lastHotkeyToggleAtMs',
   'nativeHotkeyActionInFlight',
   'nativeFnHoldActive',

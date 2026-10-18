@@ -2,9 +2,13 @@
 import { dom } from './dom-elements.js';
 import { state } from './state.js';
 import { isNativeSetupReady } from './readiness.js';
-import { isNativeDesktopMode } from './platform.js';
+import { isNativeDesktopMode, isFocusedMacDesktopMode } from './platform.js';
 
 export function setAppScreen(screen, { focus = true } = {}) {
+  if (focus) {
+    state.hasInitialRoute = true;
+    if (dom.appShell) dom.appShell.dataset.initializing = 'false';
+  }
   const next = screen === 'dictation' ? 'dictation' : 'onboarding';
   if (dom.onboardingScreen) dom.onboardingScreen.hidden = next !== 'onboarding';
   if (dom.dictationScreen) dom.dictationScreen.hidden = next !== 'dictation';
@@ -27,7 +31,8 @@ export function setSetupScreenMode(mode) {
 }
 
 export function syncFlowForSetupReadiness() {
-  if (state.hasInitialRoute) return;
+  if (state.hasInitialRoute || !state.onboardingCheckComplete
+    || (isFocusedMacDesktopMode() && !state.permissionCheckComplete)) return;
   state.hasInitialRoute = true;
   if (dom.appShell) dom.appShell.dataset.initializing = 'false';
   const ready = !isNativeDesktopMode() || isNativeSetupReady();

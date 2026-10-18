@@ -32,7 +32,7 @@ Out of scope:
 
 Pipeline sequence:
 
-1. `start_native_dictation` validates model + CLI readiness and active state. The UI requires an authorized microphone before starting; native capture still validates actual access and device opening.
+1. `start_native_dictation` reserves a session before dispatching its worker, then validates model + CLI readiness and active state. The UI requires an authorized microphone before starting; native capture still validates actual access and device opening.
 2. backend spawns recording thread and opens microphone stream.
 3. `stop_native_dictation` stops capture and joins thread.
 4. captured samples are resampled to 16 kHz mono if required.
@@ -41,6 +41,10 @@ Pipeline sequence:
 7. transcript txt output is read.
 8. artifact tokens are removed.
 9. cleaned transcript is returned.
+
+Stop and Clear invalidate pending startup as well as established capture. Button, focused Fn, backend hold/toggle, and tray actions share the reservation boundary. Cancellation never waits for microphone authorization or the startup gate on the main thread. Device opening occurs outside the short intent lock; a canceled device-open result is stopped and joined instead of being published. Publication, pending cancellation, and the listening event are ordered by the intent lock. Background UI synchronization is dispatched to the main thread without waiting under that lock.
+
+The optional frontend `request_id` correlates listening events and command completion with a specific start action. Stop/Clear invalidate that request locally; late completions cannot revive a canceled session or replace a newer one. Session IDs still govern transcript/event ordering. Duplicate focused/global Fn starts join the existing capture rather than canceling it as stale recovery.
 
 Capture details:
 

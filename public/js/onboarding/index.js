@@ -1,3 +1,4 @@
+import { isNativeSetupReady } from '../readiness.js';
 import { refreshMacosPermissions } from '../permissions.js';
 /** Onboarding payload hydration and setup flow. */
 import { dom } from '../dom-elements.js';
@@ -97,6 +98,7 @@ export async function loadDictationOnboarding({ quietStatus = false } = {}) {
       focusedFieldInsertPermissionStatus: 'Focused-field insertion is disabled.',
       focusedFieldInsertStatusMessage: 'Focused-field insertion is disabled.'
     });
+    state.onboardingCheckComplete = true;
     syncFlowForSetupReadiness();
     syncDictationHotkeyUi();
     syncControls();
@@ -112,6 +114,7 @@ export async function loadDictationOnboarding({ quietStatus = false } = {}) {
       focusedFieldInsertPermissionStatus: 'Focused-field insertion is unavailable on this platform.',
       focusedFieldInsertStatusMessage: 'Focused-field insertion is unavailable on this platform.'
     });
+    state.onboardingCheckComplete = true;
     syncFlowForSetupReadiness();
     setDictationModelBusy('');
     setDictationModelStatus(MAC_DESKTOP_ONLY_MESSAGE, 'error');
@@ -124,6 +127,7 @@ export async function loadDictationOnboarding({ quietStatus = false } = {}) {
 
   const tauriInvoke = getTauriInvoke();
   if (!tauriInvoke) {
+    state.permissionCheckComplete = true;
     resetSetupBailoutState({
       nativeDictationModelReady: false,
       whisperCliAvailable: false,
@@ -131,6 +135,7 @@ export async function loadDictationOnboarding({ quietStatus = false } = {}) {
       focusedFieldInsertPermissionStatus: 'Focused-field insertion is unavailable while desktop bridge is offline.',
       focusedFieldInsertStatusMessage: 'Focused-field insertion is unavailable while desktop bridge is offline.'
     });
+    state.onboardingCheckComplete = true;
     syncFlowForSetupReadiness();
     syncDictationHotkeyUi();
     syncControls();
@@ -141,6 +146,7 @@ export async function loadDictationOnboarding({ quietStatus = false } = {}) {
     if (!quietStatus && !state.isDictating && !state.isStartingDictation) {
       setStatus('Checking local speech-to-text setup...', 'working');
     }
+    const readinessStatusRevision = state.statusRevision;
     setDictationModelBusy('');
 
     const onboarding = await tauriInvoke('get_dictation_onboarding');
@@ -196,12 +202,9 @@ export async function loadDictationOnboarding({ quietStatus = false } = {}) {
     } else if (onboarding.selected_model_exists) {
       const selected = (onboarding.models || []).find((item) => item.id === onboarding.selected_model_id);
       setDictationModelStatus(
-        `Speech-to-text ready: ${modelDisplayName(selected) || onboarding.selected_model_id}.`,
+        `Speech model ready: ${modelDisplayName(selected) || onboarding.selected_model_id}.`,
         'ok'
       );
-      if (!quietStatus && !state.isDictating && !state.isStartingDictation) {
-        setStatus('Local speech-to-text is ready on this device.', 'ok');
-      }
     } else {
       setDictationModelStatus(
         'Choose a model and click "Download + Use" to enable local speech-to-text.',
@@ -212,7 +215,11 @@ export async function loadDictationOnboarding({ quietStatus = false } = {}) {
       }
     }
 
+    state.onboardingCheckComplete = true;
     await refreshMacosPermissions();
+    if (!quietStatus && state.statusRevision === readinessStatusRevision && !state.isDictating && !state.isStartingDictation && state.nativeDictationModelReady) {
+      setStatus(isNativeSetupReady() ? 'Ready to dictate on your Mac.' : 'Complete microphone access in Setup & settings to start dictating.', isNativeSetupReady() ? 'ok' : 'neutral');
+    }
     syncFlowForSetupReadiness();
     syncControls();
     if (document.body.dataset.mode === 'loading' && !state.isDictating && !state.isStartingDictation && !state.nativeStopRequestInFlight) document.body.dataset.mode = 'idle';
@@ -225,6 +232,8 @@ export async function loadDictationOnboarding({ quietStatus = false } = {}) {
       focusedFieldInsertPermissionStatus: 'Focused-field insertion is unavailable while setup is loading.',
       focusedFieldInsertStatusMessage: 'Focused-field insertion is unavailable while setup is loading.'
     });
+    state.onboardingCheckComplete = true;
+    await refreshMacosPermissions();
     syncFlowForSetupReadiness();
     const details = getErrorMessage(error);
     setDictationModelStatus(`Could not read setup state: ${details}`, 'error');

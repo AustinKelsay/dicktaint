@@ -31,6 +31,7 @@ export function setUiMode(mode) {
 
 
 export function setStatus(message, tone = 'neutral') {
+  state.statusRevision = (state.statusRevision || 0) + 1;
   if (dom.statusEl) {
     dom.statusEl.textContent = message;
     dom.statusEl.dataset.tone = tone;

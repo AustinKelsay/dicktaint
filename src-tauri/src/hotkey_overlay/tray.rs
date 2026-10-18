@@ -1,7 +1,7 @@
 //! macOS menu bar tray runtime, labels, and menu event handling.
 
 use crate::dictation_session::{
-    cancel_if_active, current_active_session_id, is_benign_session_error, start, stop,
+    cancel_if_active, current_active_session_id,
 };
 use crate::state::{
     BackendDictationStatus, MAIN_TRAY_ID, MenuBarMode, TRAY_MENU_FORCE_STOP_ID, TRAY_MENU_OPEN_ID,
@@ -88,24 +88,8 @@ fn handle_tray_menu_event(app: &tauri::AppHandle, menu_id: &tauri::menu::MenuId)
         return;
     }
 
-    let handle = app.clone();
-    tauri::async_runtime::spawn(async move {
-        let result = match current_backend_dictation_status(&handle) {
-            Ok(BackendDictationStatus::Listening) => stop(handle.clone()).await.map(|_| ()),
-            Ok(BackendDictationStatus::Processing) => Ok(()),
-            Ok(BackendDictationStatus::Idle | BackendDictationStatus::Error) => {
-                start(&handle).map(|_| ())
-            }
-            Err(error) => Err(error),
-        };
-
-        if let Err(error) = result {
-            if !is_benign_session_error(&error) {
-                log::warn!("Tray dictation action failed: {error}");
-                emit_dictation_state(&handle, "error", Some(error), None, None);
-            }
-        }
-    });
+    if matches!(current_backend_dictation_status(app), Ok(BackendDictationStatus::Processing)) { return; }
+    super::dispatch_backend_hotkey_action(app, crate::state::BackendHotkeyAction::Toggle);
 }
 
 fn ensure_macos_tray_runtime(

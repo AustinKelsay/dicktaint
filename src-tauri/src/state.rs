@@ -5,7 +5,6 @@ use std::path::PathBuf;
 use std::sync::{mpsc, Arc, Mutex};
 #[cfg(target_os = "macos")]
 use std::ffi::c_void;
-use std::sync::atomic::AtomicU64;
 use std::thread;
 use std::time::Instant;
 #[cfg(target_os = "macos")]
@@ -55,6 +54,7 @@ pub(crate) const INPUT_STREAM_PROBE_TIMEOUT_MS: u64 = 1_500;
 pub(crate) const INPUT_STREAM_PROBE_POLL_INTERVAL_MS: u64 = 40;
 #[derive(Clone, Serialize)]
 pub(crate) struct DictationStatePayload {
+    pub(crate) request_id: Option<String>,
     pub(crate) state: String,
     pub(crate) error: Option<String>,
     pub(crate) transcript: Option<String>,
@@ -110,7 +110,7 @@ pub(crate) struct DictationState {
     pub(crate) active_recording: Mutex<Option<ActiveRecording>>,
     pub(crate) backend_status: Mutex<BackendDictationStatus>,
     pub(crate) last_error_message: Mutex<Option<String>>,
-    pub(crate) next_session_id: AtomicU64,
+    pub(crate) session_intent: Mutex<crate::dictation_session::SessionIntent>,
 }
 
 impl Default for DictationState {
@@ -121,7 +121,7 @@ impl Default for DictationState {
             active_recording: Mutex::new(None),
             backend_status: Mutex::new(BackendDictationStatus::Idle),
             last_error_message: Mutex::new(None),
-            next_session_id: AtomicU64::new(1),
+            session_intent: Mutex::new(crate::dictation_session::SessionIntent::default()),
         }
     }
 }

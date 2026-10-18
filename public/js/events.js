@@ -1,3 +1,4 @@
+import { invalidateNativeStart } from './native-dictation.js';
 import { initPermissionListeners, isNativeSetupReady } from './permissions.js';
 /**
  * DOM and Tauri event wiring for dictation.
@@ -231,6 +232,7 @@ export function initSharedUiListeners() {
     }
   });
   dom.clearTranscriptBtn.addEventListener('click', () => {
+    invalidateNativeStart();
     const tauriInvoke = shouldUseTauriCommands() ? getTauriInvoke() : null;
     if (tauriInvoke) {
       tauriInvoke('cancel_native_dictation').catch(() => {});

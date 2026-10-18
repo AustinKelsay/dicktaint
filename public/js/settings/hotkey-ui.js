@@ -1,4 +1,4 @@
-import { isNativeSetupReady } from '../readiness.js';
+import { isNativeSetupReady, microphoneRecoveryAction } from '../readiness.js';
 /**
  * Hotkey preset chips and permission guidance UI.
  */
@@ -58,7 +58,7 @@ export function renderPermissionGuidance() {
     unavailable: 'Microphone: status unavailable. Retry the check.'
   };
   const items = [
-    { text: descriptions[microphone], permission: 'microphone', action: microphone === 'not_determined' ? 'allow' : microphone === 'denied' ? 'settings' : 'recheck' },
+    { text: descriptions[microphone], permission: 'microphone', action: microphoneRecoveryAction(microphone) },
     { text: `Accessibility: ${facts ? (facts.accessibility ? 'granted' : 'not granted') : 'unknown'}. Optional for inserting text into other apps and background Fn.`, permission: 'accessibility', action: 'settings' },
     { text: `Input Monitoring: ${facts ? (facts.input_monitoring ? 'granted' : 'not granted') : 'unknown'}. Optional alternative for background Fn.`, permission: 'input_monitoring', action: 'settings' },
     { text: state.dictationTriggerMode === 'global-hold' ? 'Background Fn listener is armed. Try holding Fn in another app to verify delivery.' : 'Button dictation works without optional permissions. Fn can also work while Murmur is focused.', action: 'recheck' }

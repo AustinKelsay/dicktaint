@@ -426,7 +426,8 @@ pub(crate) fn refresh_macos_fn_listener_after_activation(
     use tauri::Manager;
     let dictation = app.state::<crate::state::DictationState>();
     let idle_guard = dictation.start_gate.try_lock();
-    let pending = idle_guard.is_err() || dictation.hold_intent.is_held();
+    let pending = idle_guard.is_err() || dictation.hold_intent.is_held()
+        || dictation.session_intent.lock().map_err(|_| "Failed to lock session intent")?.has_pending();
     let active = if pending { false } else { crate::dictation_session::is_running(app)? };
     let registered = current_registered_hotkey(hotkey_state)?;
     if !should_refresh_fn_listener_after_activation(registered.as_deref() == Some("Fn"), pending, active) {
