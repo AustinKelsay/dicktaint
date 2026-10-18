@@ -265,7 +265,7 @@ pub(crate) fn set_focused_field_insert_enabled(
     enabled: bool,
     model_state: State<'_, LocalModelState>,
 ) -> Result<FocusedFieldInsertPayload, String> {
-    let permission = focused_field_insert_permission_status(enabled, false);
+    let permission = focused_field_insert_permission_status(enabled);
     let settings_path = model_state.settings_path.clone();
     let mut settings = model_state
         .settings

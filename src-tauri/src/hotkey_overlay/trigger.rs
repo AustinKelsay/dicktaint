@@ -231,12 +231,12 @@ fn global_hold_status(trigger: &str) -> String {
 
 fn focused_window_hold_status(trigger: &str) -> String {
     format!(
-        "Hold {trigger} to dictate while dicktaint is focused. Grant Input Monitoring for global hold-to-talk."
+        "Hold {trigger} to dictate while Murmur is focused. Accessibility or Input Monitoring can enable background hold-to-talk."
     )
 }
 
 fn fn_permission_hint() -> String {
-    "System Settings > Privacy & Security > Input Monitoring: allow dicktaint (or Terminal while running tauri:dev), then relaunch dicktaint.".to_string()
+    "For background Fn, enable Murmur in System Settings > Privacy & Security > Accessibility or Input Monitoring, then return and recheck.".to_string()
 }
 
 fn set_trigger_runtime_details(
@@ -412,7 +412,7 @@ fn set_macos_fn_listener_enabled(
  * Rebuilds the global Fn listener after the app becomes active again.
  *
  * Users typically toggle Input Monitoring in System Settings then return to
- * dicktaint; without a recreate, the old silent tap stays installed.
+ * Murmur; without a recreate, the old silent tap stays installed.
  */
 #[cfg(target_os = "macos")]
 pub(crate) fn refresh_macos_fn_listener_after_activation(

@@ -268,7 +268,7 @@ fn install_nsevent_fn_monitor(
     let monitor = NSEvent::addGlobalMonitorForEventsMatchingMask_handler(mask, &block);
     if monitor.is_none() {
         log::warn!(
-            "NSEvent.addGlobalMonitorForEvents returned nil; grant Accessibility for dicktaint."
+            "NSEvent.addGlobalMonitorForEvents returned nil; grant Accessibility for Murmur."
         );
     }
     (monitor, Some(block))

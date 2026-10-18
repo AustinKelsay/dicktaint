@@ -465,7 +465,7 @@ pub(crate) fn microphone_permission() -> crate::permissions::MicrophonePermissio
 
 #[cfg(target_os = "macos")]
 fn microphone_permission_denied_error() -> String {
-    "Microphone permission is denied for this app. In macOS Settings > Privacy & Security > Microphone, allow dicktaint and relaunch the app.".to_string()
+    "Microphone permission is denied for this app. In macOS Settings > Privacy & Security > Microphone, enable Murmur, then return and recheck.".to_string()
 }
 
 #[cfg(target_os = "macos")]
@@ -533,7 +533,7 @@ pub(crate) fn ensure_microphone_access_authorized(app: &tauri::AppHandle) -> Res
     match rx.recv_timeout(Duration::from_secs(15)) {
         Ok(result) => result,
         Err(_) => Err(
-            "Timed out waiting for macOS microphone permission. Bring dicktaint to the foreground, approve access in Privacy & Security > Microphone, then retry."
+            "Microphone permission is still unconfirmed. Return to Murmur after answering the macOS prompt, then recheck or retry."
                 .to_string(),
         ),
     }
