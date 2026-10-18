@@ -1568,3 +1568,14 @@ describe('native Mac clipboard copy', () => {
   });
 
 });
+
+it('describes toggle shortcuts accurately and does not suggest a disabled shortcut', async () => {
+  createMockDom({ nativeDesktop: true, onboardingPayload: { dictation_trigger: 'CmdOrCtrl+Shift+D', dictation_trigger_mode: 'global-toggle' } });
+  const api = await loadAppWithTestApi();
+  api.resetState();
+  api.applyDictationHotkeyPayload({ trigger: 'CmdOrCtrl+Shift+D', trigger_mode: 'global-toggle' });
+  await api.refreshMacosPermissions();
+  expect(document.getElementById('captureGuidance').textContent).toContain('press CmdOrCtrl+Shift+D');
+  await api.clearDictationHotkey();
+  expect(document.getElementById('captureGuidance').textContent).toBe('Start with the button. Speak naturally, then stop to transcribe.');
+});
