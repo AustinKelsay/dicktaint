@@ -5,7 +5,7 @@ import { getTauriInvoke, isFocusedMacDesktopMode, getErrorMessage } from '../pla
 import { modelDisplayName } from '../labels.js';
 import { describeMachineLabel } from '../settings/hotkey-logic.js';
 import {
-  setUiMode, setStatus, setAppScreen, setSetupScreenMode, syncControls,
+  setUiMode, setStatus, syncControls,
   setDictationModelStatus, setDictationModelBusy, refreshSelectedModelMeta
 } from '../ui.js';
 import { refreshDictationOnboarding } from './refresh.js';
@@ -93,7 +93,7 @@ export async function installSelectedDictationModel() {
     return;
   }
   if (!state.whisperCliAvailable) {
-    setStatus('whisper-cli is unavailable. In tauri:dev, click "Open CLI Setup (dev)", then "Refresh Setup".', 'error');
+    setStatus('The local speech engine needs attention. Recheck setup or reopen Murmur.', 'error');
     return;
   }
 
@@ -126,22 +126,20 @@ export async function installSelectedDictationModel() {
     onboardingAfterInstall = onboarding;
 
     if (!onboarding) {
-      throw new Error('Model update completed, but setup refresh failed. Click Refresh Setup.');
+      throw new Error('Model update completed, but setup refresh failed. Click Recheck setup.');
     }
     if (!onboarding.selected_model_exists) {
-      throw new Error('Model update finished, but selected model is not ready yet. Click Refresh Setup.');
+      throw new Error('Model update finished, but selected model is not ready yet. Click Recheck setup.');
     }
     if (!onboarding.whisper_cli_available) {
-      throw new Error('Model is ready, but whisper-cli is unavailable. Click Refresh Setup.');
+      throw new Error('Model is ready, but whisper-cli is unavailable. Click Recheck setup.');
     }
 
     const selectedAfter = (onboarding.models || []).find((item) => item.id === onboarding.selected_model_id);
     setDictationModelBusy('');
     setUiMode('idle');
     setStatus(`Ready: ${modelDisplayName(selectedAfter) || modelDisplayName(selected)} is active for local dictation.`, 'ok');
-    if (state.setupScreenMode === 'onboarding') {
-      setAppScreen('dictation');
-    }
+
   } catch (error) {
     const details = getErrorMessage(error);
     const modelNoLongerUsable = Boolean(onboardingAfterInstall)
@@ -213,7 +211,7 @@ export async function deleteSelectedDictationModel() {
     const onboarding = await refreshDictationOnboarding({ quietStatus: true });
 
     if (!onboarding) {
-      throw new Error('Delete completed, but setup refresh failed. Click Refresh Setup.');
+      throw new Error('Delete completed, but setup refresh failed. Click Recheck setup.');
     }
 
     if (onboarding.selected_model_exists) {
@@ -222,13 +220,10 @@ export async function deleteSelectedDictationModel() {
         `Deleted ${modelDisplayName(selected)}. Active model: ${modelDisplayName(selectedAfter) || onboarding.selected_model_id}.`,
         'ok'
       );
-      if (state.setupScreenMode === 'onboarding') {
-        setAppScreen('dictation');
-      }
+
     } else {
       setStatus(`Deleted ${modelDisplayName(selected)}. Download another model to continue local dictation.`, 'neutral');
-      setSetupScreenMode('onboarding');
-      setAppScreen('onboarding');
+
     }
     setDictationModelBusy('');
     setUiMode('idle');

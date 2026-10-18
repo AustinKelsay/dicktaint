@@ -7,8 +7,8 @@
   --pill-edge-glow: rgba(137, 201, 255, 0.3);
   --dot-idle: #8395b1;
   --dot-working: #e2ad43;
-  --dot-live: #2fc0a3;
-  --dot-ok: #45d0b7;
+  --dot-live: #a0c8b5;
+  --dot-ok: #a0c8b5;
   --dot-error: #f07b61;
 }
 
@@ -30,7 +30,7 @@ body {
 body {
   display: grid;
   place-items: center;
-  font-family: "Space Grotesk", "Avenir Next", "Segoe UI", sans-serif;
+  font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif;
   background: transparent;
 }
 

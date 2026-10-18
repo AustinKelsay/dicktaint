@@ -1,5 +1,18 @@
 /** Lazy DOM element accessors for the dictation SPA. */
 export const dom = {
+  get dictationNav() { return document.getElementById('dictationNav'); },
+  get settingsNav() { return document.getElementById('settingsNav'); },
+  get workspaceTitle() { return document.getElementById('workspaceTitle'); },
+  get copyTranscriptBtn() { return document.getElementById('copyTranscript'); },
+  get sessionStopBtn() { return document.getElementById('sessionStop'); },
+  get runtimeNote() { return document.getElementById('runtimeNote'); },
+  get captureGuidance() { return document.getElementById('captureGuidance'); },
+  get requiredMicrophoneAction() { return document.getElementById('requiredMicrophoneAction'); },
+  get microphoneHealthEl() { return document.getElementById('microphoneHealth'); },
+  get requiredSetup() { return document.getElementById('requiredSetup'); },
+  get setupTechnicalDetails() { return document.getElementById('setupTechnicalDetails'); },
+  get modelRecommendation() { return document.getElementById('modelRecommendation'); },
+
   get statusEl() { return document.getElementById('status'); },
   get onboardingScreen() { return document.getElementById('onboardingScreen'); },
   get dictationScreen() { return document.getElementById('dictationScreen'); },

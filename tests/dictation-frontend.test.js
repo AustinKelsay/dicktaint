@@ -88,6 +88,7 @@ class MockElement {
   }
 
   closest(selector) {
+    if (selector === 'button[data-permission-action]') return this.dataset.permissionAction ? this : null;
     if (selector === 'button[data-history-action][data-history-id]') {
       if (
         this.tagName === 'BUTTON'
@@ -116,6 +117,18 @@ class MockElement {
 function createMockDom({ nativeDesktop = false, onboardingPayload = null, invokeHandler = null } = {}) {
   const ids = [
     'status',
+    'dictationNav',
+    'settingsNav',
+    'copyTranscript',
+    'runtimeNote',
+    'captureGuidance',
+    'microphoneHealth',
+    'requiredMicrophoneAction',
+    'sessionStop',
+    'requiredSetup',
+    'setupTechnicalDetails',
+    'modelRecommendation',
+    'workspaceTitle',
     'onboardingScreen',
     'dictationScreen',
     'onboardingContinue',
@@ -1421,4 +1434,105 @@ describe('Mac permission setup actions', () => {
     expect(rows[0].children[0].textContent).toBe('Recheck permissions');
   });
 
+});
+
+
+describe('Murmur workspace navigation', () => {
+  it('opens ready users in dictation and retains their chosen screen on rechecks', async () => {
+    let microphone = 'authorized';
+    createMockDom({ nativeDesktop: true, invokeHandler(command) {
+      if (command === 'get_macos_permissions') return { supported: true, microphone, accessibility: false, input_monitoring: false };
+    } });
+    const api = await loadAppWithTestApi();
+    await api.refreshMacosPermissions();
+    expect(document.body.dataset.screen).toBe('dictation');
+    expect(document.body.dataset.mode).toBe('idle');
+    expect(document.getElementById('dictationNav').getAttribute('aria-current')).toBe('page');
+    api.setDraftTranscriptText('An idea worth keeping.');
+    microphone = 'denied';
+    await api.refreshMacosPermissions();
+    expect(document.body.dataset.screen).toBe('dictation');
+    expect(document.getElementById('startDictation').disabled).toBe(true);
+    expect(document.getElementById('captureGuidance').textContent).toContain('microphone');
+    document.getElementById('settingsNav').click();
+    microphone = 'authorized';
+    await api.refreshMacosPermissions();
+    document.getElementById('retryWhisperCheck').click();
+    await new Promise(resolve => setTimeout(resolve, 0));
+    expect(document.body.dataset.screen).toBe('onboarding');
+    expect(document.getElementById('settingsNav').getAttribute('aria-current')).toBe('page');
+    expect(api.getState().currentDraftText).toBe('An idea worth keeping.');
+    document.getElementById('dictationNav').click();
+    expect(document.body.dataset.screen).toBe('dictation');
+  });
+});
+
+
+describe('Murmur draft actions and browser disclosure', () => {
+  it('copies the editable draft and clears it without deleting recent dictations', async () => {
+    const { clipboardCalls } = createMockDom();
+    const api = await loadAppWithTestApi();
+    api.resetState();
+    api.appendTranscriptChunk('Original phrase', { source: 'web' });
+    const draft = document.getElementById('transcriptInput');
+    draft.value = 'Edited and ready to send.';
+    draft.dispatchEvent({ type: 'input' });
+    document.getElementById('copyTranscript').click();
+    await new Promise(resolve => setTimeout(resolve, 0));
+    expect(clipboardCalls).toEqual(['Edited and ready to send.']);
+    expect(document.getElementById('status').textContent).toContain('Copied');
+    document.getElementById('clearTranscript').click();
+    expect(draft.value).toBe('');
+    expect(api.getState().dictationHistory[0].text).toBe('Original phrase');
+  });
+
+  it('discloses browser processing and keeps manual typing available without speech support', async () => {
+    createMockDom();
+    const api = await loadAppWithTestApi();
+    expect(document.body.dataset.screen).toBe('dictation');
+    expect(document.getElementById('requiredSetup').hidden).toBe(true);
+    expect(document.getElementById('runtimeNote').textContent).toContain('online service');
+    expect(document.getElementById('captureGuidance').textContent).toContain('type, edit, and copy');
+    expect(document.getElementById('transcriptInput').disabled).toBe(false);
+    api.setDraftTranscriptText('Typed without a microphone.');
+    expect(document.getElementById('transcriptInput').value).toBe('Typed without a microphone.');
+  });
+
+  it('retains live capture and an available Stop while opening settings and refreshing setup', async () => {
+    createMockDom({ nativeDesktop: true });
+    const api = await loadAppWithTestApi();
+    await api.refreshMacosPermissions();
+    api.handleNativeDictationStatePayload({ state: 'listening', session_id: 42 });
+    document.getElementById('settingsNav').click();
+    document.getElementById('retryWhisperCheck').click();
+    await new Promise(resolve => setTimeout(resolve, 0));
+    expect(document.body.dataset.mode).toBe('listening');
+    expect(document.body.dataset.screen).toBe('onboarding');
+    expect(document.getElementById('sessionStop').hidden).toBe(false);
+    expect(document.getElementById('sessionStop').disabled).toBe(false);
+    expect(api.getState().activeNativeSessionId).toBe('42');
+  });
+});
+
+
+it('keeps a fresh setup on the required steps after model download until explicit microphone access', async () => {
+  let microphone = 'not_determined';
+  createMockDom({ nativeDesktop: true, onboardingPayload: { selected_model_exists: false }, invokeHandler(command) {
+    if (command === 'get_macos_permissions') return { supported: true, microphone, accessibility: false, input_monitoring: false };
+    if (command === 'request_microphone_permission') { microphone = 'authorized'; return { supported: true, microphone, accessibility: false, input_monitoring: false }; }
+  } });
+  const api = await loadAppWithTestApi();
+  api.resetState();
+  await api.refreshMacosPermissions();
+  await api.installSelectedDictationModel();
+  expect(document.body.dataset.screen).toBe('onboarding');
+  expect(document.getElementById('startDictation').disabled).toBe(true);
+  const allow = document.getElementById('requiredMicrophoneAction');
+  allow.tagName = 'BUTTON';
+  document.getElementById('requiredSetup').dispatchEvent({ type: 'click', target: allow });
+  await new Promise(resolve => setTimeout(resolve, 0));
+  expect(document.getElementById('startDictation').disabled).toBe(false);
+  expect(document.body.dataset.screen).toBe('onboarding');
+  document.getElementById('onboardingContinue').click();
+  expect(document.body.dataset.screen).toBe('dictation');
 });

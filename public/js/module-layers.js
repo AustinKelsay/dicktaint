@@ -1,18 +1,17 @@
 /**
- * Frontend ESM layering (acyclic).
+ * Frontend ESM imports, from leaves toward orchestration.
  *
- * Leaves (no app feature imports):
- *   constants, state, dom-elements, platform, labels, media-permissions, draft-transcript
- *   hotkey-logic, background-ui-controls, model-selection, waveform, speech-runtime, refresh
+ * Leaves: constants, state, dom-elements, platform, labels, media-permissions,
+ * draft-transcript, readiness, hotkey-logic, background-ui-controls,
+ * model-selection, waveform, speech-runtime, onboarding/refresh.
  *
- * Mid:
- *   history, transcript, hotkey-ui, hotkeys, background-ui, focused-field-insert,
- *   input-device, onboarding/models, web-speech, native-dictation
+ * Presentation: navigation, workspace-presentation, hotkey-ui → ui.
+ * Features: ui → history, transcript, settings saves, onboarding/models.
+ * Orchestration: permissions, native-dictation, web-speech, onboarding/index,
+ * then events → app.js. history imports ui for status feedback.
  *
- * Top:
- *   ui, onboarding/index, events, app.js
- *
- * Cycles are broken by leaf extraction + onboarding refresh registration
- * (see onboarding/refresh.js). Do not reintroduce mutual imports among peers.
+ * navigation owns screen choice, not session state. workspace-presentation
+ * renders capability facts without navigating. onboarding/refresh registers
+ * the loader to avoid a model-actions ↔ onboarding import cycle.
  */
 export {};

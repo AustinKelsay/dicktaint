@@ -35,18 +35,18 @@
     }
 
     .pill[data-state="listening"] {
-      background: rgba(27, 19, 9, 0.92);
+      background: rgba(40, 29, 53, 0.94);
       box-shadow:
-        0 0 0 1px rgba(255, 140, 0, 0.72),
-        0 7px 14px rgba(255, 140, 0, 0.14),
-        inset 0 1px 0 rgba(255, 210, 148, 0.1);
+        0 0 0 1px rgba(185, 155, 220, 0.72),
+        0 7px 14px rgba(185, 155, 220, 0.14),
+        inset 0 1px 0 rgba(220, 200, 244, 0.1);
     }
 
     .pill[data-state="listening"][data-audio-state="ready"] {
       background: rgba(10, 28, 24, 0.94);
       box-shadow:
-        0 0 0 1px rgba(47, 192, 163, 0.74),
-        0 8px calc(20px + (10px * var(--live-level))) rgba(47, 192, 163, 0.18),
+        0 0 0 1px rgba(160, 200, 181, 0.74),
+        0 8px calc(20px + (10px * var(--live-level))) rgba(160, 200, 181, 0.18),
         inset 0 1px 0 rgba(192, 255, 243, 0.1);
     }
 
@@ -99,7 +99,7 @@
     }
     .pill[data-state="listening"] .icon-mic {
       opacity: 1;
-      filter: drop-shadow(0 0 5px rgba(255, 140, 0, 0.22));
+      filter: drop-shadow(0 0 5px rgba(185, 155, 220, 0.22));
     }
     .pill[data-state="processing"] .icon-mic { opacity: 0.44; }
     .pill[data-state="error"] .icon-mic { opacity: 0.68; }
@@ -118,13 +118,13 @@
       display: block;
       width: 1.5px;
       border-radius: 1px;
-      background: rgb(255, 138, 0);
+      background: rgb(185, 155, 220);
       height: calc(2px + (var(--bar-level, 0.08) * 10px));
       transition: height 80ms ease, background-color 120ms ease, opacity 120ms ease;
     }
 
     .pill[data-state="listening"][data-audio-state="ready"] .waveform span {
-      background: rgb(47, 192, 163);
+      background: rgb(160, 200, 181);
     }
 
     .pill[data-state="listening"][data-audio-state="low"] .waveform span {
@@ -150,6 +150,7 @@
     }
     .pill[data-state="processing"] .spinner { display: block; }
     @keyframes spin { to { transform: rotate(360deg); } }
+    @media (prefers-reduced-motion: reduce) { *, *::before, *::after { animation: none !important; transition: none !important; } }
   </style>
 </head>
 <body>
