@@ -165,6 +165,7 @@ fn main() {
             permissions::request_microphone_permission,
             permissions::open_macos_permission_settings,
             permissions::recheck_macos_permissions,
+            commands::copy_text_to_clipboard,
             start_native_dictation,
             stop_native_dictation,
             cancel_native_dictation

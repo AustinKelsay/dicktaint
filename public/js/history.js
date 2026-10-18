@@ -2,7 +2,7 @@
 import { dom } from './dom-elements.js';
 import { state } from './state.js';
 import { DICTATION_HISTORY_LIMIT } from './constants.js';
-import { getErrorMessage } from './platform.js';
+import { getErrorMessage, getTauriInvoke, isFocusedMacDesktopMode } from './platform.js';
 import { setStatus } from './ui.js';
 import { appendToDraftTranscript } from './draft-transcript.js';
 
@@ -72,6 +72,13 @@ export function historySourceLabel(source) {
 export async function copyTextToClipboard(text) {
   const trimmed = String(text || '').trim();
   if (!trimmed) return false;
+
+  if (isFocusedMacDesktopMode()) {
+    const invoke = getTauriInvoke();
+    if (!invoke) throw new Error('Desktop clipboard bridge is unavailable.');
+    await invoke('copy_text_to_clipboard', { text: trimmed });
+    return true;
+  }
 
   const tauriClipboard = window.__TAURI__?.clipboardManager
     || window.TAURI?.clipboardManager

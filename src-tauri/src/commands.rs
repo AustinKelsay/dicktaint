@@ -320,6 +320,13 @@ pub(crate) fn set_preferred_input_device(
 }
 
 #[tauri::command]
+pub(crate) async fn copy_text_to_clipboard(text: String) -> Result<(), String> {
+    tauri::async_runtime::spawn_blocking(move || crate::insert::copy_text_to_clipboard_impl(&text))
+        .await
+        .map_err(|error| format!("Could not copy text to the clipboard: {error}"))?
+}
+
+#[tauri::command]
 pub(crate) fn insert_text_into_focused_field(
     state: State<'_, LocalModelState>,
     text: String,
