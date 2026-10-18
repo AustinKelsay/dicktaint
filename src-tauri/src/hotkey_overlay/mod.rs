@@ -28,7 +28,7 @@ use crate::dictation_session::{is_benign_session_error, is_running, start, stop}
 use crate::state::{
     BackendDictationStatus, BackendHotkeyAction, DICTATION_STATE_EVENT, DictationStatePayload,
 };
-use tauri::Emitter;
+use tauri::{Emitter, Manager};
 
 use background_ui::set_backend_dictation_status;
 
@@ -64,17 +64,32 @@ pub(crate) fn emit_dictation_state(
 
 /// Dispatches a backend hotkey action onto the async runtime.
 pub(crate) fn dispatch_backend_hotkey_action(app: &tauri::AppHandle, action: BackendHotkeyAction) {
+    // Capture press/release synchronously, before async tasks can be reordered.
+    let dictation = app.state::<crate::state::DictationState>();
+    let hold_token = match action {
+        BackendHotkeyAction::HoldStart => Some(dictation.hold_intent.press()),
+        BackendHotkeyAction::HoldStop => { dictation.hold_intent.release(); None },
+        _ => None,
+    };
     let handle = app.clone();
     tauri::async_runtime::spawn(async move {
         let result: Result<(), String> = match action {
             BackendHotkeyAction::Toggle => match is_running(&handle) {
                 Ok(true) => stop(handle.clone()).await.map(|_| ()),
-                Ok(false) => start(&handle).map(|_| ()),
+                Ok(false) => {
+                    let start_handle = handle.clone();
+                    tauri::async_runtime::spawn_blocking(move || start(&start_handle)).await
+                        .map_err(|e| e.to_string()).and_then(|result| result.map(|_| ()))
+                },
                 Err(error) => Err(error),
             },
             BackendHotkeyAction::HoldStart => match is_running(&handle) {
                 Ok(true) => Ok(()),
-                Ok(false) => start(&handle).map(|_| ()),
+                Ok(false) => {
+                    let start_handle = handle.clone();
+                    tauri::async_runtime::spawn_blocking(move || crate::dictation_session::start_with_hold(&start_handle, hold_token)).await
+                        .map_err(|e| e.to_string()).and_then(|result| result.map(|_| ()))
+                },
                 Err(error) => Err(error),
             },
             BackendHotkeyAction::HoldStop => match is_running(&handle) {

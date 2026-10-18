@@ -318,6 +318,9 @@ function createMockDom({ nativeDesktop = false, onboardingPayload = null, invoke
             });
             if (handled !== undefined) return handled;
           }
+          if (command === 'get_macos_permissions' || command === 'recheck_macos_permissions') {
+            return { supported: true, microphone: 'authorized', accessibility: false, input_monitoring: false };
+          }
           if (command === 'get_dictation_onboarding') {
             return {
               ...onboardingState,
@@ -425,6 +428,9 @@ function createMockDom({ nativeDesktop = false, onboardingPayload = null, invoke
     addEventListener(type, handler) {
       if (!windowListeners.has(type)) windowListeners.set(type, []);
       windowListeners.get(type).push(handler);
+    },
+    dispatchEvent(event) {
+      for (const handler of windowListeners.get(event.type) || []) handler(event);
     },
     open() {}
   };
@@ -1319,4 +1325,100 @@ describe('dictation frontend overlay/pill payloads', () => {
     expect(state.waveformAudioState).toBe('ready');
     expect(document.getElementById('dictationWaveBar0').style.getPropertyValue('--bar-level')).toBe('0.050');
   });
+});
+
+describe('Mac permission setup actions', () => {
+  it('keeps unrequested microphone in setup and only requests on explicit Allow', async () => {
+    let microphone = 'not_determined';
+    const { invokeCalls } = createMockDom({ nativeDesktop: true, invokeHandler(command) {
+      if (command === 'get_macos_permissions' || command === 'request_microphone_permission') {
+        if (command === 'request_microphone_permission') microphone = 'authorized';
+        return { supported: true, microphone, accessibility: false, input_monitoring: false };
+      }
+    } });
+    const api = await loadAppWithTestApi();
+    api.resetState();
+    await api.refreshMacosPermissions();
+    expect(api.isNativeSetupReady()).toBe(false);
+    expect(invokeCalls.some(call => call.command === 'request_microphone_permission')).toBe(false);
+    await api.requestMicrophonePermission();
+    expect(api.isNativeSetupReady()).toBe(true);
+    expect(document.getElementById('startDictation').disabled).toBe(false);
+  });
+  it('retains microphone readiness when optional Fn rearm fails', async () => {
+    createMockDom({ nativeDesktop: true, invokeHandler(command) {
+      if (command === 'recheck_macos_permissions') throw new Error('Background Fn unavailable');
+    } });
+    const api = await loadAppWithTestApi();
+    api.resetState();
+    await api.refreshMacosPermissions();
+    await api.refreshMacosPermissions({ rearm: true });
+    expect(api.isNativeSetupReady()).toBe(true);
+    expect(api.getState().macosPermissions.microphone).toBe('authorized');
+  });
+
+  it('reports failed inspection as unknown and recovers only after a successful retry', async () => {
+    let fail = true;
+    createMockDom({ nativeDesktop: true, invokeHandler(command) {
+      if (command === 'get_macos_permissions' && fail) throw new Error('OS check unavailable');
+    } });
+    const api = await loadAppWithTestApi();
+    api.resetState();
+    await api.refreshMacosPermissions();
+    expect(api.getState().macosPermissions).toBeNull();
+    expect(api.isNativeSetupReady()).toBe(false);
+    expect(document.getElementById('dictationPermissionList').children[0].textContent).toContain('unknown');
+    fail = false;
+    await api.refreshMacosPermissions();
+    expect(api.isNativeSetupReady()).toBe(true);
+  });
+
+  it('quiet focus checks preserve draft and Settings and never rearm during a pending or live recording', async () => {
+    let microphone = 'authorized';
+    const { invokeCalls } = createMockDom({ nativeDesktop: true, invokeHandler(command) {
+      if (command === 'get_macos_permissions') return { supported: true, microphone, accessibility: false, input_monitoring: false };
+    } });
+    const api = await loadAppWithTestApi();
+    api.resetState();
+    await api.refreshMacosPermissions();
+    api.setDraftTranscriptText('Keep these words.');
+    document.getElementById('openSettings').click();
+    api.setNativeFlags({ isStartingDictation: true });
+    microphone = 'denied';
+    window.dispatchEvent({ type: 'focus' });
+    await api.refreshMacosPermissions();
+    expect(api.getState().macosPermissions.microphone).toBe('denied');
+    expect(api.getState().isStartingDictation).toBe(true);
+    expect(api.getState().currentDraftText).toBe('Keep these words.');
+    expect(document.getElementById('onboardingScreen').hidden).toBe(false);
+    expect(document.getElementById('stopDictation').disabled).toBe(false);
+    api.setNativeFlags({ isStartingDictation: false, isDictating: true });
+    await api.refreshMacosPermissions({ rearm: true });
+    expect(api.getState().isDictating).toBe(true);
+    expect(invokeCalls.some(call => call.command === 'recheck_macos_permissions')).toBe(false);
+    expect(invokeCalls.some(call => call.command === 'open_macos_permission_settings' || call.command === 'request_microphone_permission')).toBe(false);
+  });
+
+  it('shows denied and restricted microphone recovery without inferring Input Monitoring from an armed Fn listener', async () => {
+    let microphone = 'denied';
+    const { invokeCalls } = createMockDom({ nativeDesktop: true, invokeHandler(command) {
+      if (command === 'get_macos_permissions') return { supported: true, microphone, accessibility: true, input_monitoring: false };
+      if (command === 'open_macos_permission_settings') return null;
+    } });
+    const api = await loadAppWithTestApi();
+    api.resetState();
+    await api.refreshMacosPermissions();
+    let rows = document.getElementById('dictationPermissionList').children;
+    expect(rows[0].textContent).toContain('access denied');
+    expect(rows[2].textContent).toContain('not granted');
+    await api.openMacosPermissionSettings('microphone');
+    expect(invokeCalls.filter(call => call.command === 'open_macos_permission_settings').map(call => call.args)).toEqual([{ permission: 'microphone' }]);
+    expect(api.isNativeSetupReady()).toBe(false);
+    microphone = 'restricted';
+    await api.refreshMacosPermissions();
+    rows = document.getElementById('dictationPermissionList').children;
+    expect(rows[0].textContent).toContain('device administrator');
+    expect(rows[0].children[0].textContent).toBe('Recheck permissions');
+  });
+
 });

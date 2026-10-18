@@ -423,8 +423,13 @@ pub(crate) fn refresh_macos_fn_listener_after_activation(
 
     use super::macos_fn::claim_fn_listener_activation_refresh_slot;
 
+    use tauri::Manager;
+    let dictation = app.state::<crate::state::DictationState>();
+    let idle_guard = dictation.start_gate.try_lock();
+    let pending = idle_guard.is_err() || dictation.hold_intent.is_held();
+    let active = if pending { false } else { crate::dictation_session::is_running(app)? };
     let registered = current_registered_hotkey(hotkey_state)?;
-    if !should_refresh_fn_listener_after_activation(registered.as_deref() == Some("Fn")) {
+    if !should_refresh_fn_listener_after_activation(registered.as_deref() == Some("Fn"), pending, active) {
         return Ok(());
     }
     if !claim_fn_listener_activation_refresh_slot() {

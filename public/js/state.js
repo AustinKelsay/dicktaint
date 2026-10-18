@@ -95,6 +95,9 @@ const uiBusy = {
 };
 
 export const state = {
+  macosPermissions: null,
+  macosPermissionError: '',
+  isRequestingMicrophone: false,
   webSpeech,
   nativeSession,
   onboarding,

@@ -68,29 +68,11 @@ pub(crate) fn open_whisper_setup_page() -> Result<(), String> {
 
 #[tauri::command]
 pub(crate) fn get_dictation_onboarding(
-    app: tauri::AppHandle,
     config: State<'_, AppConfig>,
     model_state: State<'_, LocalModelState>,
     hotkey_state: State<'_, GlobalHotkeyState>,
 ) -> Result<DictationOnboardingPayload, String> {
-    let mut payload =
-        build_onboarding_payload(config.inner(), model_state.inner(), hotkey_state.inner())?;
-    match apply_registered_hotkey(
-        &app,
-        hotkey_state.inner(),
-        payload.dictation_trigger.as_deref(),
-    ) {
-        Ok(runtime) => {
-            payload.dictation_trigger_mode = runtime.mode.as_str().to_string();
-            payload.dictation_trigger_status = runtime.status;
-            payload.dictation_trigger_permission_hint = runtime.permission_hint;
-        }
-        Err(error) => {
-            log::warn!("get_dictation_onboarding: failed to apply global hotkey: {error}");
-        }
-    }
-    sync_background_ui(&app);
-    Ok(payload)
+    build_onboarding_payload(config.inner(), model_state.inner(), hotkey_state.inner())
 }
 
 #[tauri::command]
@@ -283,7 +265,7 @@ pub(crate) fn set_focused_field_insert_enabled(
     enabled: bool,
     model_state: State<'_, LocalModelState>,
 ) -> Result<FocusedFieldInsertPayload, String> {
-    let permission = focused_field_insert_permission_status(enabled, enabled);
+    let permission = focused_field_insert_permission_status(enabled, false);
     let settings_path = model_state.settings_path.clone();
     let mut settings = model_state
         .settings
@@ -517,8 +499,11 @@ pub(crate) async fn delete_dictation_model(
 }
 
 #[tauri::command]
-pub(crate) fn start_native_dictation(app: tauri::AppHandle) -> Result<(), String> {
-    match dictation_session::start(&app) {
+pub(crate) async fn start_native_dictation(app: tauri::AppHandle) -> Result<(), String> {
+    let handle = app.clone();
+    let result = tauri::async_runtime::spawn_blocking(move || dictation_session::start(&handle))
+        .await.map_err(|e| format!("Could not start dictation: {e}"))?;
+    match result {
         Ok(_) => Ok(()),
         Err(error) => {
             if error.trim() != "Dictation already running." {

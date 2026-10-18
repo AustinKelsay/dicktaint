@@ -1,3 +1,4 @@
+import { isNativeSetupReady } from '../readiness.js';
 /**
  * Hotkey preset chips and permission guidance UI.
  */
@@ -6,8 +7,7 @@ import { state } from '../state.js';
 import { DEFAULT_DICTATION_HOTKEY } from '../constants.js';
 import { isNativeDesktopMode, isFocusedMacDesktopMode } from '../platform.js';
 import {
-  parseHotkeyCombo, getSuggestedHotkeyOptions, describeMachineLabel,
-  instructionHotkeyLabel
+  parseHotkeyCombo, getSuggestedHotkeyOptions, describeMachineLabel
 } from './hotkey-logic.js';
 
 /** Renders suggested hotkey preset chips. */
@@ -44,56 +44,43 @@ export function renderPermissionGuidance() {
     return;
   }
 
-  dom.dictationPermissionSummaryEl.textContent = state.nativeDictationModelReady
-    ? `${machineLabel} is ready. ${state.dictationTriggerStatus}`
-    : `${machineLabel} still needs local setup. ${state.dictationTriggerStatus}`;
-
+  dom.dictationPermissionSummaryEl.textContent = isNativeSetupReady()
+    ? 'Ready for local dictation. Optional permissions add background Fn and insertion.'
+    : 'Complete the local model, speech engine, and microphone steps to start dictating.';
+  const facts = state.macosPermissions;
+  const microphone = facts?.microphone || 'unknown';
+  const descriptions = {
+    unknown: 'Microphone: status unknown. Retry the permission check.',
+    not_determined: 'Microphone: allow access to record your voice.',
+    authorized: 'Microphone: access granted.',
+    denied: 'Microphone: access denied. Enable Murmur in System Settings, then return and recheck.',
+    restricted: 'Microphone: restricted by system policy. Contact your device administrator.',
+    unavailable: 'Microphone: status unavailable. Retry the check.'
+  };
   const items = [
-    {
-      tone: state.nativeDictationModelReady ? 'ok' : 'neutral',
-      text: 'Microphone: macOS asks the first time you start dictation. If audio fails later, relaunch after changing permission.'
-    }
+    { text: descriptions[microphone], permission: 'microphone', action: microphone === 'not_determined' ? 'allow' : microphone === 'denied' ? 'settings' : 'recheck' },
+    { text: `Accessibility: ${facts ? (facts.accessibility ? 'granted' : 'not granted') : 'unknown'}. Optional for inserting text into other apps and background Fn.`, permission: 'accessibility', action: 'settings' },
+    { text: `Input Monitoring: ${facts ? (facts.input_monitoring ? 'granted' : 'not granted') : 'unknown'}. Optional alternative for background Fn.`, permission: 'input_monitoring', action: 'settings' },
+    { text: state.dictationTriggerMode === 'global-hold' ? 'Background Fn listener is armed. Try holding Fn in another app to verify delivery.' : 'Button dictation works without optional permissions. Fn can also work while Murmur is focused.', action: 'recheck' }
   ];
-
-  if (state.savedDictationHotkey) {
-    if (state.dictationTriggerMode === 'focused-window-hold') {
-      items.push({
-        tone: 'warn',
-        text: state.dictationTriggerPermissionHint || 'Input Monitoring is required for global Fn hold-to-talk. Without it, Fn only works while dicktaint is focused.'
-      });
-    } else if (state.dictationTriggerMode === 'global-hold') {
-      items.push({
-        tone: 'ok',
-        text: 'Input Monitoring: global Fn hold-to-talk is active for this app while it is running.'
-      });
-    } else {
-      items.push({
-        tone: 'ok',
-        text: `Hotkey: ${instructionHotkeyLabel(state.savedDictationHotkey)} is registered globally while dicktaint is running.`
-      });
-    }
-  } else {
-    items.push({
-      tone: 'neutral',
-      text: 'Hotkey: disabled. Open Settings if you want a system-wide trigger again.'
-    });
-  }
-
-  items.push({
-    tone: state.focusedFieldInsertEnabled
-      ? (state.focusedFieldInsertPermissionGranted ? 'ok' : 'warn')
-      : 'neutral',
-    text: state.focusedFieldInsertEnabled
-      ? (state.focusedFieldInsertPermissionStatus
-        || 'Accessibility is required for Dictate Into Focused Field.')
-      : 'Accessibility is only needed if you enable Dictate Into Focused Field.'
-  });
-
   dom.dictationPermissionListEl.innerHTML = '';
   for (const item of items) {
     const li = document.createElement('li');
-    li.dataset.tone = item.tone;
     li.textContent = item.text;
+    const button = document.createElement('button');
+    button.type = 'button';
+    button.className = 'ghost quiet';
+    button.textContent = item.action === 'allow' ? (state.isRequestingMicrophone ? 'Waiting for macOS…' : 'Allow microphone') : item.action === 'settings' ? 'Open Settings' : 'Recheck permissions';
+    button.disabled = state.isRequestingMicrophone;
+    button.dataset.permissionAction = item.action;
+    button.dataset.permission = item.permission || '';
+    li.appendChild(button);
+    dom.dictationPermissionListEl.appendChild(li);
+  }
+  if (state.macosPermissionError) {
+    const li = document.createElement('li');
+    li.textContent = state.macosPermissionError;
+    li.dataset.tone = 'error';
     dom.dictationPermissionListEl.appendChild(li);
   }
 }
