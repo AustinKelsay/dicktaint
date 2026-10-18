@@ -117,7 +117,7 @@ export async function runDictationHistoryAction(historyAction, historyId) {
   if (action === 'reinsert') {
     if (appendToDraftTranscript(entry.text)) {
       dom.transcriptInput.focus();
-      setStatus('Reinserted previous dictation into transcript.', 'ok');
+      setStatus('Added previous dictation to your draft.', 'ok');
       return true;
     }
     return false;
@@ -174,7 +174,7 @@ export function renderDictationHistory() {
     const reuseBtn = document.createElement('button');
     reuseBtn.type = 'button';
     reuseBtn.className = 'ghost quiet';
-    reuseBtn.textContent = 'Reinsert';
+    reuseBtn.textContent = 'Add to draft';
     reuseBtn.dataset.historyAction = 'reinsert';
     reuseBtn.dataset.historyId = entry.id;
 

@@ -1,0 +1,18 @@
+<svg xmlns="http://www.w3.org/2000/svg" width="512" height="512" viewBox="0 0 512 512" fill="none">
+  <title>Murmur</title>
+  <desc>Two soft violet speech shapes on a warm light tile.</desc>
+  <defs>
+    <linearGradient id="tile" x1="256" y1="32" x2="256" y2="480" gradientUnits="userSpaceOnUse">
+      <stop stop-color="#FCF9F4"/>
+      <stop offset="1" stop-color="#EEE8E0"/>
+    </linearGradient>
+    <linearGradient id="voice" x1="140" y1="210" x2="304" y2="348" gradientUnits="userSpaceOnUse">
+      <stop stop-color="#8063B5"/>
+      <stop offset="1" stop-color="#62438F"/>
+    </linearGradient>
+  </defs>
+  <rect x="24" y="24" width="464" height="464" rx="108" fill="url(#tile)"/>
+  <rect x="25" y="25" width="462" height="462" rx="107" stroke="#FFFFFF" stroke-opacity="0.8" stroke-width="2"/>
+  <path d="M286 140C237 140 202 171 202 214C202 257 237 288 286 288H314L348 313C353 317 360 313 359 307L356 267C374 253 384 235 384 214C384 171 349 140 300 140H286Z" fill="#B5A2D5"/>
+  <path d="M218 208C166 208 128 240 128 284C128 307 139 327 159 341L156 376C155 383 162 387 167 383L203 360H218C270 360 308 328 308 284C308 240 270 208 218 208Z" fill="url(#voice)"/>
+</svg>

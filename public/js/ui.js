@@ -1,3 +1,5 @@
+export { setAppScreen, setSetupScreenMode, syncFlowForSetupReadiness } from './navigation.js';
+import { renderWorkspaceReadiness } from './workspace-presentation.js';
 import { isNativeSetupReady } from './readiness.js';
 /** Shared UI status, screens, and control sync. */
 import { dom } from './dom-elements.js';
@@ -15,6 +17,11 @@ import { getSelectedDictationModel, updateModelActionLabels } from './onboarding
 
 export function setUiMode(mode) {
   document.body.dataset.mode = mode;
+  if (dom.workspaceTitle) dom.workspaceTitle.textContent = mode === 'listening' ? 'Listening. Take your time.'
+    : mode === 'loading' && state.nativeStopRequestInFlight ? 'Finding your words…'
+    : mode === 'loading' && state.isStartingDictation ? 'Opening your microphone…'
+    : mode === 'error' ? 'Let’s try again.' : 'Ready when you are.';
+  renderWorkspaceReadiness();
   if (mode === 'listening') {
     updateDictationWaveform(state.liveAudioLevel, state.liveAudioBars, mode);
   } else {
@@ -91,43 +98,6 @@ export function syncHotkeyPillForStatus(_message, _tone = 'neutral') {
 }
 
 
-export function setAppScreen(screen) {
-  const next = screen === 'dictation' ? 'dictation' : 'onboarding';
-  if (dom.onboardingScreen) dom.onboardingScreen.hidden = next !== 'onboarding';
-  if (dom.dictationScreen) dom.dictationScreen.hidden = next !== 'dictation';
-  if (dom.appShell) dom.appShell.dataset.screen = next;
-  document.body.dataset.screen = next;
-}
-
-
-export function setSetupScreenMode(mode) {
-  state.setupScreenMode = mode === 'settings' ? 'settings' : 'onboarding';
-
-  const settingsMode = state.setupScreenMode === 'settings';
-  if (dom.setupModeChipEl) dom.setupModeChipEl.textContent = settingsMode ? 'SETTINGS' : 'ONBOARDING';
-  if (dom.setupTitleEl) dom.setupTitleEl.textContent = settingsMode ? 'Manage local speech setup' : 'Set up local speech-to-text';
-  if (dom.setupLeadEl) {
-    dom.setupLeadEl.textContent = settingsMode
-      ? 'Switch models, delete downloads, or re-check whisper-cli. Changes apply to this device only.'
-      : 'Everything runs on-device. Pick a model, download it once, and this machine is ready.';
-  }
-  if (dom.setupStepsEl) dom.setupStepsEl.hidden = settingsMode;
-}
-
-
-export function syncFlowForSetupReadiness() {
-  const setupReady = isNativeSetupReady();
-  if (!setupReady) {
-    setSetupScreenMode('onboarding');
-    setAppScreen('onboarding');
-    return;
-  }
-  if (state.setupScreenMode === 'onboarding') {
-    setAppScreen('dictation');
-  }
-}
-
-
 export function setDictationModelStatus(message, tone = 'neutral') {
   if (!dom.dictationModelStatusEl) return;
   dom.dictationModelStatusEl.textContent = message;
@@ -154,36 +124,36 @@ export function syncSetupHealthPills() {
   const modelExists = Boolean(state.currentOnboarding?.selected_model_exists);
 
   if (!isNativeDesktopMode()) {
-    setHealthPill(dom.whisperCliHealthEl, 'ok', 'whisper-cli: n/a (web)');
-    setHealthPill(dom.dictationModelHealthEl, 'ok', 'model: n/a (web)');
+    setHealthPill(dom.whisperCliHealthEl, 'ok', 'Speech engine · browser mode');
+    setHealthPill(dom.dictationModelHealthEl, 'ok', 'Speech model · browser mode');
     return;
   }
   if (!isFocusedMacDesktopMode()) {
-    setHealthPill(dom.whisperCliHealthEl, 'error', 'whisper-cli: unsupported on this desktop OS');
-    setHealthPill(dom.dictationModelHealthEl, 'error', 'model: unsupported on this desktop OS');
+    setHealthPill(dom.whisperCliHealthEl, 'error', 'Speech engine · macOS required');
+    setHealthPill(dom.dictationModelHealthEl, 'error', 'Speech model · macOS required');
     return;
   }
 
   if (!state.currentOnboarding) {
-    setHealthPill(dom.whisperCliHealthEl, 'pending', 'whisper-cli: checking');
-    setHealthPill(dom.dictationModelHealthEl, 'pending', 'model: checking');
+    setHealthPill(dom.whisperCliHealthEl, 'pending', 'Speech engine · checking');
+    setHealthPill(dom.dictationModelHealthEl, 'pending', 'Speech model · checking');
     return;
   }
 
   if (state.whisperCliAvailable) {
-    setHealthPill(dom.whisperCliHealthEl, 'ok', 'whisper-cli: ready');
+    setHealthPill(dom.whisperCliHealthEl, 'ok', 'Speech engine · ready');
   } else {
-    setHealthPill(dom.whisperCliHealthEl, 'error', 'whisper-cli: unavailable');
+    setHealthPill(dom.whisperCliHealthEl, 'error', 'Speech engine · needs attention');
   }
 
   if (state.isInstallingDictationModel) {
-    setHealthPill(dom.dictationModelHealthEl, 'working', 'model: downloading');
+    setHealthPill(dom.dictationModelHealthEl, 'working', 'Speech model · downloading');
   } else if (state.isDeletingDictationModel) {
-    setHealthPill(dom.dictationModelHealthEl, 'working', 'model: deleting');
+    setHealthPill(dom.dictationModelHealthEl, 'working', 'Speech model · removing');
   } else if (modelExists) {
-    setHealthPill(dom.dictationModelHealthEl, 'ok', 'model: ready');
+    setHealthPill(dom.dictationModelHealthEl, 'ok', 'Speech model · ready');
   } else {
-    setHealthPill(dom.dictationModelHealthEl, 'pending', 'model: required');
+    setHealthPill(dom.dictationModelHealthEl, 'pending', 'Speech model · download needed');
   }
 }
 
@@ -244,8 +214,7 @@ export function syncControls() {
   }
   if (dom.stopDictationBtn) {
     dom.stopDictationBtn.disabled = (
-      lockControls
-      || !hasCaptureSupport
+      !hasCaptureSupport
       || state.nativeStopRequestInFlight
       || (!state.isDictating && !state.isStartingDictation)
     );
@@ -257,13 +226,14 @@ export function syncControls() {
   if (dom.installDictationModelBtn) {
     dom.installDictationModelBtn.disabled = (
       lockControls
+      || state.isDictating || state.isStartingDictation || state.nativeStopRequestInFlight
       || !dom.dictationModelSelect?.value
       || !state.whisperCliAvailable
       || selectedAlreadyActive
     );
   }
   if (dom.deleteDictationModelBtn) {
-    dom.deleteDictationModelBtn.disabled = lockControls || !selected?.installed;
+    dom.deleteDictationModelBtn.disabled = lockControls || state.isDictating || state.isStartingDictation || state.nativeStopRequestInFlight || !selected?.installed;
   }
   if (dom.openWhisperSetupBtn) {
     dom.openWhisperSetupBtn.disabled = lockControls;
@@ -278,13 +248,13 @@ export function syncControls() {
     dom.dictationInputSelectEl.disabled = lockControls || !isNativeDesktopMode();
   }
   if (dom.onboardingContinueBtn) {
-    dom.onboardingContinueBtn.disabled = lockControls || (state.setupScreenMode === 'onboarding' && !setupReady);
+    dom.onboardingContinueBtn.disabled = false;
     dom.onboardingContinueBtn.textContent = state.setupScreenMode === 'settings'
-      ? 'Done'
-      : (setupReady ? 'Start Dictation' : 'Complete Setup to Continue');
+      ? 'Back to dictation'
+      : (setupReady ? 'Try dictation' : 'Open draft while you set up');
   }
   if (dom.openSettingsBtn) {
-    dom.openSettingsBtn.disabled = lockControls || !isFocusedMacDesktopMode();
+    dom.openSettingsBtn.disabled = false;
   }
   if (dom.recordDictationHotkeyBtn) {
     dom.recordDictationHotkeyBtn.disabled = hotkeyDisabled;
@@ -319,6 +289,7 @@ export function syncControls() {
   syncBackgroundUiControls();
   updateModelActionLabels();
   syncSetupHealthPills();
+  renderWorkspaceReadiness();
 }
 
 

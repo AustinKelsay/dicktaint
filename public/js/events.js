@@ -21,7 +21,7 @@ import {
   setDictationModelStatus, refreshSelectedModelMeta
 } from './ui.js';
 import { modelDisplayName } from './labels.js';
-import { renderDictationHistory, runDictationHistoryAction } from './history.js';
+import { renderDictationHistory, runDictationHistoryAction, copyTextToClipboard } from './history.js';
 import { setDraftTranscriptText, appendTranscriptChunk } from './transcript.js';
 import { clearRestartTimer, scheduleRecognitionRestart } from './speech-runtime.js';
 import {
@@ -222,6 +222,14 @@ export function initSettingsListeners() {
 
 /** Wires shared transcript / history / navigation controls. */
 export function initSharedUiListeners() {
+  dom.copyTranscriptBtn?.addEventListener('click', async () => {
+    try {
+      const copied = await copyTextToClipboard(dom.transcriptInput.value);
+      setStatus(copied ? 'Copied draft to clipboard.' : 'Nothing copied. Select the draft and use Copy from the Edit menu.', copied ? 'ok' : 'neutral');
+    } catch (error) {
+      setStatus(`Could not copy draft: ${getErrorMessage(error)}. Select the text and use Copy from the Edit menu.`, 'error');
+    }
+  });
   dom.clearTranscriptBtn.addEventListener('click', () => {
     const tauriInvoke = shouldUseTauriCommands() ? getTauriInvoke() : null;
     if (tauriInvoke) {
@@ -240,7 +248,7 @@ export function initSharedUiListeners() {
     clearRestartTimer();
     setDraftTranscriptText('');
     setUiMode('idle');
-    setStatus('Transcript cleared. Recent dictation history is still available in app state.', 'neutral');
+    setStatus('Draft cleared. Recent dictations from this session are still here.', 'neutral');
   });
 
   if (dom.clearDictationHistoryBtn) {
@@ -278,14 +286,16 @@ export function initSharedUiListeners() {
     state.currentDraftText = dom.transcriptInput.value;
   });
 
+  dom.dictationNav?.addEventListener('click', () => setAppScreen('dictation'));
+  dom.settingsNav?.addEventListener('click', () => {
+    setSetupScreenMode('settings');
+    setAppScreen('onboarding');
+  });
+  dom.sessionStopBtn?.addEventListener('click', () => dom.stopDictationBtn?.click());
   renderDictationHistory();
 
   if (dom.onboardingContinueBtn) {
     dom.onboardingContinueBtn.addEventListener('click', () => {
-      if (state.setupScreenMode === 'onboarding' && !isNativeSetupReady()) {
-        setStatus('Complete setup first, then start dictation.', 'neutral');
-        return;
-      }
       setAppScreen('dictation');
       setStatus(state.setupScreenMode === 'settings' ? 'Settings closed.' : 'Dictation ready.', 'ok');
     });

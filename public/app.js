@@ -31,6 +31,9 @@ export function bootstrapApp() {
     globalThis.__DICKTAINT_TEST_API__ = createTestApi();
   }
 
+  state.hasInitialRoute = false;
+  if (dom.appShell) dom.appShell.dataset.initializing = 'true';
+  state.macosPermissions = null;
   setUiMode('loading');
   setSetupScreenMode('onboarding');
   setAppScreen('onboarding');

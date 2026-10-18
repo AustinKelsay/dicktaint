@@ -82,13 +82,15 @@ export async function openMacosPermissionSettings(permission) {
   }
 }
 export function initPermissionListeners() {
-  dom.dictationPermissionListEl?.addEventListener('click', (event) => {
+  const permissionAction = (event) => {
     const target = event.target instanceof Element ? event.target.closest('button[data-permission-action]') : null;
     if (!target) return;
     if (target.dataset.permissionAction === 'allow') void requestMicrophonePermission();
     else if (target.dataset.permissionAction === 'settings') void openMacosPermissionSettings(target.dataset.permission);
     else void refreshMacosPermissions({ rearm: true });
-  });
+  };
+  dom.dictationPermissionListEl?.addEventListener('click', permissionAction);
+  dom.requiredSetup?.addEventListener('click', permissionAction);
   const recheck = () => { if (document.visibilityState !== 'hidden') void refreshMacosPermissions({ rearm: true }); };
   window.addEventListener('focus', recheck);
   document.addEventListener('visibilitychange', recheck);
