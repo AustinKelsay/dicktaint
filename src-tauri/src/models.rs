@@ -20,9 +20,9 @@ fn resolve_whisper_model_path(path: Option<&str>) -> Result<PathBuf, String> {
     })?;
 
     let model_path = PathBuf::from(raw);
-    if !model_path.exists() {
+    if !model_path.is_file() {
         return Err(format!(
-            "WHISPER_MODEL_PATH file not found: {}",
+            "WHISPER_MODEL_PATH must point to a local model file: {}",
             model_path.display()
         ));
     }
@@ -388,9 +388,9 @@ pub(crate) fn resolve_active_model_path(
                 path.display()
             ));
         }
-    } else if !path.exists() {
+    } else if !path.is_file() {
         return Err(format!(
-            "Selected dictation model file is missing: {}. Reinstall/select a model in onboarding.",
+            "Selected dictation model path is not a local file: {}. Reinstall/select a model in onboarding.",
             path.display()
         ));
     }
