@@ -14,6 +14,7 @@ Canonical docs live under [`llm/`](llm/README.md):
 - Implementation contracts: [`llm/implementation/`](llm/implementation/)
 - Dev / release / troubleshooting: [`llm/workflow/`](llm/workflow/)
 - Glossary + ADRs: [`CONTEXT.md`](CONTEXT.md), [`docs/adr/`](docs/adr/)
+- Murmur rebuild evidence and remaining release gates: [`docs/murmur-verification.md`](docs/murmur-verification.md)
 
 ## Quick start (web mode)
 
