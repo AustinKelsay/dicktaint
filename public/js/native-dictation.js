@@ -300,13 +300,13 @@ export function triggerDictationToggleFromHotkey() {
 
 export function handleNativeDictationStatePayload(payload) {
   const s = payload?.state ?? 'idle';
+  if (payload?.request_id && payload.request_id !== state.nativeStartRequestId) return;
   const payloadSessionId = normalizeNativeSessionId(payload?.session_id);
   const sessionMatchesCurrent = !payloadSessionId
     || !state.activeNativeSessionId
     || payloadSessionId === state.activeNativeSessionId;
 
   if (s === 'listening') {
-    if (payload?.request_id && payload.request_id !== state.nativeStartRequestId) return;
     if (payloadSessionId && payloadSessionId === state.nativeSessionIdToIgnore) return;
     // Ignore late listening events from a superseded session; allow first
     // listening when activeNativeSessionId is still null (sessionMatchesCurrent).
@@ -331,6 +331,7 @@ export function handleNativeDictationStatePayload(payload) {
   }
 
   if (s === 'idle') {
+    if (payload?.request_id) invalidateNativeStart();
     const transcriptSessionId = payloadSessionId || state.activeNativeSessionId;
     const didAppendTranscript = state.nativeStopRequestInFlight
       ? false

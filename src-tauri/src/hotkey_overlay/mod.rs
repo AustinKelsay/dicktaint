@@ -51,7 +51,7 @@ pub(crate) fn emit_dictation_started(
     emit_dictation_state_with_request(app, "listening", None, None, Some(session_id), request_id);
 }
 
-fn emit_dictation_state_with_request(
+pub(crate) fn emit_dictation_state_with_request(
     app: &tauri::AppHandle,
     state: &str,
     error: Option<String>,
@@ -95,7 +95,7 @@ pub(crate) fn dispatch_backend_hotkey_action(app: &tauri::AppHandle, action: Bac
             BackendHotkeyAction::HoldStart => {
                 let hold = dictation.hold_intent.press();
                 Ok(Prepared::Start(
-                    dictation_session::reserve_start(app)?,
+                    dictation_session::reserve_start(app, None)?,
                     Some(hold),
                 ))
             }
@@ -108,7 +108,7 @@ pub(crate) fn dispatch_backend_hotkey_action(app: &tauri::AppHandle, action: Bac
                     Ok(Prepared::Stop(dictation_session::prepare_stop(app)?))
                 } else {
                     Ok(Prepared::Start(
-                        dictation_session::reserve_start(app)?,
+                        dictation_session::reserve_start(app, None)?,
                         None,
                     ))
                 }

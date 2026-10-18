@@ -46,9 +46,13 @@ pub(crate) struct StartReservation {
 pub(crate) struct SessionIntent {
     sequence: u64,
     pending: Option<StartReservation>,
+    pending_request_id: Option<String>,
 }
 impl SessionIntent {
-    pub(crate) fn reserve(&mut self) -> Result<StartReservation, String> {
+    pub(crate) fn reserve(
+        &mut self,
+        request_id: Option<String>,
+    ) -> Result<StartReservation, String> {
         if self.pending.is_some() {
             return Err("Dictation already running.".into());
         }
@@ -57,10 +61,13 @@ impl SessionIntent {
             session_id: self.sequence,
         };
         self.pending = Some(reservation);
+        self.pending_request_id = request_id;
         Ok(reservation)
     }
-    pub(crate) fn cancel(&mut self) -> Option<u64> {
-        self.pending.take().map(|value| value.session_id)
+    pub(crate) fn cancel(&mut self) -> Option<(u64, Option<String>)> {
+        self.pending
+            .take()
+            .map(|value| (value.session_id, self.pending_request_id.take()))
     }
     pub(crate) fn is_current(&self, reservation: StartReservation) -> bool {
         self.pending == Some(reservation)
@@ -71,11 +78,15 @@ impl SessionIntent {
     pub(crate) fn finish(&mut self, reservation: StartReservation) {
         if self.is_current(reservation) {
             self.pending = None;
+            self.pending_request_id = None;
         }
     }
 }
 
-pub(crate) fn reserve_start(app: &tauri::AppHandle) -> Result<StartReservation, String> {
+pub(crate) fn reserve_start(
+    app: &tauri::AppHandle,
+    request_id: Option<String>,
+) -> Result<StartReservation, String> {
     let dictation = app.state::<DictationState>();
     let mut intent = dictation
         .session_intent
@@ -84,7 +95,7 @@ pub(crate) fn reserve_start(app: &tauri::AppHandle) -> Result<StartReservation, 
     if is_running(app)? {
         return Err("Dictation already running.".into());
     }
-    intent.reserve()
+    intent.reserve(request_id)
 }
 
 pub(crate) fn has_session(app: &tauri::AppHandle) -> Result<bool, String> {
@@ -201,6 +212,7 @@ fn start_reserved_inner(
         .active_recording
         .lock()
         .map_err(|_| "Failed to lock dictation state")? = Some(ActiveRecording {
+        start_request_id: request_id.clone(),
         session_id,
         input_device_name,
         stop_tx,
@@ -226,8 +238,17 @@ pub(crate) fn prepare_stop(app: &tauri::AppHandle) -> Result<Option<ActiveRecord
         .lock()
         .map_err(|_| "Failed to lock dictation state")?
         .take();
-    if recording.is_none() && pending_id.is_some() {
-        emit_dictation_state(app, "idle", None, None, pending_id);
+    if recording.is_none() {
+        if let Some((session_id, request_id)) = pending_id {
+            crate::hotkey_overlay::emit_dictation_state_with_request(
+                app,
+                "idle",
+                None,
+                None,
+                Some(session_id),
+                request_id,
+            );
+        }
     }
     Ok(recording)
 }
@@ -328,11 +349,12 @@ pub(crate) fn cancel(app: &tauri::AppHandle) -> Result<(), String> {
         return Ok(());
     };
     let session_id = Some(recording.session_id);
+    let request_id = recording.start_request_id.clone();
 
     let _ = recording.stop_tx.send(());
     let _ = recording.thread_handle.join();
 
-    emit_dictation_state(app, "idle", None, None, session_id);
+    crate::hotkey_overlay::emit_dictation_state_with_request(app, "idle", None, None, session_id, request_id);
     Ok(())
 }
 
@@ -348,13 +370,16 @@ mod tests {
     #[test]
     fn cancellation_invalidates_queued_start_without_cancelling_a_newer_reservation() {
         let mut intent = super::SessionIntent::default();
-        let queued = intent.reserve().unwrap();
-        assert_eq!(intent.cancel(), Some(queued.session_id));
+        let queued = intent.reserve(Some("start-a".into())).unwrap();
+        assert_eq!(
+            intent.cancel(),
+            Some((queued.session_id, Some("start-a".into())))
+        );
         assert!(!intent.is_current(queued));
-        let next = intent.reserve().unwrap();
+        let next = intent.reserve(None).unwrap();
         intent.finish(queued);
         assert!(intent.is_current(next));
-        assert!(intent.reserve().is_err());
+        assert!(intent.reserve(None).is_err());
         intent.finish(next);
         assert!(!intent.has_pending());
     }
