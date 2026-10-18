@@ -5,7 +5,7 @@ import { isNativeDesktopMode, isFocusedMacDesktopMode } from './platform.js';
 import { SpeechRecognitionApi } from './constants.js';
 import { isNativeSetupReady } from './readiness.js';
 import { modelDisplayName } from './labels.js';
-import { instructionHotkeyLabel } from './settings/hotkey-logic.js';
+import { instructionHotkeyLabel, isHoldToTalkHotkey } from './settings/hotkey-logic.js';
 
 export function renderWorkspaceReadiness() {
   const native = isNativeDesktopMode();
@@ -17,7 +17,7 @@ export function renderWorkspaceReadiness() {
   const micCopy = {
     authorized: 'Microphone · allowed', not_determined: 'Microphone · needs your permission',
     denied: 'Microphone · access denied', restricted: 'Microphone · restricted by policy',
-    unavailable: 'Microphone · check unavailable', unknown: 'Microphone · checking access'
+    unavailable: 'Microphone · check unavailable', unknown: 'Microphone · access not verified'
   };
   if (dom.requiredSetup) dom.requiredSetup.hidden = !native;
   if (dom.microphoneHealthEl) {
@@ -36,9 +36,11 @@ export function renderWorkspaceReadiness() {
     ? 'On your Mac. Your voice stays here. Transcribed locally with Whisper.'
     : 'Browser mode · Speech recognition may use your browser’s online service. On-device processing is not guaranteed. You can always type here.';
   if (dom.captureGuidance) dom.captureGuidance.textContent = !native
-    ? (SpeechRecognitionApi ? 'Start, speak, then stop. Or simply type below.' : 'Speech recognition isn’t available in this browser. You can type, edit, and copy your draft.')
+    ? (SpeechRecognitionApi ? 'Browser speech may use an online service. Start, speak, then stop. Or simply type below.' : 'Speech recognition isn’t available in this browser. You can type, edit, and copy your draft.')
     : !isFocusedMacDesktopMode() ? 'Native dictation is available on macOS. You can still type and copy a draft.'
-    : ready ? `Start with the button, or hold ${instructionHotkeyLabel(state.savedDictationHotkey)} and release to transcribe.`
+    : ready ? (!state.savedDictationHotkey ? 'Start with the button. Speak naturally, then stop to transcribe.'
+      : isHoldToTalkHotkey() ? `Start with the button, or hold ${instructionHotkeyLabel(state.savedDictationHotkey)} and release to transcribe.`
+      : `Start with the button, or press ${instructionHotkeyLabel(state.savedDictationHotkey)} to start and stop.`)
     : !state.whisperCliAvailable ? 'The local speech engine needs attention. Open Setup & settings to recheck it. You can still type a draft.'
     : !state.nativeDictationModelReady ? 'Download a speech model in Setup & settings to start dictating. You can still type a draft.'
     : 'Allow microphone access in Setup & settings to start dictating. Your draft is ready to use.';

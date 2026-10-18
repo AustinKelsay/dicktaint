@@ -294,10 +294,10 @@ export function idlePillMessage() {
   if (!isNativeDesktopMode()) return '';
   if (!isFocusedMacDesktopMode()) return 'Desktop MVP: macOS only';
   if (!state.currentOnboarding) return 'Checking dictation setup...';
-  if (!state.nativeDictationModelReady) return 'Finish setup in dicktaint';
+  if (!state.nativeDictationModelReady) return 'Finish setup in Murmur';
   if (!state.savedDictationHotkey) return 'Hotkey disabled - open settings';
   if (state.dictationTriggerMode === 'focused-window-hold') {
-    return `Focus dicktaint, then hold ${instructionHotkeyLabel(state.savedDictationHotkey)}`;
+    return `Focus Murmur, then hold ${instructionHotkeyLabel(state.savedDictationHotkey)}`;
   }
   if (isHoldToTalkHotkey()) {
     return `Hold ${instructionHotkeyLabel(state.savedDictationHotkey)} to dictate`;
