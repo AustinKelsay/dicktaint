@@ -1,6 +1,8 @@
-# dicktaint
+# Murmur
 
-A local AI dictation tool suitable for the most private chats and dirtiest language.
+Private dictation for your Mac.
+
+*A little voice. A lot less typing.*
 
 Current MVP focus: **macOS desktop**. iPhone/iOS is a future track.
 
@@ -98,3 +100,5 @@ Desktop CLI resolution: env override → bundled sidecar → `PATH` → local `s
 Settings / models on macOS live under:
 
 `$HOME/Library/Application Support/com.plebdev.dicktaint/.dicktaint/`
+
+Murmur keeps the original bundle identifier, internal executable name, settings format, storage path, and environment variables so existing models and preferences continue to work. See [ADR 0002](docs/adr/0002-murmur-continuity.md) for the upgrade continuity contract.
