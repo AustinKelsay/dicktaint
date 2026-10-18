@@ -33,7 +33,7 @@ bun run whisper:sidecar
 bun run tauri:dev
 ```
 
-Then complete onboarding: wait for local checks, download a model, start dictation.
+Complete setup by checking the local speech engine, installing or selecting a model, and allowing microphone access. A ready Mac opens directly into Dictation. Accessibility (paste into other apps) and Input Monitoring (an alternative background Fn path) are optional; button dictation works without them.
 
 Optional pipeline smoke test:
 
@@ -41,7 +41,7 @@ Optional pipeline smoke test:
 bun run whisper:smoke
 ```
 
-Closing the main window hides to tray by default (dictation can keep running). Hold `Fn` (or fallback `F19`) for hold-to-talk when Input Monitoring allows it. Details: [`llm/implementation/HOTKEY_AND_OVERLAY.md`](llm/implementation/HOTKEY_AND_OVERLAY.md).
+Closing the main window hides to tray by default (dictation can keep running). Hold `Fn` (or fallback `F19`) for hold-to-talk. Background delivery can use Accessibility or Input Monitoring; the app reports the actual hotkey capability separately from each permission. Details: [`llm/implementation/HOTKEY_AND_OVERLAY.md`](llm/implementation/HOTKEY_AND_OVERLAY.md).
 
 ## Testing
 
@@ -50,11 +50,14 @@ bun run test
 bun run test:rust
 bun run test:all
 bun run docs:verify
+bun run verify:bundle # after building/signing a local app
 ```
 
 ## Release (macOS)
 
 Tag-driven GitHub Actions build/notarize lives in `.github/workflows/release-macos.yml`. Full steps: [`llm/workflow/RELEASE_AND_DISTRIBUTION.md`](llm/workflow/RELEASE_AND_DISTRIBUTION.md).
+
+For a local verification build, follow the build/sign/inspect commands in the release runbook; ad hoc signing is local verification only. Public distribution still requires Developer ID signing, notarization, stapling, and clean-machine checks.
 
 Bump versions together in `package.json`, `src-tauri/Cargo.toml`, and `src-tauri/tauri.conf.json`, update `CHANGELOG.md`, then push a `v*` tag from `main`.
 
@@ -72,7 +75,8 @@ Requires Xcode. Android is deferred. See [`llm/context/PLATFORM_SUPPORT.md`](llm
 - Local Whisper model download / select / delete per device
 - Native desktop dictation via Rust capture + bundled `whisper-cli`
 - Configurable global hotkey, overlay pill, focused-field insert (macOS)
-- Web fallback via browser speech recognition when available
+- Editable draft, copy actions, and recent dictations kept in memory for the current session
+- Web fallback via browser speech recognition when available; the browser provider may process audio remotely
 
 ## HTTP server contract (web mode)
 

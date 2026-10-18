@@ -2,8 +2,9 @@
 
 ## Status Snapshot
 
-- Date: 2026-07-30
-- Product focus: private local-first dictation
+- Date: 2026-10-18
+- Product: Murmur — private dictation for your Mac
+- Product focus: native local transcription with a separate browser speech fallback
 - MVP platform priority: macOS desktop, then iPhone iOS, then web fallback
 
 ## Purpose
@@ -46,7 +47,11 @@ Implemented now:
 - local model onboarding with recommendation/install/delete/switch behavior
 - background desktop behavior with hide-on-close and `fn` hold-to-talk (macOS)
 - native overlay pill windows for dictation feedback on macOS, using an extra-compact floating presentation with icon-only status feedback
-- onboarding/settings UI groups model, hotkey, insertion, and permissions controls into clearer segmented sections
+- compact Dictation workspace with editable/copyable draft and temporary recent dictations
+- required setup for engine, selected model, and microphone; ready users open into Dictation
+- separate Settings for local models, optional Mac access, and advanced preferences
+- explicit permission requests/settings actions and recording-safe rechecks; observation never prompts
+- system fonts and responsive light/dark UI with keyboard focus and reduced-motion support
 - optional macOS setting to paste finalized transcript into the currently focused external text field
 
 Explicitly out of scope now:
@@ -59,6 +64,8 @@ Explicitly out of scope now:
 Key policy:
 
 - `macOSPrivateApi` is enabled to support transparent overlay behavior
+- native captured audio is transcribed locally; browser SpeechRecognition may use a remote provider
+- visible branding is Murmur; legacy bundle identifier, executable, storage, and event names remain stable (ADR 0002)
 
 ## Verification
 

@@ -2,7 +2,7 @@
 
 ## Status Snapshot
 
-- Date: 2026-07-30
+- Date: 2026-10-18
 - Frontend runtime split: `public/app.js` ESM entry loads domain modules under `public/js/`
 - Overlay runtime is separate: `public/pill.html` loads `public/pill.js`
 
@@ -29,6 +29,8 @@ Out of scope:
 - `public/js/platform.js`
 - `public/js/events.js`
 - `public/js/ui.js`
+- `public/js/navigation.js`
+- `public/js/workspace-presentation.js`
 - `public/js/native-dictation.js`
 - `public/js/onboarding/index.js`
 - `public/js/constants.js`
@@ -58,8 +60,12 @@ Runtime routing:
 
 Setup gate on mac desktop:
 
-- `nativeDictationModelReady` depends on onboarding result for selected model existence + `whisper-cli` availability
-- start dictation controls remain disabled until setup ready
+- `nativeDictationModelReady` tracks selected model validity + `whisper-cli` availability
+- native capture additionally requires an observed authorized microphone (`isNativeSetupReady()`); unknown/unavailable checks remain unverified
+- `navigation.js` chooses Dictation for a ready Mac and setup for an unready Mac once; rechecks preserve navigation, draft, and active capture
+- `workspace-presentation.js` renders engine/model/microphone readiness, runtime/privacy context, and a Stop control in Settings during capture without choosing a route
+- optional Accessibility and Input Monitoring never disable button dictation
+- start dictation controls remain disabled until required setup is ready
 - onboarding payload also drives `focusedFieldInsertEnabled` for optional focused-field paste behavior
 
 Native desktop start/stop contract:
@@ -73,6 +79,7 @@ Native desktop start/stop contract:
 Browser speech path:
 
 - uses continuous recognition with interim results
+- browser/provider recognition may send audio to a remote service; it is separate from native local Whisper privacy
 - auto-restart timer keeps capture flow between utterance boundaries
 - fatal speech errors stop restart loop
 
@@ -85,6 +92,9 @@ Invariants:
 
 - runtime mode is authoritative for command path selection
 - UI controls reflect lock/busy/setup states through `syncControls()` in `public/js/ui.js`
+- draft survives navigation; recent dictations are temporary memory, not durable history
+- manual macOS Copy uses `copy_text_to_clipboard` on a worker, serialized with insertion; it leaves the copied text on the clipboard without posting paste events or restoring old clipboard content
+- permission inspection has no prompt/settings side effect; see [`MACOS_PERMISSIONS.md`](MACOS_PERMISSIONS.md)
 
 ## Verification
 

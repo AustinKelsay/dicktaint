@@ -1,8 +1,8 @@
-# dicktaint LLM Docs
+# Murmur LLM Docs
 
 ## Status Snapshot
 
-- Date: 2026-02-17
+- Date: 2026-10-18
 - Canonical docs root: `llm`
 - Canonical scope: current shipped behavior for this repository
 
@@ -64,4 +64,5 @@ Start here:
 2. [`context/RUNTIME_MODES.md`](context/RUNTIME_MODES.md)
 3. [`implementation/API_SURFACE.md`](implementation/API_SURFACE.md)
 4. [`workflow/LOCAL_DEVELOPMENT.md`](workflow/LOCAL_DEVELOPMENT.md)
-5. [`STANDARDS.md`](STANDARDS.md)
+5. [`implementation/MACOS_PERMISSIONS.md`](implementation/MACOS_PERMISSIONS.md)
+6. [`STANDARDS.md`](STANDARDS.md)

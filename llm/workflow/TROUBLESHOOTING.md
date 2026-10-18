@@ -2,7 +2,7 @@
 
 ## Status Snapshot
 
-- Date: 2026-02-20
+- Date: 2026-10-18
 - issue patterns mapped to current runtime behavior and scripts
 
 ## Purpose
@@ -45,25 +45,30 @@ Out of scope:
 2) no local model selected:
 
 1. open setup
-2. install model with `Download + Use`
+2. install the recommended model or choose an installed model
 3. confirm ready state
 
 3) microphone/input errors:
 
-1. verify input device in macOS sound settings
-2. verify microphone permission
-3. relaunch runtime after permission changes
+1. inspect Microphone in Murmur setup/Settings; `not_determined` offers an explicit Allow action, `denied` offers Open Microphone settings, and `restricted` indicates policy-controlled access
+2. for an unavailable check, choose Recheck; do not treat unknown status as a grant
+3. after changing a grant, return to Murmur or choose Recheck; active capture and the draft are preserved
+4. if capture still fails, verify the selected input device and macOS Sound settings; authorization does not prove the device opens successfully
+5. if trust appears stale, quit and reopen that same app build, then inspect its privacy row again; a local ad hoc build may have a different trust identity from the installed app
+6. for a built app that never appears in Microphone settings, run `bun run verify:bundle` to check the usage description, signed audio-input entitlement, and signature
 
 4) hold-to-talk does not fire:
 
-1. grant Input Monitoring + Accessibility
-2. relaunch runtime
-3. verify focused fallback key path
+1. inspect the hotkey runtime mode in Settings separately from each permission row
+2. Accessibility or Input Monitoring may enable background Fn; either is optional, and both grants are independent
+3. explicitly open the desired privacy pane, enable the app, return to Murmur, and Recheck while idle
+4. verify the focused-window Fn/F19 fallback and button dictation; an optional hotkey failure must not block required-ready button capture
+5. quit/reopen the same build if macOS trust remains stale; avoid resetting the privacy database or overwriting the installed working app as routine recovery
 
-4a) `Fn` fires but brings dicktaint to the front:
+4a) `Fn` fires but brings Murmur to the front:
 
 1. open Settings and inspect the runtime hotkey mode
-2. if it says `focused-window-hold`, grant Input Monitoring and relaunch
+2. if it says `focused-window-hold`, use an explicit Accessibility or Input Monitoring settings action, return, and Recheck while idle
 3. if it says `global-hold`, treat it as a regression in the start/focus path
 
 5) no transcript after stop:
@@ -76,7 +81,8 @@ Out of scope:
 
 1. confirm browser speech API support
 2. confirm mic permissions
-3. use manual text fallback
+3. the browser provider may require network/remote processing; native local Whisper privacy does not describe this runtime
+4. use manual text fallback
 
 7) iOS dev connectivity issues:
 
@@ -88,8 +94,14 @@ Out of scope:
 
 1. enable `Dictate Into Focused Field` in app settings
 2. ensure target app text field is focused when dictation completes
-3. grant Accessibility permission for the app/Terminal and let dicktaint reopen the macOS Accessibility settings page if permission is missing
+3. explicitly open Accessibility settings from Murmur, grant the actual app/runtime, and return or Recheck; Input Monitoring does not grant insertion access
 4. retry with a plain text field to rule out app-specific input restrictions
+
+9) Copy does not work:
+
+1. on macOS desktop, Copy uses the native clipboard command and does not require Accessibility
+2. in the browser, clipboard access depends on browser support and permission; try a secure origin or select the draft and use the Edit menu
+3. copy a draft/history entry and paste manually into a plain text field to check the result independently of automatic focused-field insertion
 
 Escalation payload to capture:
 
