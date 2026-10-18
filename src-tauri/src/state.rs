@@ -651,6 +651,7 @@ pub(crate) struct LiveAudioMeter {
 }
 
 pub(crate) struct ActiveRecording {
+    pub(crate) start_request_id: Option<String>,
     pub(crate) session_id: u64,
     pub(crate) input_device_name: String,
     pub(crate) stop_tx: mpsc::Sender<()>,

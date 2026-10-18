@@ -29,7 +29,7 @@ a { color: inherit; }
 .brand { display: flex; align-items: center; gap: 8px; margin: 0 8px 39px; font-size: 21px; letter-spacing: -.65px; font-weight: 650; text-decoration: none; }
 .brand img { border-radius: 9px; }
 nav { display: grid; gap: 6px; }
-.nav-item { width: 100%; justify-content: flex-start; gap: 10px; padding: 10px 12px; border-radius: 8px; color: var(--muted); background: transparent; font-size: 12px; white-space: nowrap; }
+.nav-item { transition: none; width: 100%; justify-content: flex-start; gap: 10px; padding: 10px 12px; border-radius: 8px; color: var(--muted); background: transparent; font-size: 12px; white-space: nowrap; }
 .nav-item svg circle { fill: var(--sidebar); }
 .nav-item[aria-current="page"] { color: var(--accent); background: var(--accent-soft); }
 .nav-item[aria-current="page"] svg circle { fill: var(--accent-soft); }

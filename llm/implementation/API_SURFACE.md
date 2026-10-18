@@ -81,7 +81,7 @@ Event channels:
 
 - frontend local fallback only: `dictation:hotkey-triggered` payload `{ pressed }`
 - backend to frontend (and overlay): `dictation:state-changed` payload `{ state, error?, transcript?, session_id?, request_id? }`
-  - optional `request_id` on listening correlates a frontend start with its event; existing native callers may omit it
+  - optional `request_id` on listening and cancellation idle correlates a frontend start with its event; existing native callers may omit it
   - dictation session `state` vocabulary: `idle` | `listening` | `processing` | `error`
 - backend to frontend/overlay: `dictation:audio-level` payload `{ session_id, peak_abs, rms, level, bars }` (always present; matches `DictationAudioLevelPayload`)
 - backend/frontend to overlay: `dicktaint://pill-status` payload `{ message, state, visible }`

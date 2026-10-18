@@ -44,7 +44,7 @@ Pipeline sequence:
 
 Stop and Clear invalidate pending startup as well as established capture. Button, focused Fn, backend hold/toggle, and tray actions share the reservation boundary. Cancellation never waits for microphone authorization or the startup gate on the main thread. Device opening occurs outside the short intent lock; a canceled device-open result is stopped and joined instead of being published. Publication, pending cancellation, and the listening event are ordered by the intent lock. Background UI synchronization is dispatched to the main thread without waiting under that lock.
 
-The optional frontend `request_id` correlates listening events and command completion with a specific start action. Stop/Clear invalidate that request locally; late completions cannot revive a canceled session or replace a newer one. Session IDs still govern transcript/event ordering. Duplicate focused/global Fn starts join the existing capture rather than canceling it as stale recovery.
+The optional frontend `request_id` correlates listening, cancellation idle events, and command completion with a specific start action. Stop/Clear invalidate that request locally; late completions cannot revive a canceled session or replace a newer one. Session IDs still govern transcript/event ordering. Duplicate focused/global Fn starts join the existing capture rather than canceling it as stale recovery.
 
 Capture details:
 

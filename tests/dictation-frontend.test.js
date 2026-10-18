@@ -1667,6 +1667,9 @@ describe('review regressions', () => {
     document.getElementById('clearTranscript').click();
     document.getElementById('startDictation').click();
     await new Promise(resolve => setTimeout(resolve, 0));
+    api.handleNativeDictationStatePayload({ state: 'idle', session_id: 902, request_id: starts[0].requestId });
+    expect(api.getState().isStartingDictation).toBe(true);
+    expect(document.getElementById('stopDictation').disabled).toBe(false);
     api.handleNativeDictationStatePayload({ state: 'listening', session_id: 903, request_id: starts[1].requestId });
     starts[1].resolve(null);
     starts[0].resolve(null);
