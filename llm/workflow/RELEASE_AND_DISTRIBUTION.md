@@ -2,7 +2,7 @@
 
 ## Status Snapshot
 
-- Date: 2026-03-21
+- Date: 2026-10-18
 - desktop release posture is direct macOS distribution while private API mode is enabled
 
 ## Purpose
@@ -27,6 +27,9 @@ Out of scope:
 - `src-tauri/tauri.conf.json`
 - `src-tauri/binaries/README.md`
 - `package.json`
+- `scripts/verify-macos-bundle.sh`
+- `src-tauri/dicktaint.entitlements`
+- `src-tauri/Info.plist`
 
 ## Runbook
 
@@ -39,7 +42,24 @@ Pre-release gates:
 5. run manual smoke checklist from `SMOKE_TESTS.md`
 6. verify sidecar binaries required for target distribution are present
 7. verify private API setting matches release channel policy
-8. verify the signed macOS app bundle includes `com.apple.security.device.audio-input`
+8. run `bun run verify:bundle` against each built app on its matching Mac architecture; verify metadata, source/bundle version parity, real Mach-O main executable and sidecar, microphone usage description, signed audio-input entitlement, and strict deep signature
+9. record actual command results and distinguish automated tests, browser DTO simulations, native facts, and manual dictation evidence
+
+Local review build (keeps the installed app untouched):
+
+```bash
+bun run tauri:build -- --bundles app
+# Without a configured signing identity, bind local metadata and entitlements explicitly.
+codesign --force --sign - src-tauri/target/release/bundle/macos/Murmur.app/Contents/MacOS/whisper-cli
+codesign --force --sign - --entitlements src-tauri/dicktaint.entitlements src-tauri/target/release/bundle/macos/Murmur.app
+bun run verify:bundle
+# Or inspect a supplied artifact:
+bun run verify:bundle /path/to/Murmur.app
+```
+
+The default artifact is the `Murmur.app` under the release bundle directory. Verification reads the app without launching, installing, changing privacy settings, or touching model/settings data. The sidecar check establishes a native executable for this Mac; use the fixture smoke to establish actual transcription. An ad hoc signature is accepted for local verification and clearly reports `LOCAL ONLY`. An unsigned or linker-only artifact without bound audio-input entitlement fails. Any signature mode still requires the distribution gates below; the verifier does not establish notarization or identity continuity. Rebuilds can invalidate a local signature, so sign and verify again after the final build.
+
+Keep source version `0.3.12` until a deliberate release bump. Display name is Murmur; bundle id `com.plebdev.dicktaint`, internal executable `dicktaint`, storage, settings schema, and event names remain stable. Preserve the established signing identity for a distributable upgrade: bundle-id continuity alone does not preserve macOS TCC trust.
 
 Tag-and-publish path:
 

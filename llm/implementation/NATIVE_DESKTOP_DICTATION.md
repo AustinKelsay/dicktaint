@@ -2,7 +2,7 @@
 
 ## Status Snapshot
 
-- Date: 2026-02-17
+- Date: 2026-10-18
 - Desktop dictation backend is implemented in Rust and wired through Tauri commands
 
 ## Purpose
@@ -32,7 +32,7 @@ Out of scope:
 
 Pipeline sequence:
 
-1. `start_native_dictation` validates model + CLI readiness and active state.
+1. `start_native_dictation` validates model + CLI readiness and active state. The UI requires an authorized microphone before starting; native capture still validates actual access and device opening.
 2. backend spawns recording thread and opens microphone stream.
 3. `stop_native_dictation` stops capture and joins thread.
 4. captured samples are resampled to 16 kHz mono if required.
@@ -61,6 +61,8 @@ Concurrency invariants:
 - only one active recording at a time
 - second start while active returns `Dictation already running.`
 - cancel path is safe when idle
+- permission observation/recheck preserves active or starting capture; listener re-arming is deferred until idle
+- audio capture/transcription stays local to Rust/cpal + Whisper; model download is a separate network operation
 
 ## Verification
 

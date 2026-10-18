@@ -2,7 +2,7 @@
 
 ## Status Snapshot
 
-- Date: 2026-07-30
+- Date: 2026-10-18
 - Runtime split is determined by Tauri bridge presence, UA platform classification, and browser speech API support
 
 ## Purpose
@@ -39,8 +39,8 @@ Mode detection primitives (in `public/js/platform.js` / `public/js/constants.js`
 
 Mode behavior:
 
-1. Web mode (`bun run start`): static server + browser speech path if available.
-2. Native desktop macOS: Tauri invoke/event bridge, onboarding gate, native dictation commands.
+1. Web mode (`bun run start`): static server + browser speech path if available; recognition may use a remote browser service. Manual editing/copy/history remain available.
+2. Native desktop macOS: Tauri invoke/event bridge, engine/model/microphone readiness gate, local capture and Whisper transcription. Optional Mac permissions affect background Fn/insertion independently.
 3. Native desktop non-mac: explicit unsupported desktop messaging for MVP native path.
 4. iOS mode: mobile runtime scripts exist, desktop-native Whisper path is not active.
 

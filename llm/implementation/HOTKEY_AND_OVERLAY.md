@@ -2,7 +2,7 @@
 
 ## Status Snapshot
 
-- Date: 2026-07-30
+- Date: 2026-10-18
 - hold-to-talk and overlay behavior are macOS-focused MVP features
 - overlay document is `public/pill.html`; live runtime is `public/pill.js`
 
@@ -54,7 +54,7 @@ Backend behavior:
 Frontend behavior:
 
 - fallback focused listeners for `Fn` / `F19`
-- only uses focused-window `Fn` listeners when macOS global Input Monitoring is unavailable
+- uses focused-window `Fn` / `F19` fallback when actual global hotkey delivery is unavailable; either Accessibility or Input Monitoring can enable the global Fn path
 - listens for `dictation:state-changed` and treats `session_id` as the authoritative native session identity
 - release-during-start race handled by deferred stop flag
 - status may still emit `dicktaint://pill-status` for setup/onboarding text, but backend owns dictation lifecycle pill updates
@@ -70,8 +70,12 @@ Overlay window (`public/pill.html` + `public/pill.js`):
 
 Permission expectations:
 
-- Input Monitoring and Accessibility may be required for global key monitoring
-- Accessibility is required for focused-field paste; the app now uses native pasteboard + key event posting instead of `System Events`
+- Accessibility enables focused-field paste and can enable background Fn; Input Monitoring is an alternative background Fn route
+- each grant is observed separately from the actual hotkey capability; neither optional grant blocks button dictation
+- startup and status observation stay quiet; only explicit permission/settings actions may prompt or open System Settings
+- returning to the app can re-arm the listener while idle; active recording or a pending start keeps its current listener
+- focused-field paste uses native pasteboard + key event posting instead of `System Events`
+- see [`MACOS_PERMISSIONS.md`](MACOS_PERMISSIONS.md) for DTO and recovery details
 
 Dependency constraint:
 

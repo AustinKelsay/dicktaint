@@ -1,5 +1,14 @@
 # Changelog
 
+## Unreleased
+
+- renamed the visible product to **Murmur** and rebuilt the Mac workspace around Dictation, editable text, recent dictations, and progressively disclosed Settings
+- added guided required setup for the local speech engine, model, and microphone, with independent optional Accessibility and Input Monitoring guidance
+- made permission observation quiet and added explicit request, System Settings, and safe recheck actions; background Fn refresh preserves active capture
+- retained the original bundle identifier, executable, settings/model storage, event contracts, and version `0.3.12` for upgrade continuity; signing identity still matters to macOS trust
+- removed external font dependencies and clarified that browser speech recognition may use a remote service
+- added `bun run verify:bundle` for repeatable local metadata, version, native binary, microphone entitlement, and strict signature checks; local ad hoc signing does not establish public release readiness
+
 ## v0.3.12 - 2026-08-10
 
 ### Highlights

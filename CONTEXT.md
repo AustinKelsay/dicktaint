@@ -2,7 +2,7 @@
 
 ## Product
 
-**Murmur** is a local-first, private dictation app: “Private dictation for your Mac.” Primary runtime is **macOS desktop** via Tauri + bundled `whisper-cli`. Web mode is a static SPA fallback (browser SpeechRecognition). iPhone/iOS is an explicit future track, not the current cleanup focus. The display brand is separate from the legacy `com.plebdev.dicktaint` identity, `.dicktaint` storage, internal executable, events, and environment variables; see [ADR 0002](docs/adr/0002-murmur-continuity.md).
+**Murmur** is a local-first, private dictation app: “Private dictation for your Mac.” Primary runtime is **macOS desktop** via Tauri + bundled `whisper-cli`. Web mode is a static SPA fallback (browser SpeechRecognition, which may use a remote browser service). iPhone/iOS is an explicit future track, not the current cleanup focus. The display brand is separate from the legacy `com.plebdev.dicktaint` identity, `.dicktaint` storage, internal executable, events, and environment variables; see [ADR 0002](docs/adr/0002-murmur-continuity.md).
 
 ## Glossary
 
@@ -16,6 +16,8 @@
 | Required readiness | Local speech engine, selected model, and microphone access needed for capture |
 | Optional Mac access | Accessibility for insertion/background Fn, or Input Monitoring as an alternative background Fn path; never required for button dictation |
 | Onboarding | Guided required-readiness flow before first native dictation |
+| Draft | Editable transcript in the current window; retained while moving between Dictation and Settings |
+| Recent dictations | In-memory session history; not persisted across reloads or restarts |
 | Staging tip | Integration branch for PRs; should track shipping `main` closely |
 
 ## Module map
