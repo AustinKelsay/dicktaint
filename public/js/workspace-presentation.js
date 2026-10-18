@@ -17,7 +17,7 @@ export function renderWorkspaceReadiness() {
   const micCopy = {
     authorized: 'Microphone · allowed', not_determined: 'Microphone · needs your permission',
     denied: 'Microphone · access denied', restricted: 'Microphone · restricted by policy',
-    unavailable: 'Microphone · check unavailable', unknown: 'Microphone · checking access'
+    unavailable: 'Microphone · check unavailable', unknown: 'Microphone · access not verified'
   };
   if (dom.requiredSetup) dom.requiredSetup.hidden = !native;
   if (dom.microphoneHealthEl) {
@@ -36,7 +36,7 @@ export function renderWorkspaceReadiness() {
     ? 'On your Mac. Your voice stays here. Transcribed locally with Whisper.'
     : 'Browser mode · Speech recognition may use your browser’s online service. On-device processing is not guaranteed. You can always type here.';
   if (dom.captureGuidance) dom.captureGuidance.textContent = !native
-    ? (SpeechRecognitionApi ? 'Start, speak, then stop. Or simply type below.' : 'Speech recognition isn’t available in this browser. You can type, edit, and copy your draft.')
+    ? (SpeechRecognitionApi ? 'Browser speech may use an online service. Start, speak, then stop. Or simply type below.' : 'Speech recognition isn’t available in this browser. You can type, edit, and copy your draft.')
     : !isFocusedMacDesktopMode() ? 'Native dictation is available on macOS. You can still type and copy a draft.'
     : ready ? (!state.savedDictationHotkey ? 'Start with the button. Speak naturally, then stop to transcribe.'
       : isHoldToTalkHotkey() ? `Start with the button, or hold ${instructionHotkeyLabel(state.savedDictationHotkey)} and release to transcribe.`

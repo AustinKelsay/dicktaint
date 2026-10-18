@@ -1578,4 +1578,6 @@ it('describes toggle shortcuts accurately and does not suggest a disabled shortc
   expect(document.getElementById('captureGuidance').textContent).toContain('press CmdOrCtrl+Shift+D');
   await api.clearDictationHotkey();
   expect(document.getElementById('captureGuidance').textContent).toBe('Start with the button. Speak naturally, then stop to transcribe.');
+  await api.saveDictationHotkey('Fn');
+  expect(document.getElementById('captureGuidance').textContent).toContain('hold Fn / Globe and release to transcribe');
 });
