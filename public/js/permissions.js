@@ -52,6 +52,7 @@ export async function refreshMacosPermissions({ rearm = false } = {}) {
       return null;
     } finally {
       refreshInFlight = null;
+      state.permissionCheckComplete = true;
       updatePermissionUi();
     }
   })();

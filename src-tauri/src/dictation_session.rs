@@ -17,17 +17,91 @@ use tauri::Manager;
 pub(crate) struct HoldIntent(AtomicU64);
 impl HoldIntent {
     pub(crate) fn press(&self) -> u64 {
-        (self.0.fetch_update(Ordering::SeqCst, Ordering::SeqCst, |value| Some((value | 1) + 2)).unwrap() | 1) + 2
+        (self
+            .0
+            .fetch_update(Ordering::SeqCst, Ordering::SeqCst, |value| {
+                Some((value | 1) + 2)
+            })
+            .unwrap()
+            | 1)
+            + 2
     }
-    pub(crate) fn is_held(&self) -> bool { self.0.load(Ordering::SeqCst) & 1 == 1 }
-    pub(crate) fn release(&self) { self.0.fetch_and(!1, Ordering::SeqCst); }
-    pub(crate) fn is_current(&self, token: u64) -> bool { self.0.load(Ordering::SeqCst) == token }
+    pub(crate) fn is_held(&self) -> bool {
+        self.0.load(Ordering::SeqCst) & 1 == 1
+    }
+    pub(crate) fn release(&self) {
+        self.0.fetch_and(!1, Ordering::SeqCst);
+    }
+    pub(crate) fn is_current(&self, token: u64) -> bool {
+        self.0.load(Ordering::SeqCst) == token
+    }
+}
+
+/// One pending capture reservation, created before dispatching any worker.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub(crate) struct StartReservation {
+    pub(crate) session_id: u64,
+}
+#[derive(Default)]
+pub(crate) struct SessionIntent {
+    sequence: u64,
+    pending: Option<StartReservation>,
+}
+impl SessionIntent {
+    pub(crate) fn reserve(&mut self) -> Result<StartReservation, String> {
+        if self.pending.is_some() {
+            return Err("Dictation already running.".into());
+        }
+        self.sequence += 1;
+        let reservation = StartReservation {
+            session_id: self.sequence,
+        };
+        self.pending = Some(reservation);
+        Ok(reservation)
+    }
+    pub(crate) fn cancel(&mut self) -> Option<u64> {
+        self.pending.take().map(|value| value.session_id)
+    }
+    pub(crate) fn is_current(&self, reservation: StartReservation) -> bool {
+        self.pending == Some(reservation)
+    }
+    pub(crate) fn has_pending(&self) -> bool {
+        self.pending.is_some()
+    }
+    pub(crate) fn finish(&mut self, reservation: StartReservation) {
+        if self.is_current(reservation) {
+            self.pending = None;
+        }
+    }
+}
+
+pub(crate) fn reserve_start(app: &tauri::AppHandle) -> Result<StartReservation, String> {
+    let dictation = app.state::<DictationState>();
+    let mut intent = dictation
+        .session_intent
+        .lock()
+        .map_err(|_| "Failed to lock session intent")?;
+    if is_running(app)? {
+        return Err("Dictation already running.".into());
+    }
+    intent.reserve()
+}
+
+pub(crate) fn has_session(app: &tauri::AppHandle) -> Result<bool, String> {
+    let dictation = app.state::<DictationState>();
+    let intent = dictation
+        .session_intent
+        .lock()
+        .map_err(|_| "Failed to lock session intent")?;
+    Ok(intent.has_pending() || is_running(app)?)
 }
 
 /// Returns true when `msg` is a benign concurrent start/stop conflict.
 pub(crate) fn is_benign_session_error(msg: &str) -> bool {
     let trimmed = msg.trim();
-    trimmed == "Dictation already running." || trimmed == "Dictation is not running."
+    trimmed == "Dictation already running."
+        || trimmed == "Dictation is not running."
+        || trimmed == "Dictation start canceled."
 }
 
 /// Returns the active recording session id, if any.
@@ -45,21 +119,47 @@ pub(crate) fn is_running(app: &tauri::AppHandle) -> Result<bool, String> {
     current_active_session_id(app).map(|value| value.is_some())
 }
 
-/// Starts native mic capture and marks the session as listening.
-pub(crate) fn start(app: &tauri::AppHandle) -> Result<u64, String> {
-    start_with_hold(app, None)
+/// Executes a reservation. Cancellation never waits for authorization or the start gate.
+pub(crate) fn start_reserved(
+    app: &tauri::AppHandle,
+    reservation: StartReservation,
+    hold: Option<u64>,
+    request_id: Option<String>,
+) -> Result<u64, String> {
+    let mut result = start_reserved_inner(app, reservation, hold, request_id);
+    if result.is_err() {
+        let dictation = app.state::<DictationState>();
+        if let Ok(mut intent) = dictation.session_intent.lock() {
+            if !intent.is_current(reservation) {
+                result = Err("Dictation start canceled.".into());
+            }
+            intent.finish(reservation);
+        };
+    }
+    result
 }
 
-pub(crate) fn start_with_hold(app: &tauri::AppHandle, hold: Option<u64>) -> Result<u64, String> {
+fn start_reserved_inner(
+    app: &tauri::AppHandle,
+    reservation: StartReservation,
+    hold: Option<u64>,
+    request_id: Option<String>,
+) -> Result<u64, String> {
     let config = app.state::<AppConfig>();
     let model_state = app.state::<LocalModelState>();
     let dictation = app.state::<DictationState>();
-
-    // Refresh holds this same gate while replacing listeners. A pending permission
-    // prompt is therefore protected just like an established recording.
-    let _start_guard = dictation.start_gate.try_lock().map_err(|_| "Dictation already running.".to_string())?;
-    if hold.is_some_and(|token| !dictation.hold_intent.is_current(token)) {
-        return Err("Dictation is not running.".into());
+    let _start_guard = dictation
+        .start_gate
+        .lock()
+        .map_err(|_| "Failed to lock capture startup")?;
+    if !dictation
+        .session_intent
+        .lock()
+        .map_err(|_| "Failed to lock session intent")?
+        .is_current(reservation)
+        || hold.is_some_and(|token| !dictation.hold_intent.is_current(token))
+    {
+        return Err("Dictation start canceled.".into());
     }
     resolve_active_model_path(config.inner(), model_state.inner())?;
     let configured_whisper_cli_path = resolve_whisper_cli_path(
@@ -71,22 +171,36 @@ pub(crate) fn start_with_hold(app: &tauri::AppHandle, hold: Option<u64>) -> Resu
     ensure_whisper_cli_available(&whisper_cli_path)?;
     ensure_microphone_access_authorized(app)?;
 
-    let mut guard = dictation
-        .active_recording
+    if !dictation
+        .session_intent
         .lock()
-        .map_err(|_| "Failed to lock dictation state".to_string())?;
-    if hold.is_some_and(|token| !dictation.hold_intent.is_current(token)) {
-        return Err("Dictation is not running.".into());
+        .map_err(|_| "Failed to lock session intent")?
+        .is_current(reservation)
+    {
+        return Err("Dictation start canceled.".into());
     }
-    if guard.is_some() {
-        return Err("Dictation already running.".to_string());
-    }
-
-    let session_id = dictation.next_session_id.fetch_add(1, Ordering::SeqCst);
+    let session_id = reservation.session_id;
     let samples = Arc::new(Mutex::new(Vec::<f32>::new()));
     let (stop_tx, thread_handle, sample_rate, input_device_name) =
         spawn_recording_thread(Arc::clone(&samples), app.clone(), session_id)?;
-    *guard = Some(ActiveRecording {
+    // Publication and cancellation share the short intent lock. Device opening and
+    // authorization hold neither this lock nor active_recording.
+    let mut intent = dictation
+        .session_intent
+        .lock()
+        .map_err(|_| "Failed to lock session intent")?;
+    if !intent.is_current(reservation)
+        || hold.is_some_and(|token| !dictation.hold_intent.is_current(token))
+    {
+        drop(intent);
+        let _ = stop_tx.send(());
+        let _ = thread_handle.join();
+        return Err("Dictation start canceled.".into());
+    }
+    *dictation
+        .active_recording
+        .lock()
+        .map_err(|_| "Failed to lock dictation state")? = Some(ActiveRecording {
         session_id,
         input_device_name,
         stop_tx,
@@ -94,24 +208,41 @@ pub(crate) fn start_with_hold(app: &tauri::AppHandle, hold: Option<u64>) -> Resu
         samples,
         sample_rate,
     });
-    drop(guard);
-
-    emit_dictation_state(app, "listening", None, None, Some(session_id));
+    intent.finish(reservation);
+    crate::hotkey_overlay::emit_dictation_started(app, session_id, request_id);
     Ok(session_id)
+}
+
+/// Invalidates queued startup and takes capture before any deferred stop worker.
+pub(crate) fn prepare_stop(app: &tauri::AppHandle) -> Result<Option<ActiveRecording>, String> {
+    let dictation = app.state::<DictationState>();
+    let mut intent = dictation
+        .session_intent
+        .lock()
+        .map_err(|_| "Failed to lock session intent")?;
+    let pending_id = intent.cancel();
+    let recording = dictation
+        .active_recording
+        .lock()
+        .map_err(|_| "Failed to lock dictation state")?
+        .take();
+    if recording.is_none() && pending_id.is_some() {
+        emit_dictation_state(app, "idle", None, None, pending_id);
+    }
+    Ok(recording)
 }
 
 /// Stops capture, transcribes, and emits processing/idle/error states.
 pub(crate) async fn stop(app: tauri::AppHandle) -> Result<String, String> {
-    let recording = {
-        let dictation = app.state::<DictationState>();
-        let mut guard = dictation
-            .active_recording
-            .lock()
-            .map_err(|_| "Failed to lock dictation state".to_string())?;
-        guard
-            .take()
-            .ok_or_else(|| "Dictation is not running.".to_string())?
-    };
+    let recording = prepare_stop(&app)?;
+    stop_prepared(app, recording).await
+}
+
+pub(crate) async fn stop_prepared(
+    app: tauri::AppHandle,
+    recording: Option<ActiveRecording>,
+) -> Result<String, String> {
+    let recording = recording.ok_or_else(|| "Dictation is not running.".to_string())?;
     let session_id = recording.session_id;
 
     let _ = recording.stop_tx.send(());
@@ -130,13 +261,7 @@ pub(crate) async fn stop(app: tauri::AppHandle) -> Result<String, String> {
         Ok(guard) => guard.clone(),
         Err(_) => {
             let message = "Failed to read captured audio".to_string();
-            emit_dictation_state(
-                &app,
-                "error",
-                Some(message.clone()),
-                None,
-                Some(session_id),
-            );
+            emit_dictation_state(&app, "error", Some(message.clone()), None, Some(session_id));
             return Err(message);
         }
     };
@@ -198,20 +323,14 @@ pub(crate) async fn stop(app: tauri::AppHandle) -> Result<String, String> {
 
 /// Cancels any active recording without transcription and returns to idle.
 pub(crate) fn cancel(app: &tauri::AppHandle) -> Result<(), String> {
-    let recording = {
-        let dictation = app.state::<DictationState>();
-        let mut guard = dictation
-            .active_recording
-            .lock()
-            .map_err(|_| "Failed to lock dictation state".to_string())?;
-        guard.take()
+    let recording = prepare_stop(app)?;
+    let Some(recording) = recording else {
+        return Ok(());
     };
-    let session_id = recording.as_ref().map(|value| value.session_id);
+    let session_id = Some(recording.session_id);
 
-    if let Some(recording) = recording {
-        let _ = recording.stop_tx.send(());
-        let _ = recording.thread_handle.join();
-    }
+    let _ = recording.stop_tx.send(());
+    let _ = recording.thread_handle.join();
 
     emit_dictation_state(app, "idle", None, None, session_id);
     Ok(())
@@ -219,15 +338,26 @@ pub(crate) fn cancel(app: &tauri::AppHandle) -> Result<(), String> {
 
 /// Cancels the active session when one is running; no-op otherwise.
 pub(crate) fn cancel_if_active(app: &tauri::AppHandle) -> Result<(), String> {
-    if is_running(app)? {
-        cancel(app)?;
-    }
-    Ok(())
+    cancel(app)
 }
 
 #[cfg(test)]
 mod tests {
     use super::is_benign_session_error;
+
+    #[test]
+    fn cancellation_invalidates_queued_start_without_cancelling_a_newer_reservation() {
+        let mut intent = super::SessionIntent::default();
+        let queued = intent.reserve().unwrap();
+        assert_eq!(intent.cancel(), Some(queued.session_id));
+        assert!(!intent.is_current(queued));
+        let next = intent.reserve().unwrap();
+        intent.finish(queued);
+        assert!(intent.is_current(next));
+        assert!(intent.reserve().is_err());
+        intent.finish(next);
+        assert!(!intent.has_pending());
+    }
 
     #[test]
     fn released_hold_cannot_start_after_permission_prompt_or_new_press() {

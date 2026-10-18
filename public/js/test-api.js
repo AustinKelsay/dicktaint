@@ -81,6 +81,7 @@ export function resetDictationStateForTests() {
   state.isDictating = false;
   state.isStartingDictation = false;
   state.shouldKeepDictating = false;
+  state.nativeStartRequestId = null;
   state.nativeStopRequestInFlight = false;
   state.pendingNativeStartAfterStop = false;
   state.pendingNativeStartTrigger = null;

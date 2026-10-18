@@ -15,6 +15,13 @@ import { appendTranscriptChunk, normalizeNativeSessionId } from './transcript.js
 import { ensureMicrophoneAccess } from './media-permissions.js';
 import { clampAudioLevel, normalizeLiveAudioBars, updateDictationWaveform } from './waveform.js';
 
+let nextStartRequest = 0;
+
+/** Rejects local completion/event delivery; the caller also sends native Stop or Clear. */
+export function invalidateNativeStart() {
+  state.nativeStartRequestId = null;
+}
+
 export function normalizeNativeDictationError(text) {
   return String(text || '').trim().toLowerCase();
 }
@@ -59,7 +66,7 @@ export async function maybeStartQueuedNativeDictation() {
 }
 
 
-export async function startNativeDesktopDictation(trigger = 'button', shouldRetryOnConflict = true) {
+export async function startNativeDesktopDictation(trigger = 'button') {
   const tauriInvoke = getTauriInvoke();
   if (!tauriInvoke || !isFocusedMacDesktopMode()) return;
   if (state.nativeStopRequestInFlight) {
@@ -74,6 +81,8 @@ export async function startNativeDesktopDictation(trigger = 'button', shouldRetr
     return;
   }
 
+  const requestId = `frontend-${++nextStartRequest}`;
+  state.nativeStartRequestId = requestId;
   try {
     state.isStartingDictation = true;
     state.nativeSessionIdToIgnore = null;
@@ -82,32 +91,34 @@ export async function startNativeDesktopDictation(trigger = 'button', shouldRetr
     setUiMode('loading');
     setStatus('Requesting microphone access...', 'working');
     await ensureMicrophoneAccess();
+    if (state.nativeStartRequestId !== requestId) return;
     setStatus('Opening microphone...', 'working');
     state.activeNativeSessionId = null;
-    await tauriInvoke('start_native_dictation');
+    await tauriInvoke('start_native_dictation', { requestId });
+    if (state.nativeStartRequestId !== requestId) return;
     state.isStartingDictation = false;
     setDictationState(true);
     setUiMode('listening');
     setStatus(listeningStatusForTrigger(trigger), 'live');
   } catch (error) {
+    if (state.nativeStartRequestId !== requestId) return;
     const details = getErrorMessage(error);
-    if (shouldRetryOnConflict && isStartConflictDictationError(details)) {
-      setStatus('Recovering from stale dictation state...', 'working');
-      state.nativeSessionIdToIgnore = null;
-      state.rejectNextNativeAppend = false;
-      state.activeNativeSessionId = null;
+    if (details.includes('Dictation start canceled.')) {
+      invalidateNativeStart();
       state.isStartingDictation = false;
       setDictationState(false);
-      try {
-        await tauriInvoke('cancel_native_dictation');
-        return startNativeDesktopDictation(trigger, false);
-      } catch (recoverError) {
-        state.isStartingDictation = false;
-        setDictationState(false);
-        setUiMode('error');
-        setStatus(`Could not recover dictation session: ${getErrorMessage(recoverError)}`, 'error');
-        return;
+      setUiMode('idle');
+      return;
+    }
+    if (isStartConflictDictationError(details)) {
+      // Global Fn and focused Fn can deliver the same press. Joining that live
+      // or pending session must never cancel its capture as "stale" recovery.
+      if (!state.isDictating) {
+        state.isStartingDictation = true;
+        setUiMode('loading');
+        setStatus('Dictation is already starting. Waiting for the microphone...', 'working');
       }
+      return;
     }
 
     state.isStartingDictation = false;
@@ -124,6 +135,7 @@ export async function stopNativeDesktopDictation(trigger = 'button') {
   if (!tauriInvoke || (!state.isDictating && !state.isStartingDictation)) return;
   if (state.nativeStopRequestInFlight) return;
 
+  invalidateNativeStart();
   state.nativeStopRequestInFlight = true;
   const sessionId = state.activeNativeSessionId;
   try {
@@ -200,9 +212,8 @@ export function applyNativeFnHoldState(pressed) {
 
   state.nativeFnHoldActive = false;
   if (state.isStartingDictation && !state.isDictating) {
-    // Release can arrive while startup is in-flight; defer stop until capture is live.
-    state.nativeFnStopRequested = true;
-    setHotkeyPill('fn released - waiting for microphone...', 'working', true);
+    state.nativeFnStopRequested = false;
+    void stopNativeDesktopDictation('hotkey-hold');
     return;
   }
 
@@ -295,6 +306,8 @@ export function handleNativeDictationStatePayload(payload) {
     || payloadSessionId === state.activeNativeSessionId;
 
   if (s === 'listening') {
+    if (payload?.request_id && payload.request_id !== state.nativeStartRequestId) return;
+    if (payloadSessionId && payloadSessionId === state.nativeSessionIdToIgnore) return;
     // Ignore late listening events from a superseded session; allow first
     // listening when activeNativeSessionId is still null (sessionMatchesCurrent).
     if (!sessionMatchesCurrent) return;
@@ -307,6 +320,7 @@ export function handleNativeDictationStatePayload(payload) {
   }
 
   if (s === 'processing') {
+    if (!sessionMatchesCurrent) return;
     if (payloadSessionId && !state.activeNativeSessionId) {
       state.activeNativeSessionId = payloadSessionId;
     }

@@ -1581,3 +1581,99 @@ it('describes toggle shortcuts accurately and does not suggest a disabled shortc
   await api.saveDictationHotkey('Fn');
   expect(document.getElementById('captureGuidance').textContent).toContain('hold Fn / Globe and release to transcribe');
 });
+
+describe('review regressions', () => {
+  it('Stop and Clear cancel pending starts without late listening revival', async () => {
+    for (const action of ['stopDictation', 'clearTranscript']) {
+      let finishStart;
+      const start = new Promise(resolve => { finishStart = resolve; });
+      let requestId;
+      createMockDom({ nativeDesktop: true, invokeHandler(command, args) {
+        if (command === 'start_native_dictation') { requestId = args.requestId; return start; }
+        if (command === 'stop_native_dictation') throw new Error('Dictation is not running.');
+        if (command === 'cancel_native_dictation') return null;
+      } });
+      const api = await loadAppWithTestApi();
+      api.resetState();
+      await api.refreshMacosPermissions();
+      document.getElementById('startDictation').click();
+      await new Promise(resolve => setTimeout(resolve, 0));
+      expect(api.getState().isStartingDictation).toBe(true);
+      document.getElementById(action).click();
+      await new Promise(resolve => setTimeout(resolve, 0));
+      finishStart(null);
+      await new Promise(resolve => setTimeout(resolve, 0));
+      api.handleNativeDictationStatePayload({ state: 'listening', session_id: 800, request_id: requestId });
+      expect(api.getState().isDictating).toBe(false);
+      expect(api.getState().isStartingDictation).toBe(false);
+    }
+  });
+  it('waits for onboarding before initial focus-driven routing and respects manual navigation while loading', async () => {
+    for (const navigate of [false, true]) {
+      let releaseOnboarding;
+      const waiting = new Promise(resolve => { releaseOnboarding = resolve; });
+      createMockDom({ nativeDesktop: true, async invokeHandler(command) {
+        if (command === 'get_dictation_onboarding') await waiting;
+      } });
+      const api = await loadAppWithTestApi();
+      window.dispatchEvent({ type: 'focus' });
+      await api.refreshMacosPermissions();
+      if (navigate) document.getElementById('settingsNav').click();
+      releaseOnboarding();
+      await new Promise(resolve => setTimeout(resolve, 0));
+      expect(api.isNativeSetupReady()).toBe(true);
+      expect(document.body.dataset.screen).toBe(navigate ? 'onboarding' : 'dictation');
+    }
+  });
+
+  it('reports required microphone setup instead of overall readiness when only model and engine are ready', async () => {
+    createMockDom({ nativeDesktop: true, invokeHandler(command) {
+      if (command === 'get_macos_permissions') return { supported: true, microphone: 'not_determined', accessibility: false, input_monitoring: false };
+    } });
+    const api = await loadAppWithTestApi();
+    await new Promise(resolve => setTimeout(resolve, 0));
+    expect(api.isNativeSetupReady()).toBe(false);
+    expect(document.getElementById('status').textContent).toContain('microphone');
+    expect(document.getElementById('status').dataset.tone).not.toBe('ok');
+  });
+
+  it('joins duplicate Fn delivery without canceling a pending native capture', async () => {
+    const { invokeCalls } = createMockDom({ nativeDesktop: true, invokeHandler(command) {
+      if (command === 'start_native_dictation') throw new Error('Dictation already running.');
+      if (command === 'cancel_native_dictation') return null;
+    } });
+    const api = await loadAppWithTestApi();
+    api.resetState();
+    await api.refreshMacosPermissions();
+    document.getElementById('startDictation').click();
+    await new Promise(resolve => setTimeout(resolve, 0));
+    expect(api.getState().isStartingDictation).toBe(true);
+    expect(invokeCalls.some(call => call.command === 'cancel_native_dictation')).toBe(false);
+    api.handleNativeDictationStatePayload({ state: 'listening', session_id: 901 });
+    expect(api.getState().isDictating).toBe(true);
+  });
+
+  it('a canceled start cannot overwrite a newer session when its promise and event arrive late', async () => {
+    const starts = [];
+    createMockDom({ nativeDesktop: true, invokeHandler(command, args) {
+      if (command === 'start_native_dictation') return new Promise(resolve => starts.push({ resolve, requestId: args.requestId }));
+      if (command === 'cancel_native_dictation') return null;
+    } });
+    const api = await loadAppWithTestApi();
+    api.resetState();
+    await api.refreshMacosPermissions();
+    document.getElementById('startDictation').click();
+    await new Promise(resolve => setTimeout(resolve, 0));
+    document.getElementById('clearTranscript').click();
+    document.getElementById('startDictation').click();
+    await new Promise(resolve => setTimeout(resolve, 0));
+    api.handleNativeDictationStatePayload({ state: 'listening', session_id: 903, request_id: starts[1].requestId });
+    starts[1].resolve(null);
+    starts[0].resolve(null);
+    await new Promise(resolve => setTimeout(resolve, 0));
+    api.handleNativeDictationStatePayload({ state: 'listening', session_id: 902, request_id: starts[0].requestId });
+    expect(api.getState().activeNativeSessionId).toBe('903');
+    expect(api.getState().isDictating).toBe(true);
+  });
+
+});

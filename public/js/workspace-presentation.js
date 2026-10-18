@@ -3,7 +3,7 @@ import { dom } from './dom-elements.js';
 import { state } from './state.js';
 import { isNativeDesktopMode, isFocusedMacDesktopMode } from './platform.js';
 import { SpeechRecognitionApi } from './constants.js';
-import { isNativeSetupReady } from './readiness.js';
+import { isNativeSetupReady, microphoneRecoveryAction } from './readiness.js';
 import { modelDisplayName } from './labels.js';
 import { instructionHotkeyLabel, isHoldToTalkHotkey } from './settings/hotkey-logic.js';
 
@@ -25,7 +25,7 @@ export function renderWorkspaceReadiness() {
     dom.microphoneHealthEl.dataset.state = microphone === 'authorized' ? 'ok' : 'pending';
   }
   if (dom.requiredMicrophoneAction) {
-    const action = microphone === 'not_determined' ? 'allow' : microphone === 'denied' ? 'settings' : 'recheck';
+    const action = microphoneRecoveryAction(microphone);
     dom.requiredMicrophoneAction.hidden = microphone === 'authorized';
     dom.requiredMicrophoneAction.dataset.permissionAction = action;
     dom.requiredMicrophoneAction.dataset.permission = 'microphone';

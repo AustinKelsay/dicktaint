@@ -32,11 +32,13 @@ export function bootstrapApp() {
   }
 
   state.hasInitialRoute = false;
+  state.onboardingCheckComplete = false;
+  state.permissionCheckComplete = !isFocusedMacDesktopMode();
   if (dom.appShell) dom.appShell.dataset.initializing = 'true';
   state.macosPermissions = null;
   setUiMode('loading');
   setSetupScreenMode('onboarding');
-  setAppScreen('onboarding');
+  setAppScreen('onboarding', { focus: false });
   syncControls();
   syncHotkeyPillForStatus(dom.statusEl?.textContent || '', 'neutral');
 

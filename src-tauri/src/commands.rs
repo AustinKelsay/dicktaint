@@ -506,14 +506,15 @@ pub(crate) async fn delete_dictation_model(
 }
 
 #[tauri::command]
-pub(crate) async fn start_native_dictation(app: tauri::AppHandle) -> Result<(), String> {
+pub(crate) async fn start_native_dictation(app: tauri::AppHandle, request_id: Option<String>) -> Result<(), String> {
+    let reservation = dictation_session::reserve_start(&app)?;
     let handle = app.clone();
-    let result = tauri::async_runtime::spawn_blocking(move || dictation_session::start(&handle))
+    let result = tauri::async_runtime::spawn_blocking(move || dictation_session::start_reserved(&handle, reservation, None, request_id))
         .await.map_err(|e| format!("Could not start dictation: {e}"))?;
     match result {
         Ok(_) => Ok(()),
         Err(error) => {
-            if error.trim() != "Dictation already running." {
+            if !dictation_session::is_benign_session_error(&error) {
                 emit_dictation_state(&app, "error", Some(error.clone()), None, None);
             }
             Err(error)

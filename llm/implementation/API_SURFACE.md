@@ -63,7 +63,7 @@ Tauri commands:
 - `open_whisper_setup_page() -> Result<(), String>`
 - `install_dictation_model(model: String) -> Result<DictationModelSelection, String>`
 - `delete_dictation_model(model: String) -> Result<DictationModelDeletion, String>`
-- `start_native_dictation() -> Result<(), String>`
+- `start_native_dictation(request_id?: String) -> Result<(), String>`
 - `stop_native_dictation() -> Result<String, String>`
 - `cancel_native_dictation() -> Result<(), String>`
 
@@ -80,7 +80,8 @@ Command payload notes:
 Event channels:
 
 - frontend local fallback only: `dictation:hotkey-triggered` payload `{ pressed }`
-- backend to frontend (and overlay): `dictation:state-changed` payload `{ state, error?, transcript?, session_id? }`
+- backend to frontend (and overlay): `dictation:state-changed` payload `{ state, error?, transcript?, session_id?, request_id? }`
+  - optional `request_id` on listening correlates a frontend start with its event; existing native callers may omit it
   - dictation session `state` vocabulary: `idle` | `listening` | `processing` | `error`
 - backend to frontend/overlay: `dictation:audio-level` payload `{ session_id, peak_abs, rms, level, bars }` (always present; matches `DictationAudioLevelPayload`)
 - backend/frontend to overlay: `dicktaint://pill-status` payload `{ message, state, visible }`
