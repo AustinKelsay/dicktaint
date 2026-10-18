@@ -2,7 +2,7 @@
 
 ## Product
 
-**dicktaint** is a local-first, private dictation app. Primary runtime is **macOS desktop** via Tauri + bundled `whisper-cli`. Web mode is a static SPA fallback (browser SpeechRecognition). iPhone/iOS is an explicit future track, not the current cleanup focus.
+**Murmur** is a local-first, private dictation app: “Private dictation for your Mac.” Primary runtime is **macOS desktop** via Tauri + bundled `whisper-cli`. Web mode is a static SPA fallback (browser SpeechRecognition). iPhone/iOS is an explicit future track, not the current cleanup focus. The display brand is separate from the legacy `com.plebdev.dicktaint` identity, `.dicktaint` storage, internal executable, events, and environment variables; see [ADR 0002](docs/adr/0002-murmur-continuity.md).
 
 ## Glossary
 

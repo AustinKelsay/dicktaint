@@ -35,7 +35,7 @@ fn tray_force_stop_enabled(status: BackendDictationStatus) -> bool {
 
 fn tray_title_for_backend_status(status: BackendDictationStatus) -> &'static str {
     match status {
-        BackendDictationStatus::Idle => "DT",
+        BackendDictationStatus::Idle => "Murmur",
         BackendDictationStatus::Listening => "REC",
         BackendDictationStatus::Processing => "...",
         BackendDictationStatus::Error => "ERR",
@@ -128,7 +128,7 @@ fn ensure_macos_tray_runtime(
     .enabled(false)
     .build(app)
     .map_err(|e| format!("Failed to build tray status item: {e}"))?;
-    let open_item = MenuItemBuilder::with_id(TRAY_MENU_OPEN_ID, "Open dicktaint")
+    let open_item = MenuItemBuilder::with_id(TRAY_MENU_OPEN_ID, "Open Murmur")
         .build(app)
         .map_err(|e| format!("Failed to build tray open item: {e}"))?;
     let toggle_item =
@@ -141,7 +141,7 @@ fn ensure_macos_tray_runtime(
             .enabled(tray_force_stop_enabled(status))
             .build(app)
             .map_err(|e| format!("Failed to build tray force-stop item: {e}"))?;
-    let quit_item = MenuItemBuilder::with_id(TRAY_MENU_QUIT_ID, "Quit dicktaint")
+    let quit_item = MenuItemBuilder::with_id(TRAY_MENU_QUIT_ID, "Quit Murmur")
         .build(app)
         .map_err(|e| format!("Failed to build tray quit item: {e}"))?;
 
@@ -159,7 +159,7 @@ fn ensure_macos_tray_runtime(
         .menu(&menu)
         .title(tray_title_for_backend_status(status))
         .show_menu_on_left_click(true)
-        .tooltip("dicktaint")
+        .tooltip("Murmur")
         .on_menu_event(|app, event: tauri::menu::MenuEvent| {
             handle_tray_menu_event(app, event.id());
         })
@@ -210,7 +210,7 @@ pub(super) fn sync_macos_tray(app: &tauri::AppHandle, status: BackendDictationSt
         .map_err(|e| format!("Failed to update tray force-stop enabled state: {e}"))?;
     runtime
         .tray_icon
-        .set_tooltip(Some(format!("dicktaint: {}", status.tray_label())))
+        .set_tooltip(Some(format!("Murmur: {}", status.tray_label())))
         .map_err(|e| format!("Failed to update tray tooltip: {e}"))?;
     runtime
         .tray_icon
