@@ -105,6 +105,8 @@ impl BackendDictationStatus {
 }
 
 pub(crate) struct DictationState {
+    pub(crate) start_gate: Mutex<()>,
+    pub(crate) hold_intent: crate::dictation_session::HoldIntent,
     pub(crate) active_recording: Mutex<Option<ActiveRecording>>,
     pub(crate) backend_status: Mutex<BackendDictationStatus>,
     pub(crate) last_error_message: Mutex<Option<String>>,
@@ -114,6 +116,8 @@ pub(crate) struct DictationState {
 impl Default for DictationState {
     fn default() -> Self {
         Self {
+            start_gate: Mutex::new(()),
+            hold_intent: crate::dictation_session::HoldIntent::default(),
             active_recording: Mutex::new(None),
             backend_status: Mutex::new(BackendDictationStatus::Idle),
             last_error_message: Mutex::new(None),

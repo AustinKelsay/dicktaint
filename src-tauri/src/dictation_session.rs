@@ -8,9 +8,21 @@ use crate::transcribe::transcribe_samples;
 use crate::whisper_cli::{
     detect_whisper_cli_path, ensure_whisper_cli_available, resolve_whisper_cli_path,
 };
-use std::sync::atomic::Ordering;
+use std::sync::atomic::{AtomicU64, Ordering};
 use std::sync::{Arc, Mutex};
 use tauri::Manager;
+
+/// Generation token preserves hold/release intent across asynchronous permission prompts.
+#[derive(Default)]
+pub(crate) struct HoldIntent(AtomicU64);
+impl HoldIntent {
+    pub(crate) fn press(&self) -> u64 {
+        (self.0.fetch_update(Ordering::SeqCst, Ordering::SeqCst, |value| Some((value | 1) + 2)).unwrap() | 1) + 2
+    }
+    pub(crate) fn is_held(&self) -> bool { self.0.load(Ordering::SeqCst) & 1 == 1 }
+    pub(crate) fn release(&self) { self.0.fetch_and(!1, Ordering::SeqCst); }
+    pub(crate) fn is_current(&self, token: u64) -> bool { self.0.load(Ordering::SeqCst) == token }
+}
 
 /// Returns true when `msg` is a benign concurrent start/stop conflict.
 pub(crate) fn is_benign_session_error(msg: &str) -> bool {
@@ -35,11 +47,20 @@ pub(crate) fn is_running(app: &tauri::AppHandle) -> Result<bool, String> {
 
 /// Starts native mic capture and marks the session as listening.
 pub(crate) fn start(app: &tauri::AppHandle) -> Result<u64, String> {
+    start_with_hold(app, None)
+}
+
+pub(crate) fn start_with_hold(app: &tauri::AppHandle, hold: Option<u64>) -> Result<u64, String> {
     let config = app.state::<AppConfig>();
     let model_state = app.state::<LocalModelState>();
     let dictation = app.state::<DictationState>();
 
-    ensure_microphone_access_authorized(app)?;
+    // Refresh holds this same gate while replacing listeners. A pending permission
+    // prompt is therefore protected just like an established recording.
+    let _start_guard = dictation.start_gate.try_lock().map_err(|_| "Dictation already running.".to_string())?;
+    if hold.is_some_and(|token| !dictation.hold_intent.is_current(token)) {
+        return Err("Dictation is not running.".into());
+    }
     resolve_active_model_path(config.inner(), model_state.inner())?;
     let configured_whisper_cli_path = resolve_whisper_cli_path(
         config.whisper_cli_path_override.as_deref(),
@@ -48,11 +69,15 @@ pub(crate) fn start(app: &tauri::AppHandle) -> Result<u64, String> {
     let whisper_cli_path = detect_whisper_cli_path(&configured_whisper_cli_path)
         .unwrap_or(configured_whisper_cli_path);
     ensure_whisper_cli_available(&whisper_cli_path)?;
+    ensure_microphone_access_authorized(app)?;
 
     let mut guard = dictation
         .active_recording
         .lock()
         .map_err(|_| "Failed to lock dictation state".to_string())?;
+    if hold.is_some_and(|token| !dictation.hold_intent.is_current(token)) {
+        return Err("Dictation is not running.".into());
+    }
     if guard.is_some() {
         return Err("Dictation already running.".to_string());
     }
@@ -203,6 +228,18 @@ pub(crate) fn cancel_if_active(app: &tauri::AppHandle) -> Result<(), String> {
 #[cfg(test)]
 mod tests {
     use super::is_benign_session_error;
+
+    #[test]
+    fn released_hold_cannot_start_after_permission_prompt_or_new_press() {
+        let intent = super::HoldIntent::default();
+        let first = intent.press();
+        assert!(intent.is_current(first));
+        intent.release();
+        assert!(!intent.is_current(first));
+        let second = intent.press();
+        assert!(!intent.is_current(first));
+        assert!(intent.is_current(second));
+    }
 
     #[test]
     fn is_benign_session_error_matches_known_conflicts() {

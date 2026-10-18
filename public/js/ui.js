@@ -1,3 +1,4 @@
+import { isNativeSetupReady } from './readiness.js';
 /** Shared UI status, screens, and control sync. */
 import { dom } from './dom-elements.js';
 import { state } from './state.js';
@@ -115,7 +116,7 @@ export function setSetupScreenMode(mode) {
 
 
 export function syncFlowForSetupReadiness() {
-  const setupReady = !isFocusedMacDesktopMode() || state.nativeDictationModelReady;
+  const setupReady = isNativeSetupReady();
   if (!setupReady) {
     setSetupScreenMode('onboarding');
     setAppScreen('onboarding');
@@ -214,14 +215,14 @@ export function refreshSelectedModelMeta() {
 
 export function syncControls() {
   const hasCaptureSupport = isFocusedMacDesktopMode() || (!isNativeDesktopMode() && Boolean(SpeechRecognitionApi));
-  const dictationModelMissing = isFocusedMacDesktopMode() && !state.nativeDictationModelReady;
+  const dictationModelMissing = !isNativeSetupReady();
   const lockControls = state.isInstallingDictationModel
     || state.isDeletingDictationModel
     || state.isSavingInputDevice
     || state.isSavingBackgroundUiSettings;
   const hotkeyDisabled = lockControls || !isNativeDesktopMode();
   const selected = getSelectedDictationModel();
-  const setupReady = !isFocusedMacDesktopMode() || state.nativeDictationModelReady;
+  const setupReady = isNativeSetupReady();
   const selectedAlreadyActive = Boolean(selected?.installed)
     && Boolean(state.currentOnboarding?.selected_model_exists)
     && state.currentOnboarding?.selected_model_id === selected.id;

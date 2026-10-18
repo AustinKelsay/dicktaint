@@ -1,3 +1,4 @@
+import { initPermissionListeners, isNativeSetupReady } from './permissions.js';
 /**
  * DOM and Tauri event wiring for dictation.
  *
@@ -281,7 +282,7 @@ export function initSharedUiListeners() {
 
   if (dom.onboardingContinueBtn) {
     dom.onboardingContinueBtn.addEventListener('click', () => {
-      if (state.setupScreenMode === 'onboarding' && isFocusedMacDesktopMode() && !state.nativeDictationModelReady) {
+      if (state.setupScreenMode === 'onboarding' && !isNativeSetupReady()) {
         setStatus('Complete setup first, then start dictation.', 'neutral');
         return;
       }
@@ -407,6 +408,7 @@ export function initDictation() {
 
   if (isFocusedMacDesktopMode()) {
     initSettingsListeners();
+    initPermissionListeners();
     syncControls();
     return;
   }

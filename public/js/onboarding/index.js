@@ -1,3 +1,4 @@
+import { refreshMacosPermissions } from '../permissions.js';
 /** Onboarding payload hydration and setup flow. */
 import { dom } from '../dom-elements.js';
 import { state } from '../state.js';
@@ -211,6 +212,7 @@ export async function loadDictationOnboarding({ quietStatus = false } = {}) {
       }
     }
 
+    await refreshMacosPermissions();
     syncFlowForSetupReadiness();
     syncControls();
     return onboarding;

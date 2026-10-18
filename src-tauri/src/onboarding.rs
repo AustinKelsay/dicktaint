@@ -89,7 +89,7 @@ pub(crate) fn build_onboarding_payload(
     let whisper_cli_available = detected_whisper_cli_path.is_some();
     let onboarding_required = !selected_model_exists || !whisper_cli_available;
     let focused_field_permission =
-        focused_field_insert_permission_status(focused_field_insert_enabled(&settings), false);
+        focused_field_insert_permission_status(focused_field_insert_enabled(&settings));
     let background_ui_preferences = resolve_background_ui_preferences(&settings);
     let available_input_devices = list_input_devices();
 

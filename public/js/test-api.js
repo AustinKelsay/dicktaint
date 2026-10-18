@@ -1,3 +1,4 @@
+import { refreshMacosPermissions, requestMicrophonePermission, openMacosPermissionSettings, isNativeSetupReady } from './permissions.js';
 /** Test-only hooks exposed when __DICKTAINT_EXPOSE_TEST_API__ is set. */
 import { dom } from './dom-elements.js';
 import { state } from './state.js';
@@ -42,6 +43,7 @@ import { renderDictationHistory } from './history.js';
 /** @returns {Record<string, unknown>} Snapshot of dictation state for tests. */
 export function getDictationTestState() {
   return {
+    macosPermissions: state.macosPermissions,
     currentDraftText: state.currentDraftText,
     dictationHistory: state.dictationHistory.map((entry) => ({ ...entry })),
     liveAudioLevel: state.liveAudioLevel,
@@ -114,6 +116,7 @@ export function resetDictationStateForTests() {
 /** Builds the object assigned to globalThis.__DICKTAINT_TEST_API__. */
 export function createTestApi() {
   return {
+    refreshMacosPermissions, requestMicrophonePermission, openMacosPermissionSettings, isNativeSetupReady,
     appendTranscriptChunk,
     runDictationHistoryAction,
     queueNativeStartAfterCurrentStop,

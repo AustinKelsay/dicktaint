@@ -21,7 +21,6 @@ use objc2::runtime::AnyObject;
 use objc2::rc::Retained;
 use objc2_app_kit::{NSEvent, NSEventMask, NSEventModifierFlags, NSEventType};
 use std::ffi::c_void;
-use std::process::Command;
 use std::ptr::NonNull;
 use std::sync::atomic::{AtomicBool, AtomicPtr, Ordering};
 use std::sync::{Arc, Mutex};
@@ -29,13 +28,9 @@ use std::time::{Duration, Instant};
 
 use super::dispatch_backend_hotkey_action;
 
-/// Minimum gap between Input Monitoring Settings reopen attempts.
-const INPUT_MONITORING_SETTINGS_REOPEN_COOLDOWN: Duration = Duration::from_secs(60);
 /// Minimum gap between focus/reopen Fn tap rebuilds.
 const FN_LISTENER_ACTIVATION_REFRESH_COOLDOWN: Duration = Duration::from_secs(5);
-static LAST_INPUT_MONITORING_SETTINGS_OPEN: Mutex<Option<Instant>> = Mutex::new(None);
 static LAST_FN_LISTENER_ACTIVATION_REFRESH: Mutex<Option<Instant>> = Mutex::new(None);
-static DID_REQUEST_LISTEN_EVENT_ACCESS: AtomicBool = AtomicBool::new(false);
 
 #[link(name = "CoreGraphics", kind = "framework")]
 extern "C" {
@@ -51,7 +46,6 @@ extern "C" {
     fn CGEventGetFlags(event: CGEventRef) -> CGEventFlags;
     fn CGEventGetIntegerValueField(event: CGEventRef, field: u32) -> i64;
     fn CGPreflightListenEventAccess() -> bool;
-    fn CGRequestListenEventAccess() -> bool;
 }
 
 #[link(name = "CoreFoundation", kind = "framework")]
@@ -106,60 +100,16 @@ fn macos_tap_disable_should_dispatch_stop(was_fn_down: bool) -> bool {
 
 /// Error shown when neither Accessibility nor Input Monitoring can arm global Fn.
 fn macos_fn_input_monitoring_error() -> String {
-    "Global Fn listener unavailable. Allow Accessibility (and Input Monitoring if listed) for dicktaint in System Settings > Privacy & Security, then relaunch dicktaint.".to_string()
-}
-
-/// Opens System Settings → Input Monitoring (rate-limited).
-fn open_input_monitoring_settings_debounced() {
-    let mut last_open = match LAST_INPUT_MONITORING_SETTINGS_OPEN.lock() {
-        Ok(guard) => guard,
-        Err(poisoned) => poisoned.into_inner(),
-    };
-    if let Some(opened_at) = *last_open {
-        if opened_at.elapsed() < INPUT_MONITORING_SETTINGS_REOPEN_COOLDOWN {
-            return;
-        }
-    }
-
-    let status = Command::new("open")
-        .arg("x-apple.systempreferences:com.apple.preference.security?Privacy_ListenEvent")
-        .status();
-    match status {
-        Ok(code) if code.success() => {
-            *last_open = Some(Instant::now());
-        }
-        Ok(code) => {
-            log::warn!("Failed to open Input Monitoring settings (exit {code}).");
-        }
-        Err(error) => {
-            log::warn!("Failed to open Input Monitoring settings: {error}");
-        }
-    }
-}
-
-/**
- * Requests Input Monitoring once per process and opens Settings when denied.
- *
- * The first request matters after ad-hoc re-signs: macOS keys the toggle to the
- * new CDHash, and without a request the app may never appear under Input
- * Monitoring even though `CGEventTapCreate` still returns a non-null (silent) tap.
- */
-fn prompt_macos_listen_event_access_if_needed() {
-    let already_requested = DID_REQUEST_LISTEN_EVENT_ACCESS.swap(true, Ordering::SeqCst);
-    let granted = unsafe {
-        if !already_requested || !CGPreflightListenEventAccess() {
-            let _ = CGRequestListenEventAccess();
-        }
-        CGPreflightListenEventAccess()
-    };
-    if !granted {
-        open_input_monitoring_settings_debounced();
-    }
+    "Background Fn is unavailable. Allow Accessibility or Input Monitoring in System Settings > Privacy & Security, then return to Murmur and recheck. Button dictation remains available.".to_string()
 }
 
 /// Whether activation should rebuild an existing Fn tap.
-pub(crate) fn should_refresh_fn_listener_after_activation(registered_trigger_is_fn: bool) -> bool {
-    registered_trigger_is_fn
+pub(crate) fn should_refresh_fn_listener_after_activation(
+    registered_trigger_is_fn: bool,
+    start_pending: bool,
+    recording_active: bool,
+) -> bool {
+    registered_trigger_is_fn && !start_pending && !recording_active
 }
 
 /// Returns whether the activation-refresh cooldown has elapsed.
@@ -318,7 +268,7 @@ fn install_nsevent_fn_monitor(
     let monitor = NSEvent::addGlobalMonitorForEventsMatchingMask_handler(mask, &block);
     if monitor.is_none() {
         log::warn!(
-            "NSEvent.addGlobalMonitorForEvents returned nil; grant Accessibility for dicktaint."
+            "NSEvent.addGlobalMonitorForEvents returned nil; grant Accessibility for Murmur."
         );
     }
     (monitor, Some(block))
@@ -326,8 +276,6 @@ fn install_nsevent_fn_monitor(
 
 impl MacFnGlobalListener {
     pub(super) fn new(app: &tauri::AppHandle) -> Result<Self, String> {
-        prompt_macos_listen_event_access_if_needed();
-
         let callback_ctx = Arc::new(MacFnCallbackContext {
             app: app.clone(),
             enabled: AtomicBool::new(false),
@@ -339,13 +287,9 @@ impl MacFnGlobalListener {
         let (nsevent_monitor, nsevent_block) =
             install_nsevent_fn_monitor(Arc::clone(&callback_ctx));
 
-        let mut tap = create_macos_fn_event_tap(callback_ctx_raw as *mut c_void);
-        if tap.is_null() {
-            unsafe {
-                let _ = CGRequestListenEventAccess();
-            }
-            tap = create_macos_fn_event_tap(callback_ctx_raw as *mut c_void);
-        }
+        let mut tap = if unsafe { CGPreflightListenEventAccess() } {
+            create_macos_fn_event_tap(callback_ctx_raw as *mut c_void)
+        } else { std::ptr::null_mut() };
 
         let mut source = std::ptr::null_mut();
         if !tap.is_null() {
@@ -513,8 +457,15 @@ mod tests {
     }
 
     #[test]
+    fn permission_refresh_preserves_pending_and_active_recordings() {
+        assert!(!super::should_refresh_fn_listener_after_activation(true, true, false));
+        assert!(!super::should_refresh_fn_listener_after_activation(true, false, true));
+        assert!(super::should_refresh_fn_listener_after_activation(true, false, false));
+    }
+
+    #[test]
     fn activation_refresh_only_when_fn_is_registered() {
-        assert!(super::should_refresh_fn_listener_after_activation(true));
-        assert!(!super::should_refresh_fn_listener_after_activation(false));
+        assert!(super::should_refresh_fn_listener_after_activation(true, false, false));
+        assert!(!super::should_refresh_fn_listener_after_activation(false, false, false));
     }
 }
