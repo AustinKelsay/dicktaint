@@ -13,7 +13,9 @@
 | Sidecar | Bundled `whisper-cli-*` binary under `src-tauri/binaries/` |
 | Overlay pill | Native transparent macOS window showing dictation state |
 | Focused-field insert | Paste finished transcript into the frontmost text field (Accessibility) |
-| Onboarding | Local model + whisper-cli readiness flow before dictation |
+| Required readiness | Local speech engine, selected model, and microphone access needed for capture |
+| Optional Mac access | Accessibility for insertion/background Fn, or Input Monitoring as an alternative background Fn path; never required for button dictation |
+| Onboarding | Guided required-readiness flow before first native dictation |
 | Staging tip | Integration branch for PRs; should track shipping `main` closely |
 
 ## Module map
@@ -23,6 +25,7 @@
 | `whisper_cli` | Path resolution, probes, sidecar candidates |
 | `models` | Catalog, download, settings persistence, path resolution |
 | `onboarding` | Assembles readiness DTO from models/hotkey/insert/audio/whisper |
+| `permissions` | Observational macOS permission facts and explicit permission/settings actions |
 | `audio` | Mic capture, resample, sanitize, WAV write |
 | `transcribe` | Whisper invoke + transcript normalization |
 | `hotkey_overlay` | Facade: dictation UI coordination + re-exports |
@@ -35,6 +38,10 @@
 | `insert` | Clipboard / Accessibility insertion |
 | `commands` | Tauri command handlers |
 | Frontend `public/js/*` | Onboarding, settings, native session, history, web speech |
+
+## Upgrade continuity
+
+Murmur is the visible product name. The bundle identifier, internal executable, settings/model storage, existing settings schema, event namespace, and legacy environment variables keep their original names deliberately. See [ADR 0002](docs/adr/0002-murmur-continuity.md) before changing them. Permission observation must stay quiet and must not replace the Fn listener during capture or a pending start.
 
 ## Canonical docs
 
