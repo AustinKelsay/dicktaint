@@ -137,6 +137,21 @@ fn write_text_to_general_pasteboard(
     Ok((pasteboard, snapshot))
 }
 
+/// Explicit Copy keeps the chosen text on the clipboard without requiring AX trust.
+#[cfg(target_os = "macos")]
+pub(crate) fn copy_text_to_clipboard_impl(text: &str) -> Result<(), String> {
+    // Wait for any insertion's conditional restore before taking clipboard ownership.
+    let _guard = FOCUSED_FIELD_INSERT_LOCK
+        .lock()
+        .unwrap_or_else(|poisoned| poisoned.into_inner());
+    write_text_to_general_pasteboard(text).map(|_| ())
+}
+
+#[cfg(not(target_os = "macos"))]
+pub(crate) fn copy_text_to_clipboard_impl(_text: &str) -> Result<(), String> {
+    Err("Native clipboard copying is currently supported on macOS desktop only.".to_string())
+}
+
 #[cfg(target_os = "macos")]
 fn restore_general_pasteboard(
     pasteboard: &NSPasteboard,

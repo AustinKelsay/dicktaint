@@ -1536,3 +1536,35 @@ it('keeps a fresh setup on the required steps after model download until explici
   document.getElementById('onboardingContinue').click();
   expect(document.body.dataset.screen).toBe('dictation');
 });
+
+describe('native Mac clipboard copy', () => {
+  it('copies a history entry through the native clipboard without browser clipboard support or Accessibility', async () => {
+    const { invokeCalls } = createMockDom({ nativeDesktop: true, invokeHandler(command) {
+      if (command === 'copy_text_to_clipboard') return null;
+    } });
+    delete navigator.clipboard;
+    const api = await loadAppWithTestApi();
+    api.resetState();
+    api.appendTranscriptChunk('Keep this dictation.', { source: 'native' });
+    const entry = api.getState().dictationHistory[0];
+    expect(await api.runDictationHistoryAction('copy', entry.id)).toBe(true);
+    expect(invokeCalls.filter(call => call.command === 'copy_text_to_clipboard').map(call => call.args))
+      .toEqual([{ text: 'Keep this dictation.' }]);
+    expect(api.getState().focusedFieldInsertPermissionGranted).toBe(false);
+    expect(document.getElementById('status').textContent).toBe('Copied dictation entry to clipboard.');
+  });
+  it('reports native clipboard failure without claiming success or falling back to another clipboard writer', async () => {
+    const { clipboardCalls } = createMockDom({ nativeDesktop: true, invokeHandler(command) {
+      if (command === 'copy_text_to_clipboard') throw new Error('Pasteboard write rejected');
+    } });
+    const api = await loadAppWithTestApi();
+    api.resetState();
+    api.appendTranscriptChunk('Keep the failed copy available.', { source: 'native' });
+    const entry = api.getState().dictationHistory[0];
+    expect(await api.runDictationHistoryAction('copy', entry.id)).toBe(false);
+    expect(clipboardCalls).toEqual([]);
+    expect(document.getElementById('status').textContent).toBe('Could not copy dictation entry: Pasteboard write rejected');
+    expect(api.getState().dictationHistory[0].text).toBe('Keep the failed copy available.');
+  });
+
+});
