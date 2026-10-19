@@ -2,6 +2,8 @@
 
 ## Unreleased
 
+- fixed Stop/Clear arriving before a delayed native start: canceled requests release their own capture, and later frontend starts wait for cleanup and Clear acknowledgement
+
 - renamed the visible product to **Murmur** and rebuilt the Mac workspace around Dictation, editable text, recent dictations, and progressively disclosed Settings
 - added guided required setup for the local speech engine, model, and microphone, with independent optional Accessibility and Input Monitoring guidance
 - made permission observation quiet and added explicit request, System Settings, and safe recheck actions; background Fn refresh preserves active capture

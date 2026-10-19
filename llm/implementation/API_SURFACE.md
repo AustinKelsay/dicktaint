@@ -65,9 +65,11 @@ Tauri commands:
 - `delete_dictation_model(model: String) -> Result<DictationModelDeletion, String>`
 - `start_native_dictation(request_id?: String) -> Result<(), String>`
 - `stop_native_dictation() -> Result<String, String>`
-- `cancel_native_dictation() -> Result<(), String>`
+- `cancel_native_dictation(request_id?: String) -> Result<(), String>`
 
 Command payload notes:
+
+- `cancel_native_dictation` without `request_id` cancels the current pending or active capture. With `request_id` (invoke key `requestId`), it cancels only a pending or active capture owned by that frontend start; other frontend requests and native Fn captures are preserved. See [`NATIVE_DESKTOP_DICTATION.md`](NATIVE_DESKTOP_DICTATION.md) for cleanup ordering.
 
 - `MacosPermissions` contains `supported`, independent `microphone`, `accessibility`, and `input_monitoring` facts; microphone vocabulary is `not_determined | authorized | denied | restricted | unavailable`
 - `PermissionPane` is the allowlisted `microphone | accessibility | input_monitoring`; arbitrary URLs are rejected

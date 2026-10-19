@@ -20,12 +20,15 @@ In scope:
 
 Out of scope:
 
-- frontend UI branch logic
+- frontend presentation beyond native capture ownership and cancellation ordering
 
 ## Source Anchors
 
 - `src-tauri/src/main.rs` (thin entry)
 - `src-tauri/src/` domain modules (`audio`, `commands`, `hotkey_overlay`, `insert`, `models`, `state`, `transcribe`, `whisper_cli`)
+- `src-tauri/src/dictation_session.rs`
+- `public/js/native-dictation.js`
+- `public/js/events.js`
 - `src-tauri/Cargo.toml`
 
 ## Contract
@@ -44,7 +47,9 @@ Pipeline sequence:
 
 Stop and Clear invalidate pending startup as well as established capture. Button, focused Fn, backend hold/toggle, and tray actions share the reservation boundary. Cancellation never waits for microphone authorization or the startup gate on the main thread. Device opening occurs outside the short intent lock; a canceled device-open result is stopped and joined instead of being published. Publication, pending cancellation, and the listening event are ordered by the intent lock. Background UI synchronization is dispatched to the main thread without waiting under that lock.
 
-The optional frontend `request_id` correlates listening, cancellation idle events, and command completion with a specific start action. Stop/Clear invalidate that request locally; late completions cannot revive a canceled session or replace a newer one. Session IDs still govern transcript/event ordering. Duplicate focused/global Fn starts join the existing capture rather than canceling it as stale recovery.
+The optional frontend `request_id` correlates listening, cancellation idle events, and command completion with a specific start action. Stop/Clear invalidate that request locally. If a canceled start reaches the backend only after the initial cancellation found no reservation, its successful completion triggers a second cancellation scoped to that request. This cleanup releases its capture while preserving any unrelated frontend request or native Fn capture. A delayed start may briefly open the device before its completion is acknowledged and cleanup runs; local invalidation does not forcibly interrupt an IPC delivery or device initializer.
+
+Subsequent frontend starts wait for the preceding start and its scoped cleanup. Clear also adds its unscoped cancellation acknowledgement to that ordering barrier, so a delayed Clear cannot cancel the next local recording. Late completions and events cannot revive a canceled UI session or replace a newer one. Session IDs still govern transcript/event ordering. A rejected duplicate focused/global Fn start joins the existing capture and does not run stale-success cleanup.
 
 Capture details:
 

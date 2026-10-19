@@ -66,6 +66,12 @@ Call the app **Murmur**. Give it a calm, compact Mac workspace, a guided setup t
 - Renaming the GitHub repository, deleting existing app data, changing user privacy settings automatically, or replacing the installed working app.
 - Public release/tag/notarization claims without the required signing credentials and release gates.
 
+## Authorized local deployment follow-up
+
+After the initial isolated validation, the user explicitly requested rebuilding, renaming, and redeploying on this machine. That follow-up authorizes replacing the installed app after a backup, retaining the stable identity and byte-identical settings/models, and recovering stale macOS trust through the normal System Settings UI when necessary. It supersedes the initial installed-app replacement exclusion above; it does not authorize deleting existing data or bypassing macOS permission controls. The local deployment and its verification limits are recorded in [`../murmur-verification.md`](../murmur-verification.md).
+
+The cancellation follow-up must also release a frontend start delivered after Stop/Clear found no native reservation. Cleanup is scoped to the canceled request, and later local starts wait for both cleanup and Clear acknowledgement. Native Fn ownership remains independent.
+
 ## Further Notes
 
 Baseline: 42 Bun tests and 44 Rust tests pass. Canonical current implementation docs remain under `llm/`. The continuity/surface audits established that microphone state was missing, Fn status reads rebuilt listeners, Accessibility and Input Monitoring were conflated, and history is temporary session memory. Durable decisions live in ADR 0002 and this spec. The throwaway readiness prototype is captured on branch `prototype/murmur-readiness` at `09fd14b`; its walkthrough verdict is recorded on issue #35. Pipeline: design/domain modeling, spec, dependency-linked tracer-bullet tickets, worktree implementation with TDD, integration, dual-axis review, complete build verification.
