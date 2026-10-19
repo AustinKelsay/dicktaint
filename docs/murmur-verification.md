@@ -13,7 +13,7 @@ Verified on 2026-10-18 on an Apple Silicon Mac. Initial integration: `ba6dbd59e0
 
 | Check | Baseline | Final result |
 | --- | --- | --- |
-| `bun test` | 42 tests | 71 passed, 0 failed, 264 assertions |
+| `bun test` | 42 tests | 72 passed, 0 failed, 277 assertions |
 | `bun run test:rust` | 44 tests | 56 passed, 0 failed |
 | `bun run docs:verify` | Passing | Passing |
 | `git diff --check` | Clean | Clean |
@@ -90,3 +90,12 @@ The initial rebuild artifacts remain under the ignored `src-tauri/target/release
 Initial isolated validation left the user's privacy grants unchanged. The current installed-app permission result is recorded in the local deployment section above. Automated fixture transcription uses the installed engine and existing selected Small English model. The agent did not manually exercise live recording, physical Fn delivery, or focused-field paste into another app. The installed Copy action was exercised while preserving the current draft, with the original plain-text clipboard restored afterward. Those paths retain regression coverage; a complete physical-device walkthrough remains a release gate.
 
 There is no valid Developer ID signing identity available in this environment. The delivered local artifact is ad hoc signed; it is not notarized or stapled and is not a public distribution build. Developer ID signing, notarization/stapling, clean-machine Gatekeeper checks, and the physical walkthrough remain in the [release runbook](../llm/workflow/RELEASE_AND_DISTRIBUTION.md) and [smoke checklist](../llm/workflow/SMOKE_TESTS.md). No release tag was created. The corrected app is installed locally. Public distribution remains a separate gate.
+
+
+## v0.4.0 release preparation — 2026-10-19
+
+The owner authorized merging, releasing, and installing the polished rebuild. Source versions and the Cargo lockfile now agree on `0.4.0`; bundle fixtures read the current package version instead of pinning the preceding release. The remaining model-readiness and platform-specific copy findings were corrected.
+
+`bun run test:all` passed with 72 frontend tests / 277 assertions and 56 Rust tests. Documentation and whitespace checks passed. Tauri produced the Apple Silicon `Murmur.app` and DMG. The app was explicitly ad hoc signed with the audio-input entitlement and passed `bun run verify:bundle`; its bundled Whisper engine also transcribed the JFK fixture. This is local verification, not notarization evidence.
+
+Production signing/notarization secret names are configured in the GitHub `prod` environment. The preceding `v0.3.12` CI run failed with Apple's HTTP 403 missing/expired agreement response. The new release will retry that service; the workflow now additionally requires the shared bundle verifier, a Developer ID Application signature, a valid stapled ticket, and Gatekeeper acceptance before collecting distributable assets. Earlier remaining-gate statements above describe the preceding local build and remain historical evidence.

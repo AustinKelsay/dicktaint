@@ -18,7 +18,7 @@ export function describeSpeechError(errorCode) {
   }
 
   if (errorCode === 'audio-capture') {
-    return 'no microphone was found. Check System Settings > Sound > Input, then try again.';
+    return 'no microphone was found. Check your microphone connection and selected input, then try again.';
   }
 
   if (errorCode === 'no-speech') {

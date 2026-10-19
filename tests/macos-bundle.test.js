@@ -2,6 +2,7 @@ import { afterEach, expect, test } from "bun:test";
 import { cpSync, mkdirSync, mkdtempSync, rmSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
+import { version } from "../package.json";
 
 const temporaryDirectories = [];
 afterEach(() => {
@@ -18,8 +19,8 @@ function fixture() {
     CFBundleExecutable: "dicktaint",
     CFBundleName: "Murmur",
     CFBundleDisplayName: "Murmur",
-    CFBundleVersion: "0.3.12",
-    CFBundleShortVersionString: "0.3.12",
+    CFBundleVersion: version,
+    CFBundleShortVersionString: version,
     CFBundlePackageType: "APPL",
     NSMicrophoneUsageDescription: "Murmur uses your microphone to transcribe your voice on your Mac.",
   };
@@ -62,7 +63,7 @@ test.skipIf(process.platform !== "darwin")("a bundle with a stale version fails 
   Bun.spawnSync(["/usr/libexec/PlistBuddy", "-c", "Set :CFBundleShortVersionString 0.3.11", join(app, "Contents", "Info.plist")]);
   const result = verify(app);
   expect(result.status).toBe(1);
-  expect(result.output).toContain("CFBundleShortVersionString must be '0.3.12'");
+  expect(result.output).toContain(`CFBundleShortVersionString must be '${version}'`);
 });
 
 test.skipIf(process.platform !== "darwin")("a missing sidecar fails even when the main executable is valid", () => {

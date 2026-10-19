@@ -18,9 +18,8 @@ describe('release config', () => {
     expect(tauriConfig.mainBinaryName).toBe('dicktaint');
     expect(packageConfig.name).toBe('dicktaint');
     expect(cargoManifest).toMatch(/^name = "dicktaint"$/m);
-    expect(tauriConfig.version).toBe('0.3.12');
-    expect(packageConfig.version).toBe('0.3.12');
-    expect(cargoManifest).toMatch(/^version = "0\.3\.12"$/m);
+    expect(tauriConfig.version).toBe(packageConfig.version);
+    expect(cargoManifest.match(/^version = "([^"]+)"$/m)?.[1]).toBe(packageConfig.version);
     expect(tauriConfig.bundle.externalBin).toEqual(['binaries/whisper-cli']);
     expect(tauriConfig.bundle.macOS.entitlements).toBe('dicktaint.entitlements');
   });

@@ -59,7 +59,7 @@ bun run verify:bundle /path/to/Murmur.app
 
 The default artifact is the `Murmur.app` under the release bundle directory. Verification reads the app without launching, installing, changing privacy settings, or touching model/settings data. The sidecar check establishes a native executable for this Mac; use the fixture smoke to establish actual transcription. An ad hoc signature is accepted for local verification and clearly reports `LOCAL ONLY`. An unsigned or linker-only artifact without bound audio-input entitlement fails. Any signature mode still requires the distribution gates below; the verifier does not establish notarization or identity continuity. Rebuilds can invalidate a local signature, so sign and verify again after the final build.
 
-Keep source version `0.3.12` until a deliberate release bump. Display name is Murmur; bundle id `com.plebdev.dicktaint`, internal executable `dicktaint`, storage, settings schema, and event names remain stable. Preserve the established signing identity for a distributable upgrade: bundle-id continuity alone does not preserve macOS TCC trust.
+The Murmur rebuild releases as `0.4.0`. Display name is Murmur; bundle id `com.plebdev.dicktaint`, internal executable `dicktaint`, storage, settings schema, and event names remain stable. Preserve the established signing identity for a distributable upgrade: bundle-id continuity alone does not preserve macOS TCC trust.
 
 Tag-and-publish path:
 

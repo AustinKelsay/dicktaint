@@ -123,6 +123,16 @@ jobs:
             printf '%s\n' "$entitlements" | grep -q '<key>com.apple.security.device.audio-input</key>'
           done
 
+      - name: Validate distribution bundle
+        run: |
+          set -euo pipefail
+          for app in src-tauri/target/release/bundle/macos/*.app; do
+            bun run verify:bundle "$app"
+            codesign -dv --verbose=4 "$app" 2>&1 | grep -q '^Authority=Developer ID Application:'
+            xcrun stapler validate "$app"
+            spctl --assess --type execute --verbose=2 "$app"
+          done
+
       - name: Collect artifacts
         run: |
           set -euo pipefail

@@ -2,6 +2,8 @@
 
 ## Unreleased
 
+## v0.4.0 - 2026-10-19
+
 - simplified the interface: first-run setup shows only the three required checks and the model; Settings hides checks that already pass; removed repeated labels, taglines, the duplicate workspace Settings button, the mic-level label, the draft footer, the model details line, and the Use default shortcut button; Mac access lists only the optional permissions with one Recheck; one footer line carries status and privacy
 - polished the Murmur interface and copy end to end: one voice across setup, settings, the workspace, status messages, menu bar, and macOS permission guidance; shortcuts are named the way the keyboard labels them; browser mode reports a real status; dead overlay stylesheet removed
 - fixed Stop/Clear arriving before a delayed native start: canceled requests release their own capture, and later frontend starts wait for cleanup and Clear acknowledgement
@@ -9,7 +11,7 @@
 - renamed the visible product to **Murmur** and rebuilt the Mac workspace around Dictation, editable text, recent dictations, and progressively disclosed Settings
 - added guided required setup for the local speech engine, model, and microphone, with independent optional Accessibility and Input Monitoring guidance
 - made permission observation quiet and added explicit request, System Settings, and safe recheck actions; background Fn refresh preserves active capture
-- retained the original bundle identifier, executable, settings/model storage, event contracts, and version `0.3.12` for upgrade continuity; signing identity still matters to macOS trust
+- retained the original bundle identifier, executable, settings/model storage, and event contracts for upgrade continuity; signing identity still matters to macOS trust
 - removed external font dependencies and clarified that browser speech recognition may use a remote service
 - added `bun run verify:bundle` for repeatable local metadata, version, native binary, microphone entitlement, and strict signature checks; local ad hoc signing does not establish public release readiness
 

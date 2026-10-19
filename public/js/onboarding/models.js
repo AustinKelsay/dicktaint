@@ -3,6 +3,7 @@ import { dom } from '../dom-elements.js';
 import { state } from '../state.js';
 import { getTauriInvoke, isFocusedMacDesktopMode, getErrorMessage } from '../platform.js';
 import { modelDisplayName } from '../labels.js';
+import { isNativeSetupReady } from '../readiness.js';
 import { describeMachineLabel } from '../settings/hotkey-logic.js';
 import {
   setUiMode, setStatus, syncControls,
@@ -134,7 +135,8 @@ export async function installSelectedDictationModel() {
     const selectedAfter = (onboarding.models || []).find((item) => item.id === onboarding.selected_model_id);
     setDictationModelBusy('');
     setUiMode('idle');
-    setStatus(`${modelDisplayName(selectedAfter) || modelDisplayName(selected)} is ready. You can dictate now.`, 'ok');
+    const nextStep = isNativeSetupReady() ? 'You can dictate now.' : 'Allow microphone access to start dictating.';
+    setStatus(`${modelDisplayName(selectedAfter) || modelDisplayName(selected)} is ready. ${nextStep}`, 'ok');
 
   } catch (error) {
     const details = getErrorMessage(error);

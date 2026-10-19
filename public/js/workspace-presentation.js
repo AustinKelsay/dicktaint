@@ -47,9 +47,9 @@ export function renderWorkspaceReadiness() {
     dom.requiredMicrophoneAction.textContent = state.isRequestingMicrophone ? 'Waiting for macOS…' : action === 'allow' ? 'Allow microphone' : action === 'settings' ? 'Open System Settings' : 'Recheck';
     dom.requiredMicrophoneAction.disabled = state.isRequestingMicrophone;
   }
-  if (dom.runtimeNote) dom.runtimeNote.textContent = native
+  if (dom.runtimeNote) dom.runtimeNote.textContent = isFocusedMacDesktopMode()
     ? 'Transcribed on this Mac. Your voice never leaves it.'
-    : 'Browser mode: speech recognition may use an online service.';
+    : native ? 'Native dictation is available on macOS.' : 'Browser mode: speech recognition may use an online service.';
   if (dom.captureGuidance) dom.captureGuidance.textContent = captureGuidance(native, active);
   if (dom.sessionStopBtn) {
     dom.sessionStopBtn.hidden = !state.isDictating && !state.isStartingDictation;
