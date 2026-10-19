@@ -12,18 +12,15 @@ import { initPermissionListeners, isNativeSetupReady } from './permissions.js';
 import { dom } from './dom-elements.js';
 import { state } from './state.js';
 import {
-  DEFAULT_DICTATION_HOTKEY,
   DICTATION_HOTKEY_EVENT, DICTATION_STATE_EVENT, DICTATION_AUDIO_LEVEL_EVENT, SpeechRecognitionApi
 } from './constants.js';
 import { isNativeDesktopMode, isFocusedMacDesktopMode, shouldUseTauriCommands, getTauriInvoke, getErrorMessage } from './platform.js';
 import {
   setUiMode, setStatus, setAppScreen, setSetupScreenMode, syncControls, setDictationState,
-  setDictationModelStatus, refreshSelectedModelMeta
+  setDictationModelStatus
 } from './ui.js';
-import { modelDisplayName } from './labels.js';
 import { renderDictationHistory, runDictationHistoryAction, copyTextToClipboard } from './history.js';
 import { setDraftTranscriptText, appendTranscriptChunk } from './transcript.js';
-import { syncDraftMeta } from './draft-transcript.js';
 import { clearRestartTimer, scheduleRecognitionRestart } from './speech-runtime.js';
 import {
   applyNativeFnHoldState, handleNativeHoldKeydown, handleNativeHoldKeyup,
@@ -45,7 +42,7 @@ import {
 import { savePreferredInputDevice } from './settings/input-device.js';
 import {
   installSelectedDictationModel, deleteSelectedDictationModel, openWhisperSetupPage,
-  getSelectedDictationModel, updateModelActionLabels
+  updateModelActionLabels
 } from './onboarding/models.js';
 import { loadDictationOnboarding } from './onboarding/index.js';
 import {
@@ -127,9 +124,9 @@ export function initSettingsListeners() {
       state.pendingDictationHotkey = String(event?.currentTarget?.value || '').trim();
       state.isCapturingDictationHotkey = false;
       if (!state.pendingDictationHotkey) {
-        setDictationHotkeyStatus(`Leave this empty and save to turn the shortcut off. Default: ${humanizeHotkeyLabel(state.defaultDictationHotkey || DEFAULT_DICTATION_HOTKEY)}.`, 'neutral');
+        setDictationHotkeyStatus('Pick a preset or record keys.', 'neutral');
       } else {
-        setDictationHotkeyStatus(`Ready to save: ${state.pendingDictationHotkey}. Click Save shortcut.`, 'neutral');
+        setDictationHotkeyStatus(`Ready to save: ${humanizeHotkeyLabel(state.pendingDictationHotkey)}.`, 'neutral');
       }
       syncControls();
     });
@@ -146,7 +143,7 @@ export function initSettingsListeners() {
       if (dom.dictationHotkeyInputEl) {
         dom.dictationHotkeyInputEl.value = state.pendingDictationHotkey;
       }
-      setDictationHotkeyStatus(`Ready to save: ${humanizeHotkeyLabel(state.pendingDictationHotkey)}. Click Save shortcut.`, 'neutral');
+      setDictationHotkeyStatus(`Ready to save: ${humanizeHotkeyLabel(state.pendingDictationHotkey)}.`, 'neutral');
       syncControls();
     });
   }
@@ -154,12 +151,6 @@ export function initSettingsListeners() {
     dom.saveDictationHotkeyBtn.addEventListener('click', async () => {
       const nextValue = String(dom.dictationHotkeyInputEl?.value || state.pendingDictationHotkey || '').trim();
       await saveDictationHotkey(nextValue);
-    });
-  }
-  if (dom.resetDictationHotkeyBtn) {
-    dom.resetDictationHotkeyBtn.addEventListener('click', async () => {
-      state.pendingDictationHotkey = state.defaultDictationHotkey || DEFAULT_DICTATION_HOTKEY;
-      await saveDictationHotkey(state.pendingDictationHotkey);
     });
   }
   if (dom.clearDictationHotkeyBtn) {
@@ -197,25 +188,7 @@ export function initSettingsListeners() {
   }
   if (dom.dictationModelSelect) {
     dom.dictationModelSelect.addEventListener('change', () => {
-      const selected = getSelectedDictationModel();
-      if (!selected) {
-        setDictationModelStatus('Choose a model.', 'neutral');
-      } else if (selected.installed) {
-        const isCurrent = Boolean(state.currentOnboarding?.selected_model_exists)
-          && state.currentOnboarding?.selected_model_id === selected.id;
-        setDictationModelStatus(
-          isCurrent
-            ? `${modelDisplayName(selected)} is in use.`
-            : `${modelDisplayName(selected)} is downloaded. Click Use this model to switch.`,
-          'neutral'
-        );
-      } else {
-        setDictationModelStatus(
-          `${modelDisplayName(selected)} isn’t downloaded yet. Click Download and use.`,
-          'neutral'
-        );
-      }
-      refreshSelectedModelMeta();
+      setDictationModelStatus('', 'neutral');
       updateModelActionLabels();
       syncControls();
     });
@@ -283,9 +256,7 @@ export function initSharedUiListeners() {
 
   dom.transcriptInput.addEventListener('input', () => {
     state.currentDraftText = dom.transcriptInput.value;
-    syncDraftMeta();
   });
-  syncDraftMeta();
 
   dom.dictationNav?.addEventListener('click', () => setAppScreen('dictation'));
   dom.settingsNav?.addEventListener('click', () => {
@@ -298,17 +269,7 @@ export function initSharedUiListeners() {
   if (dom.onboardingContinueBtn) {
     dom.onboardingContinueBtn.addEventListener('click', () => {
       setAppScreen('dictation');
-      setStatus(state.setupScreenMode === 'settings'
-        ? 'Back to your draft.'
-        : (isNativeSetupReady() ? 'Ready to dictate.' : 'Your draft is ready. Finish setup any time in Settings.'), isNativeSetupReady() ? 'ok' : 'neutral');
-    });
-  }
-
-  if (dom.openSettingsBtn) {
-    dom.openSettingsBtn.addEventListener('click', () => {
-      setSetupScreenMode('settings');
-      setAppScreen('onboarding');
-      setStatus('Settings. Your draft is waiting on the Dictation tab.', 'neutral');
+      setStatus(isNativeSetupReady() ? 'Ready to dictate.' : 'Your draft is ready. Finish setup any time in Settings.', isNativeSetupReady() ? 'ok' : 'neutral');
     });
   }
 }
@@ -346,7 +307,6 @@ export function initWebSpeechDictation() {
     }
 
     dom.transcriptInput.value = `${state.currentDraftText} ${interimTranscript}`.trim();
-    syncDraftMeta();
   };
 
   state.recognition.onerror = (event) => {

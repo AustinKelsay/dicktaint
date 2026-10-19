@@ -45,14 +45,8 @@ export function renderInputDeviceOptions(devices, selectedDeviceName) {
   }
 
   dom.dictationInputSelectEl.value = selectedDeviceName || '';
-
-  if (selectedDeviceName) {
-    setDictationInputStatus(`Always using ${selectedDeviceName}.`, 'ok');
-  } else if (systemDefault) {
-    setDictationInputStatus(`Following the system default. Right now that’s ${systemDefault}.`, 'neutral');
-  } else {
-    setDictationInputStatus('Using the system default microphone.', 'neutral');
-  }
+  // The selected option already names the device; the status line is kept for save errors.
+  setDictationInputStatus('', 'neutral');
 }
 
 /**

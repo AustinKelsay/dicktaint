@@ -9,7 +9,6 @@ import {
   getTauriEventApi, isNativeDesktopMode, isFocusedMacDesktopMode
 } from './platform.js';
 import { updateDictationWaveform, resetDictationWaveform } from './waveform.js';
-import { modelDisplayName } from './labels.js';
 import { syncBackgroundUiControls } from './settings/background-ui-controls.js';
 import { instructionHotkeyLabel, isHoldToTalkHotkey, idlePillMessage } from './settings/hotkey-logic.js';
 import { syncDictationHotkeyUi } from './settings/hotkey-ui.js';
@@ -159,31 +158,6 @@ export function syncSetupHealthPills() {
 }
 
 
-export function refreshSelectedModelMeta() {
-  if (!dom.dictationModelMetaEl) return;
-  const selected = getSelectedDictationModel();
-  if (!selected) {
-    dom.dictationModelMetaEl.textContent = 'Choose a model to see its size, speed, and quality.';
-    return;
-  }
-
-  const sizeValue = Number(selected.approx_size_gb);
-  const sizeLabel = Number.isFinite(sizeValue)
-    ? `${sizeValue.toFixed(2).replace(/\.00$/u, '')} GB`
-    : 'size unknown';
-
-  const parts = [
-    modelDisplayName(selected),
-    sizeLabel,
-    selected.speed_note || 'speed unknown',
-    selected.quality_note || 'quality unknown',
-    selected.installed ? 'downloaded' : 'not downloaded',
-    selected.recommended ? 'recommended for this Mac' : (selected.likely_runnable ? 'fits this Mac' : 'may be slow on this Mac')
-  ];
-  dom.dictationModelMetaEl.textContent = parts.join(' · ');
-}
-
-
 export function syncControls() {
   const hasCaptureSupport = isFocusedMacDesktopMode() || (!isNativeDesktopMode() && Boolean(SpeechRecognitionApi));
   const dictationModelMissing = !isNativeSetupReady();
@@ -201,7 +175,6 @@ export function syncControls() {
   const normalizedSaved = String(state.savedDictationHotkey || '').trim();
   const pendingMatchesSaved = normalizedPending === normalizedSaved;
   const hasPendingHotkey = Boolean(normalizedPending);
-  const savedIsDefault = Boolean(normalizedSaved && state.defaultDictationHotkey && normalizedSaved === state.defaultDictationHotkey);
 
   if (dom.startDictationBtn) {
     dom.startDictationBtn.disabled = (
@@ -250,21 +223,13 @@ export function syncControls() {
   }
   if (dom.onboardingContinueBtn) {
     dom.onboardingContinueBtn.disabled = false;
-    dom.onboardingContinueBtn.textContent = state.setupScreenMode === 'settings'
-      ? 'Done'
-      : (setupReady ? 'Start dictating' : 'Skip to the draft');
-  }
-  if (dom.openSettingsBtn) {
-    dom.openSettingsBtn.disabled = false;
+    dom.onboardingContinueBtn.textContent = setupReady ? 'Start dictating' : 'Skip to the draft';
   }
   if (dom.recordDictationHotkeyBtn) {
     dom.recordDictationHotkeyBtn.disabled = hotkeyDisabled;
   }
   if (dom.saveDictationHotkeyBtn) {
     dom.saveDictationHotkeyBtn.disabled = hotkeyDisabled || !hasPendingHotkey || pendingMatchesSaved || state.isCapturingDictationHotkey;
-  }
-  if (dom.resetDictationHotkeyBtn) {
-    dom.resetDictationHotkeyBtn.disabled = hotkeyDisabled || savedIsDefault;
   }
   if (dom.clearDictationHotkeyBtn) {
     dom.clearDictationHotkeyBtn.disabled = hotkeyDisabled || !normalizedSaved;

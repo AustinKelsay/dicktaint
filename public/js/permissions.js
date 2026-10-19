@@ -90,7 +90,7 @@ export function initPermissionListeners() {
     else if (target.dataset.permissionAction === 'settings') void openMacosPermissionSettings(target.dataset.permission);
     else void refreshMacosPermissions({ rearm: true });
   };
-  dom.dictationPermissionListEl?.addEventListener('click', permissionAction);
+  dom.dictationPermissionsCardEl?.addEventListener('click', permissionAction);
   dom.requiredSetup?.addEventListener('click', permissionAction);
   const recheck = () => { if (document.visibilityState !== 'hidden') void refreshMacosPermissions({ rearm: true }); };
   window.addEventListener('focus', recheck);

@@ -22,18 +22,14 @@
           </button>
         </nav>
         <div class="sidebar-foot">
-          <button id="sessionStop" class="primary session-stop" type="button" hidden>Stop dictation</button>
-          <p>A little voice.<br />A lot less typing.</p>
-          <span class="sidebar-note"><span class="privacy-dot" aria-hidden="true"></span><span id="sidebarNote">Private by design</span></span>
+          <button id="sessionStop" class="primary session-stop" type="button" hidden>Stop &amp; transcribe</button>
         </div>
       </aside>
       <main class="main-content">
         <section id="onboardingScreen" class="screen setup-screen" aria-labelledby="setupTitle">
           <header class="page-header">
-            <p id="setupModeChip" class="eyebrow">WELCOME TO MURMUR</p>
             <h1 id="setupTitle" tabindex="-1">Make room for your voice.</h1>
-            <p id="setupLead" class="lead">Three quick checks, then you’re ready to speak. Your Mac does all the transcribing.</p>
-            <p id="setupSteps" class="hint">No account. No subscription. Just you and your words.</p>
+            <p id="setupLead" class="lead">Three quick checks and you’re ready.</p>
           </header>
           <div id="requiredSetup" class="required-setup">
             <div class="section-top"><h2>Ready to dictate?</h2><button id="retryWhisperCheck" class="ghost quiet" type="button">Recheck</button></div>
@@ -45,15 +41,12 @@
           </div>
           <div id="dictationModelCard" hidden>
             <section class="settings-section model-section" aria-labelledby="modelTitle">
-              <div class="section-heading"><h2 id="modelTitle">Speech model</h2><span class="tag">ON DEVICE</span></div>
-              <p id="modelRecommendation" class="hint">Download one model, then dictate offline.</p>
-              <label for="dictationModelSelect">Model</label>
-              <div class="inline-actions"><select id="dictationModelSelect"></select><button id="installDictationModel" class="secondary" type="button">Download and use</button></div>
-              <p id="dictationModelMeta" class="hint model-meta"></p>
+              <h2 id="modelTitle">Speech model</h2>
+              <div class="inline-actions"><select id="dictationModelSelect" aria-labelledby="modelTitle"></select><button id="installDictationModel" class="secondary" type="button">Download and use</button></div>
               <p id="dictationModelBusy" class="hint busy-note" role="status" hidden></p>
               <p id="dictationModelStatus" class="hint" role="status"></p>
               <details class="minor-details">
-                <summary><span class="summary-title">Storage and details</span></summary>
+                <summary>Storage and details</summary>
                 <div class="details-content">
                   <button id="deleteDictationModel" class="ghost danger-btn" type="button">Remove downloaded model</button>
                   <p id="dictationDeviceProfile" class="hint" hidden></p>
@@ -63,56 +56,54 @@
                 </div>
               </details>
             </section>
-            <details id="dictationInputCard" class="settings-section">
-              <summary><span class="summary-title">Microphone</span><span class="summary-detail">Which mic to listen with</span></summary>
-              <div class="details-content"><label for="dictationInputSelect">Microphone</label><select id="dictationInputSelect"></select><p id="dictationInputStatus" class="hint">Using the system default microphone.</p></div>
-            </details>
-            <details id="dictationHotkeyCard" class="settings-section" hidden>
-              <summary><span class="summary-title">Keyboard shortcut</span><span class="summary-detail">Hold Fn to talk, or pick a key combination</span></summary>
-              <div class="details-content">
-                <p class="hint">Choose a preset or record your own, then save. With Fn, hold to talk and release to transcribe.</p>
-                <div id="dictationHotkeyPresets" class="preset-row" aria-label="Shortcut presets"></div>
-                <div class="hotkey-editor"><label for="dictationHotkeyInput">Shortcut</label><input id="dictationHotkeyInput" type="text" spellcheck="false" autocapitalize="off" autocomplete="off" placeholder="Fn" /><button id="recordDictationHotkey" class="secondary" type="button">Record keys</button></div>
-                <div class="dictation-setup-actions"><button id="saveDictationHotkey" class="secondary" type="button">Save shortcut</button><button id="resetDictationHotkey" class="ghost" type="button">Use default</button><button id="clearDictationHotkey" class="ghost danger-btn" type="button">Turn off</button></div>
-                <p id="dictationHotkeyStatus" class="hint"></p>
-              </div>
-            </details>
-            <details id="focusedFieldInsertCard" class="settings-section" hidden>
-              <summary><span class="summary-title">Type in other apps</span><span class="summary-detail">Optional</span></summary>
-              <div class="details-content">
-                <p class="hint">Paste each finished dictation into the text field you’re using in another app. Your words also stay in Murmur’s draft.</p>
-                <label class="toggle-row" for="focusedFieldInsertToggle"><input id="focusedFieldInsertToggle" type="checkbox" /><span>Paste finished dictations where I’m typing</span></label>
-                <p id="focusedFieldInsertStatus" class="hint"></p>
-              </div>
-            </details>
-            <details id="backgroundUiCard" class="settings-section" hidden>
-              <summary><span class="summary-title">Menu bar and floating pill</span><span class="summary-detail">How Murmur behaves in the background</span></summary>
-              <div class="details-content preference-grid">
-                <label for="menuBarModeSelect">Menu bar icon</label><select id="menuBarModeSelect"><option value="always">Always show</option><option value="background-only">Only while the window is hidden</option><option value="off">Off</option></select>
-                <label for="closeActionSelect">Closing the window</label><select id="closeActionSelect"><option value="hide-to-tray">Keep running in the menu bar</option><option value="quit">Quit Murmur</option></select>
-                <label for="pillVisibilityModeSelect">Floating pill</label><select id="pillVisibilityModeSelect"><option value="off">Off</option><option value="active-only">While dictating</option><option value="always">Always show</option></select>
-                <p id="backgroundUiStatus" class="hint"></p>
-              </div>
-            </details>
-            <details id="dictationPermissionsCard" class="settings-section" hidden>
-              <summary><span class="summary-title">Mac access</span><span class="summary-detail">Optional permissions and recovery</span></summary>
-              <div class="details-content">
-                <p id="dictationPermissionSummary" class="hint"></p>
-                <ul id="dictationPermissionList" class="permission-list"></ul>
-                <p class="hint">Changed something in System Settings? Recheck, then quit and reopen Murmur if it still doesn’t show. On a managed Mac, an administrator may need to allow access. The draft and Copy always work.</p>
-                <details class="minor-details">
-                  <summary><span class="summary-title">Allowed, but still not working?</span></summary>
-                  <p class="hint">Recheck, then quit and reopen Murmur. If that doesn’t help, remove Murmur from the affected privacy pane in System Settings and add it back, choosing the exact app you open now. Older builds may be listed under the previous name, dicktaint. Then try the shortcut in another app again.</p>
-                </details>
-              </div>
-            </details>
+            <div id="optionalSettings">
+              <details id="dictationInputCard" class="settings-section">
+                <summary>Microphone</summary>
+                <div class="details-content"><select id="dictationInputSelect" aria-label="Microphone"></select><p id="dictationInputStatus" class="hint"></p></div>
+              </details>
+              <details id="dictationHotkeyCard" class="settings-section" hidden>
+                <summary>Keyboard shortcut</summary>
+                <div class="details-content">
+                  <div id="dictationHotkeyPresets" class="preset-row" aria-label="Shortcut presets"></div>
+                  <div class="hotkey-editor"><input id="dictationHotkeyInput" type="text" aria-label="Shortcut" spellcheck="false" autocapitalize="off" autocomplete="off" placeholder="Fn" /><button id="recordDictationHotkey" class="secondary" type="button">Record keys</button></div>
+                  <div class="dictation-setup-actions"><button id="saveDictationHotkey" class="secondary" type="button">Save shortcut</button><button id="clearDictationHotkey" class="ghost danger-btn" type="button">Turn off</button></div>
+                  <p id="dictationHotkeyStatus" class="hint"></p>
+                </div>
+              </details>
+              <details id="focusedFieldInsertCard" class="settings-section" hidden>
+                <summary>Type in other apps</summary>
+                <div class="details-content">
+                  <label class="toggle-row" for="focusedFieldInsertToggle"><input id="focusedFieldInsertToggle" type="checkbox" /><span>Paste finished dictations where I’m typing</span></label>
+                  <p id="focusedFieldInsertStatus" class="hint"></p>
+                </div>
+              </details>
+              <details id="backgroundUiCard" class="settings-section" hidden>
+                <summary>Menu bar and floating pill</summary>
+                <div class="details-content preference-grid">
+                  <label for="menuBarModeSelect">Menu bar icon</label><select id="menuBarModeSelect"><option value="always">Always show</option><option value="background-only">Only while the window is hidden</option><option value="off">Off</option></select>
+                  <label for="closeActionSelect">Closing the window</label><select id="closeActionSelect"><option value="hide-to-tray">Keep running in the menu bar</option><option value="quit">Quit Murmur</option></select>
+                  <label for="pillVisibilityModeSelect">Floating pill</label><select id="pillVisibilityModeSelect"><option value="off">Off</option><option value="active-only">While dictating</option><option value="always">Always show</option></select>
+                  <p id="backgroundUiStatus" class="hint"></p>
+                </div>
+              </details>
+              <details id="dictationPermissionsCard" class="settings-section" hidden>
+                <summary>Mac access</summary>
+                <div class="details-content">
+                  <ul id="dictationPermissionList" class="permission-list"></ul>
+                  <button id="recheckPermissions" class="ghost quiet" type="button" data-permission-action="recheck">Recheck</button>
+                  <details class="minor-details">
+                    <summary>Allowed, but still not working?</summary>
+                    <p class="hint">Quit and reopen Murmur. If that doesn’t help, remove Murmur from that privacy pane in System Settings and add it back, choosing the app you open now. Older builds may be listed as dicktaint. On a managed Mac, an administrator may need to allow access.</p>
+                  </details>
+                </div>
+              </details>
+            </div>
           </div>
           <div class="screen-actions"><button id="onboardingContinue" class="primary" type="button">Skip to the draft</button></div>
         </section>
         <section id="dictationScreen" class="screen dictation-screen" aria-labelledby="workspaceTitle" hidden>
-          <header class="page-header workspace-header">
-            <div><p class="eyebrow">A LITTLE SPACE FOR YOUR WORDS</p><h1 id="workspaceTitle" tabindex="-1">Ready when you are.</h1></div>
-            <button id="openSettings" class="ghost quiet" type="button"><svg viewBox="0 0 24 24" fill="none" aria-hidden="true"><path d="M4 7h16M4 17h16"/><circle cx="9" cy="7" r="3"/><circle cx="15" cy="17" r="3"/></svg>Settings</button>
+          <header class="page-header">
+            <h1 id="workspaceTitle" tabindex="-1">Ready when you are.</h1>
           </header>
           <div class="capture-panel">
             <div class="capture-main">
@@ -120,25 +111,21 @@
                 <button id="startDictation" class="primary" type="button"><svg viewBox="0 0 24 24" fill="none" aria-hidden="true"><rect x="9" y="3" width="6" height="12" rx="3"/><path d="M5 11a7 7 0 0 0 14 0M12 18v3m-3 0h6"/></svg>Start dictation</button>
                 <button id="stopDictation" class="primary stop-button" type="button" disabled><span class="stop-square" aria-hidden="true"></span>Stop &amp; transcribe</button>
               </div>
-              <div class="audio-feedback">
-                <div id="dictationWaveform" class="waveform" data-audio-state="idle" aria-hidden="true"><span id="dictationWaveBar0" class="waveform-bar" style="--i:0"></span><span id="dictationWaveBar1" class="waveform-bar" style="--i:1"></span><span id="dictationWaveBar2" class="waveform-bar" style="--i:2"></span><span id="dictationWaveBar3" class="waveform-bar" style="--i:3"></span><span id="dictationWaveBar4" class="waveform-bar" style="--i:4"></span><span id="dictationWaveBar5" class="waveform-bar" style="--i:5"></span><span id="dictationWaveBar6" class="waveform-bar" style="--i:6"></span><span id="dictationWaveBar7" class="waveform-bar" style="--i:7"></span><span id="dictationWaveBar8" class="waveform-bar" style="--i:8"></span><span id="dictationWaveBar9" class="waveform-bar" style="--i:9"></span><span id="dictationWaveBar10" class="waveform-bar" style="--i:10"></span><span id="dictationWaveBar11" class="waveform-bar" style="--i:11"></span></div>
-                <p id="dictationWaveformLevel" class="waveform-level">Mic level: waiting…</p>
-              </div>
+              <div id="dictationWaveform" class="waveform" data-audio-state="idle" aria-hidden="true"><span id="dictationWaveBar0" class="waveform-bar" style="--i:0"></span><span id="dictationWaveBar1" class="waveform-bar" style="--i:1"></span><span id="dictationWaveBar2" class="waveform-bar" style="--i:2"></span><span id="dictationWaveBar3" class="waveform-bar" style="--i:3"></span><span id="dictationWaveBar4" class="waveform-bar" style="--i:4"></span><span id="dictationWaveBar5" class="waveform-bar" style="--i:5"></span><span id="dictationWaveBar6" class="waveform-bar" style="--i:6"></span><span id="dictationWaveBar7" class="waveform-bar" style="--i:7"></span><span id="dictationWaveBar8" class="waveform-bar" style="--i:8"></span><span id="dictationWaveBar9" class="waveform-bar" style="--i:9"></span><span id="dictationWaveBar10" class="waveform-bar" style="--i:10"></span><span id="dictationWaveBar11" class="waveform-bar" style="--i:11"></span></div>
             </div>
-            <p id="captureGuidance" class="hint capture-guidance">Start with the button, or hold Fn and release to transcribe.</p>
+            <p id="captureGuidance" class="hint capture-guidance"></p>
           </div>
           <section class="draft-panel" aria-label="Your draft">
             <div class="draft-toolbar"><label for="transcriptInput">Your draft</label><div class="draft-actions"><button id="clearTranscript" class="ghost quiet" type="button">Clear</button><button id="copyTranscript" class="secondary quiet" type="button">Copy</button></div></div>
-            <textarea id="transcriptInput" rows="9" placeholder="Say what’s on your mind.&#10;Your words will appear here." spellcheck="true"></textarea>
-            <div class="draft-foot"><span id="draftMeta">Empty draft</span><span>Edit freely, then copy it anywhere.</span></div>
+            <textarea id="transcriptInput" rows="9" placeholder="Your words will appear here." spellcheck="true"></textarea>
           </section>
           <section id="dictationHistorySection" class="dictation-history" aria-labelledby="recentTitle">
-            <div class="dictation-history-head"><div><h2 id="recentTitle">Recent dictations</h2><p class="hint">This session only · the last 10</p></div><button id="clearDictationHistory" class="ghost quiet" type="button">Clear</button></div>
-            <p id="dictationHistoryEmpty" class="history-empty">Each finished dictation lands here, so nothing gets lost while you edit.</p>
+            <div class="dictation-history-head"><h2 id="recentTitle">Recent dictations</h2><button id="clearDictationHistory" class="ghost quiet" type="button" hidden>Clear</button></div>
+            <p id="dictationHistoryEmpty" class="history-empty">Finished dictations from this session appear here.</p>
             <ul id="dictationHistoryList" class="dictation-history-list"></ul>
           </section>
         </section>
-        <footer class="app-footer"><p id="runtimeNote" class="runtime-note">Transcribed on this Mac. Your voice never leaves it.</p><div class="status-bar" role="status" aria-live="polite"><span class="status-dot" aria-hidden="true"></span><p id="status">Checking your setup…</p></div></footer>
+        <footer class="app-footer"><div class="status-bar" role="status" aria-live="polite"><span class="status-dot" aria-hidden="true"></span><p id="status">Checking your setup…</p></div><p id="runtimeNote" class="runtime-note">Transcribed on this Mac. Your voice never leaves it.</p></footer>
       </main>
     </div>
     <script type="module" src="/app.js"></script>

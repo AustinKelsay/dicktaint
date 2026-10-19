@@ -55,17 +55,6 @@ export function formatHistoryTimestamp(value) {
 }
 
 /**
- * @param {string} source
- * @returns {string}
- */
-export function historySourceLabel(source) {
-  const value = String(source || '').trim().toLowerCase();
-  if (value === 'web') return 'Browser';
-  if (value === 'native' || value === 'native-event') return 'This Mac';
-  return 'Dictation';
-}
-
-/**
  * @param {string} text
  * @returns {Promise<boolean>}
  */
@@ -149,7 +138,7 @@ export function renderDictationHistory() {
   dom.dictationHistorySection.hidden = false;
   const hasHistory = state.dictationHistory.length > 0;
   dom.dictationHistoryEmptyEl.hidden = hasHistory;
-  if (dom.clearDictationHistoryBtn) dom.clearDictationHistoryBtn.disabled = !hasHistory;
+  if (dom.clearDictationHistoryBtn) dom.clearDictationHistoryBtn.hidden = !hasHistory;
 
   dom.dictationHistoryListEl.innerHTML = '';
   if (!hasHistory) return;
@@ -164,9 +153,7 @@ export function renderDictationHistory() {
 
     const meta = document.createElement('p');
     meta.className = 'dictation-history-meta';
-    const stamp = formatHistoryTimestamp(entry.createdAt);
-    const source = historySourceLabel(entry.source);
-    meta.textContent = stamp ? `${stamp} · ${source}` : source;
+    meta.textContent = formatHistoryTimestamp(entry.createdAt);
 
     const actions = document.createElement('div');
     actions.className = 'dictation-history-actions';

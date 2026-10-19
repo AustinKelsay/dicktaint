@@ -94,7 +94,7 @@ export function applyDictationHotkeyPayload(payload, { preservePending = false }
 
 /** @returns {string} */
 function shortcutOffStatus() {
-  return `Shortcut off. Use the button to dictate, or pick a shortcut above. Default: ${humanizeHotkeyLabel(state.defaultDictationHotkey)}.`;
+  return 'Shortcut off. Pick one above, or use the Start button.';
 }
 
 /**
@@ -209,7 +209,7 @@ export function maybeCaptureDictationHotkeyEvent(event) {
 
   state.pendingDictationHotkey = parsed.display;
   state.isCapturingDictationHotkey = false;
-  setDictationHotkeyStatus(`Ready to save: ${humanizeHotkeyLabel(parsed.display)}. Click Save shortcut.`, 'neutral');
+  setDictationHotkeyStatus(`Ready to save: ${humanizeHotkeyLabel(parsed.display)}.`, 'neutral');
   syncControls();
   return true;
 }

@@ -6,7 +6,7 @@ import { modelDisplayName } from '../labels.js';
 import { describeMachineLabel } from '../settings/hotkey-logic.js';
 import {
   setUiMode, setStatus, syncControls,
-  setDictationModelStatus, setDictationModelBusy, refreshSelectedModelMeta
+  setDictationModelStatus, setDictationModelBusy
 } from '../ui.js';
 import { refreshDictationOnboarding } from './refresh.js';
 import {
@@ -65,7 +65,6 @@ export function renderDictationModelOptions(models, selectedModelId) {
   if (!dom.dictationModelSelect.options.length) {
     dom.dictationModelSelect.value = '';
     updateModelActionLabels();
-    refreshSelectedModelMeta();
     return;
   }
 
@@ -73,7 +72,6 @@ export function renderDictationModelOptions(models, selectedModelId) {
   if (hasSelectedModel) {
     dom.dictationModelSelect.value = selectedModelId;
     updateModelActionLabels();
-    refreshSelectedModelMeta();
     return;
   }
 
@@ -81,7 +79,6 @@ export function renderDictationModelOptions(models, selectedModelId) {
   const best = safeModels.find((model) => model.recommended || model.likely_runnable) || safeModels[0];
   dom.dictationModelSelect.value = installed?.id || best?.id || '';
   updateModelActionLabels();
-  refreshSelectedModelMeta();
 }
 
 /** Downloads or switches the selected dictation model. */
@@ -110,16 +107,13 @@ export async function installSelectedDictationModel() {
     const isAlreadyInstalled = Boolean(selected.installed);
     if (isAlreadyInstalled) {
       setDictationModelBusy(`Switching to ${modelDisplayName(selected)}…`);
-      setDictationModelStatus(`Switching to ${modelDisplayName(selected)}…`, 'neutral');
+      setDictationModelStatus('', 'neutral');
       setStatus(`Switching to ${modelDisplayName(selected)}…`, 'working');
     } else {
       const sizeValue = Number(selected.approx_size_gb);
       const sizeLabel = Number.isFinite(sizeValue) ? `about ${sizeValue} GB` : 'size unknown';
-      setDictationModelBusy(`Downloading ${modelDisplayName(selected)} (${sizeLabel}). Keep Murmur open…`);
-      setDictationModelStatus(
-        `Downloading ${modelDisplayName(selected)} (${sizeLabel}). This happens once. Keep Murmur open until it finishes…`,
-        'neutral'
-      );
+      setDictationModelBusy(`Downloading ${modelDisplayName(selected)} (${sizeLabel}). This happens once. Keep Murmur open…`);
+      setDictationModelStatus('', 'neutral');
       setStatus(`Downloading ${modelDisplayName(selected)}…`, 'working');
     }
 
@@ -206,7 +200,7 @@ export async function deleteSelectedDictationModel() {
     syncControls();
     setUiMode('loading');
     setDictationModelBusy(`Removing ${modelDisplayName(selected)}…`);
-    setDictationModelStatus(`Removing ${modelDisplayName(selected)}…`, 'neutral');
+    setDictationModelStatus('', 'neutral');
     setStatus(`Removing ${modelDisplayName(selected)}…`, 'working');
 
     await tauriInvoke('delete_dictation_model', { model: selected.id });

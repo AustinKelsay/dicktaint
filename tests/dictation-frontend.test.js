@@ -126,22 +126,18 @@ function createMockDom({ nativeDesktop = false, onboardingPayload = null, invoke
     'requiredMicrophoneAction',
     'sessionStop',
     'requiredSetup',
+    'optionalSettings',
     'setupTechnicalDetails',
-    'modelRecommendation',
     'workspaceTitle',
     'onboardingScreen',
     'dictationScreen',
     'onboardingContinue',
-    'openSettings',
-    'setupModeChip',
     'setupTitle',
     'setupLead',
-    'setupSteps',
     'startDictation',
     'stopDictation',
     'clearTranscript',
     'dictationWaveform',
-    'dictationWaveformLevel',
     'dictationWaveBar0',
     'dictationWaveBar1',
     'dictationWaveBar2',
@@ -170,12 +166,10 @@ function createMockDom({ nativeDesktop = false, onboardingPayload = null, invoke
     'dictationModelStatus',
     'dictationModelBusy',
     'dictationDeviceProfile',
-    'dictationModelMeta',
     'dictationHotkeyCard',
     'dictationHotkeyInput',
     'recordDictationHotkey',
     'saveDictationHotkey',
-    'resetDictationHotkey',
     'clearDictationHotkey',
     'dictationHotkeyStatus',
     'dictationHotkeyPresets',
@@ -188,7 +182,6 @@ function createMockDom({ nativeDesktop = false, onboardingPayload = null, invoke
     'pillVisibilityModeSelect',
     'backgroundUiStatus',
     'dictationPermissionsCard',
-    'dictationPermissionSummary',
     'dictationPermissionList',
     'quickDictationFab'
   ];
@@ -747,7 +740,6 @@ describe('dictation frontend hotkey polish', () => {
     expect(state.liveAudioLevel).toBe(0.52);
     expect(state.waveformAudioState).toBe('ready');
     expect(state.liveAudioBars[11]).toBe(1);
-    expect(document.getElementById('dictationWaveformLevel').textContent).toBe('Mic level: good');
     expect(document.getElementById('dictationWaveBar11').style.getPropertyValue('--bar-level')).toBe('1.000');
   });
 });
@@ -1380,7 +1372,8 @@ describe('Mac permission setup actions', () => {
     await api.refreshMacosPermissions();
     expect(api.getState().macosPermissions).toBeNull();
     expect(api.isNativeSetupReady()).toBe(false);
-    expect(document.getElementById('dictationPermissionList').children[0].textContent).toContain('unknown');
+    expect(document.getElementById('microphoneHealth').textContent).toContain('not checked');
+    expect(document.getElementById('dictationPermissionList').children[0].textContent).toContain('Accessibility · unknown');
     fail = false;
     await api.refreshMacosPermissions();
     expect(api.isNativeSetupReady()).toBe(true);
@@ -1395,7 +1388,7 @@ describe('Mac permission setup actions', () => {
     api.resetState();
     await api.refreshMacosPermissions();
     api.setDraftTranscriptText('Keep these words.');
-    document.getElementById('openSettings').click();
+    document.getElementById('settingsNav').click();
     api.setNativeFlags({ isStartingDictation: true });
     microphone = 'denied';
     window.dispatchEvent({ type: 'focus' });
@@ -1421,17 +1414,18 @@ describe('Mac permission setup actions', () => {
     const api = await loadAppWithTestApi();
     api.resetState();
     await api.refreshMacosPermissions();
-    let rows = document.getElementById('dictationPermissionList').children;
-    expect(rows[0].textContent).toContain('access denied');
-    expect(rows[2].textContent).toContain('not granted');
+    expect(document.getElementById('microphoneHealth').textContent).toContain('access denied');
+    expect(document.getElementById('requiredMicrophoneAction').textContent).toBe('Open System Settings');
+    const rows = document.getElementById('dictationPermissionList').children;
+    expect(rows.map(row => row.textContent).join(' ')).toContain('Accessibility · allowed');
+    expect(rows.map(row => row.textContent).join(' ')).not.toContain('Input Monitoring · allowed');
     await api.openMacosPermissionSettings('microphone');
     expect(invokeCalls.filter(call => call.command === 'open_macos_permission_settings').map(call => call.args)).toEqual([{ permission: 'microphone' }]);
     expect(api.isNativeSetupReady()).toBe(false);
     microphone = 'restricted';
     await api.refreshMacosPermissions();
-    rows = document.getElementById('dictationPermissionList').children;
-    expect(rows[0].textContent).toContain('device administrator');
-    expect(rows[0].children[0].textContent).toBe('Recheck permissions');
+    expect(document.getElementById('microphoneHealth').textContent).toContain('restricted');
+    expect(document.getElementById('requiredMicrophoneAction').textContent).toBe('Recheck');
   });
 
 });
@@ -1465,6 +1459,32 @@ describe('Murmur workspace navigation', () => {
     document.getElementById('dictationNav').click();
     expect(document.body.dataset.screen).toBe('dictation');
   });
+
+  it('shows only the required checks on first run and every option in Settings', async () => {
+    let microphone = 'not_determined';
+    createMockDom({ nativeDesktop: true, invokeHandler(command) {
+      if (command === 'get_macos_permissions') return { supported: true, microphone, accessibility: false, input_monitoring: false };
+    } });
+    const api = await loadAppWithTestApi();
+    await api.refreshMacosPermissions();
+    expect(document.body.dataset.screen).toBe('onboarding');
+    expect(document.getElementById('requiredSetup').hidden).toBe(false);
+    expect(document.getElementById('optionalSettings').hidden).toBe(true);
+    expect(document.getElementById('onboardingContinue').hidden).toBe(false);
+    document.getElementById('settingsNav').click();
+    expect(document.getElementById('optionalSettings').hidden).toBe(false);
+    expect(document.getElementById('requiredSetup').hidden).toBe(false);
+    expect(document.getElementById('onboardingContinue').hidden).toBe(true);
+    microphone = 'authorized';
+    await api.refreshMacosPermissions();
+    expect(document.getElementById('requiredSetup').hidden).toBe(true);
+    expect(document.body.dataset.screen).toBe('onboarding');
+    const rows = document.getElementById('dictationPermissionList').children;
+    expect(rows.map(row => row.textContent)).toEqual([
+      'Accessibility · not allowed. Pastes into other apps and hears Fn from any app.',
+      'Input Monitoring · not allowed. Hears Fn from any app, without pasting.'
+    ]);
+  });
 });
 
 
@@ -1473,7 +1493,9 @@ describe('Murmur draft actions and browser disclosure', () => {
     const { clipboardCalls } = createMockDom();
     const api = await loadAppWithTestApi();
     api.resetState();
+    expect(document.getElementById('clearDictationHistory').hidden).toBe(true);
     api.appendTranscriptChunk('Original phrase', { source: 'web' });
+    expect(document.getElementById('clearDictationHistory').hidden).toBe(false);
     const draft = document.getElementById('transcriptInput');
     draft.value = 'Edited and ready to send.';
     draft.dispatchEvent({ type: 'input' });
@@ -1577,7 +1599,7 @@ it('describes toggle shortcuts accurately and does not suggest a disabled shortc
   await api.refreshMacosPermissions();
   expect(document.getElementById('captureGuidance').textContent).toContain('press Cmd+Shift+D');
   await api.clearDictationHotkey();
-  expect(document.getElementById('captureGuidance').textContent).toBe('Start with the button. Speak naturally, then stop to transcribe.');
+  expect(document.getElementById('captureGuidance').textContent).toBe('');
   await api.saveDictationHotkey('Fn');
   expect(document.getElementById('captureGuidance').textContent).toContain('hold Fn / Globe and release to transcribe');
 });

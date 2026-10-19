@@ -35,7 +35,6 @@ function hideSetupCards() {
   if (dom.dictationInputCardEl) dom.dictationInputCardEl.hidden = true;
   if (dom.focusedFieldInsertCardEl) dom.focusedFieldInsertCardEl.hidden = true;
   if (dom.backgroundUiCardEl) dom.backgroundUiCardEl.hidden = true;
-  if (dom.openSettingsBtn) dom.openSettingsBtn.hidden = true;
 }
 
 /**
@@ -178,9 +177,6 @@ export async function loadDictationOnboarding({ quietStatus = false } = {}) {
     if (dom.backgroundUiCardEl) {
       dom.backgroundUiCardEl.hidden = false;
     }
-    if (dom.openSettingsBtn) {
-      dom.openSettingsBtn.hidden = false;
-    }
     if (dom.dictationDeviceProfileEl) {
       dom.dictationDeviceProfileEl.textContent = describeDeviceProfile(onboarding.device);
     }
@@ -216,10 +212,8 @@ export async function loadDictationOnboarding({ quietStatus = false } = {}) {
         'ok'
       );
     } else {
-      setDictationModelStatus(
-        'Choose a model, then click Download and use.',
-        'neutral'
-      );
+      // The checklist and status bar already name the next step.
+      setDictationModelStatus('', 'neutral');
       if (!quietStatus && !state.isDictating && !state.isStartingDictation) {
         setStatus('Download a speech model to finish setup.', 'neutral');
       }

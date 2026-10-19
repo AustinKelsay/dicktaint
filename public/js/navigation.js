@@ -19,15 +19,19 @@ export function setAppScreen(screen, { focus = true } = {}) {
   if (focus) (next === 'dictation' ? dom.workspaceTitle : dom.setupTitleEl)?.focus();
 }
 
+/** First run shows only the required checks; Settings shows every option and hides checks that already pass. */
+export function syncSetupSections() {
+  const settings = state.setupScreenMode === 'settings';
+  if (dom.requiredSetup) dom.requiredSetup.hidden = !isNativeDesktopMode() || (settings && isNativeSetupReady());
+  if (dom.optionalSettingsEl) dom.optionalSettingsEl.hidden = !settings;
+  if (dom.setupLeadEl) dom.setupLeadEl.hidden = settings;
+  if (dom.onboardingContinueBtn) dom.onboardingContinueBtn.hidden = settings;
+}
+
 export function setSetupScreenMode(mode) {
   state.setupScreenMode = mode === 'settings' ? 'settings' : 'onboarding';
-  const settings = state.setupScreenMode === 'settings';
-  if (dom.setupModeChipEl) dom.setupModeChipEl.textContent = settings ? 'SETTINGS' : 'WELCOME TO MURMUR';
-  if (dom.setupTitleEl) dom.setupTitleEl.textContent = settings ? 'Settings' : 'Make room for your voice.';
-  if (dom.setupLeadEl) dom.setupLeadEl.textContent = settings
-    ? 'Models, shortcuts, and Mac access. Everything stays on this Mac.'
-    : 'Three quick checks, then you’re ready to speak. Your Mac does all the transcribing.';
-  if (dom.setupStepsEl) dom.setupStepsEl.hidden = settings;
+  if (dom.setupTitleEl) dom.setupTitleEl.textContent = state.setupScreenMode === 'settings' ? 'Settings' : 'Make room for your voice.';
+  syncSetupSections();
 }
 
 export function syncFlowForSetupReadiness() {
