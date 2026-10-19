@@ -16,10 +16,20 @@ import { ensureMicrophoneAccess } from './media-permissions.js';
 import { clampAudioLevel, normalizeLiveAudioBars, updateDictationWaveform } from './waveform.js';
 
 let nextStartRequest = 0;
+let nativeStartOperation = Promise.resolve();
 
 /** Rejects local completion/event delivery; the caller also sends native Stop or Clear. */
 export function invalidateNativeStart() {
   state.nativeStartRequestId = null;
+}
+
+/** Clears native capture and keeps later starts behind its acknowledgement. */
+export function cancelNativeDesktopDictation() {
+  invalidateNativeStart();
+  const invoke = getTauriInvoke();
+  if (!invoke || !isFocusedMacDesktopMode()) return;
+  const cancellation = invoke('cancel_native_dictation').catch(() => {});
+  nativeStartOperation = Promise.all([nativeStartOperation, cancellation]).then(() => {});
 }
 
 export function normalizeNativeDictationError(text) {
@@ -82,6 +92,9 @@ export async function startNativeDesktopDictation(trigger = 'button') {
   }
 
   const requestId = `frontend-${++nextStartRequest}`;
+  const previousStart = nativeStartOperation;
+  let releaseStart;
+  nativeStartOperation = new Promise(resolve => { releaseStart = resolve; });
   state.nativeStartRequestId = requestId;
   try {
     state.isStartingDictation = true;
@@ -90,12 +103,19 @@ export async function startNativeDesktopDictation(trigger = 'button') {
     syncControls();
     setUiMode('loading');
     setStatus('Requesting microphone access...', 'working');
+    // A canceled request still owns its native start until scoped cleanup ends.
+    await previousStart;
+    if (state.nativeStartRequestId !== requestId) return;
     await ensureMicrophoneAccess();
     if (state.nativeStartRequestId !== requestId) return;
     setStatus('Opening microphone...', 'working');
     state.activeNativeSessionId = null;
     await tauriInvoke('start_native_dictation', { requestId });
-    if (state.nativeStartRequestId !== requestId) return;
+    if (state.nativeStartRequestId !== requestId) {
+      // Stop/Clear can reach Rust before this async command reserves capture.
+      await tauriInvoke('cancel_native_dictation', { requestId });
+      return;
+    }
     state.isStartingDictation = false;
     setDictationState(true);
     setUiMode('listening');
@@ -126,6 +146,8 @@ export async function startNativeDesktopDictation(trigger = 'button') {
     state.activeNativeSessionId = null;
     setUiMode('error');
     setStatus(`Could not start dictation: ${details}`, 'error');
+  } finally {
+    releaseStart();
   }
 }
 

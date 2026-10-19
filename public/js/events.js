@@ -1,4 +1,3 @@
-import { invalidateNativeStart } from './native-dictation.js';
 import { initPermissionListeners, isNativeSetupReady } from './permissions.js';
 /**
  * DOM and Tauri event wiring for dictation.
@@ -29,7 +28,8 @@ import {
   applyNativeFnHoldState, handleNativeHoldKeydown, handleNativeHoldKeyup,
   handleNativeDictationStatePayload, handleNativeDictationAudioLevelPayload,
   shouldHandleNativeFnHoldInFocusedWindow,
-  startNativeDesktopDictation, stopNativeDesktopDictation, triggerDictationToggleFromHotkey
+  startNativeDesktopDictation, stopNativeDesktopDictation, cancelNativeDesktopDictation,
+  triggerDictationToggleFromHotkey
 } from './native-dictation.js';
 import {
   handleDictationHotkeyEvent, beginDictationHotkeyCapture, saveDictationHotkey, clearDictationHotkey
@@ -232,11 +232,7 @@ export function initSharedUiListeners() {
     }
   });
   dom.clearTranscriptBtn.addEventListener('click', () => {
-    invalidateNativeStart();
-    const tauriInvoke = shouldUseTauriCommands() ? getTauriInvoke() : null;
-    if (tauriInvoke) {
-      tauriInvoke('cancel_native_dictation').catch(() => {});
-    }
+    cancelNativeDesktopDictation();
 
     state.shouldKeepDictating = false;
     state.isStartingDictation = false;

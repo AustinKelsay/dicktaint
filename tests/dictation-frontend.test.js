@@ -1583,6 +1583,81 @@ it('describes toggle shortcuts accurately and does not suggest a disabled shortc
 });
 
 describe('review regressions', () => {
+  it('Stop and Clear release capture when cancellation reaches the backend before start', async () => {
+    for (const action of ['stopDictation', 'clearTranscript']) {
+      let deliverStart;
+      let captureRunning = false;
+      let captureRequestId;
+      createMockDom({ nativeDesktop: true, invokeHandler(command, args) {
+        if (command === 'start_native_dictation') {
+          return new Promise(resolve => {
+            deliverStart = () => {
+              captureRequestId = args.requestId;
+              captureRunning = true;
+              resolve(null);
+            };
+          });
+        }
+        if (command === 'stop_native_dictation' || command === 'cancel_native_dictation') {
+          if (!args?.requestId || args.requestId === captureRequestId) captureRunning = false;
+          return command === 'stop_native_dictation' ? '' : null;
+        }
+      } });
+      const api = await loadAppWithTestApi();
+      api.resetState();
+      await api.refreshMacosPermissions();
+      document.getElementById('startDictation').click();
+      await new Promise(resolve => setTimeout(resolve, 0));
+      document.getElementById(action).click();
+      await new Promise(resolve => setTimeout(resolve, 0));
+      deliverStart();
+      await new Promise(resolve => setTimeout(resolve, 0));
+      expect(captureRunning).toBe(false);
+      expect(api.getState().isDictating).toBe(false);
+    }
+  });
+
+  it('waits for a delayed Clear acknowledgement before opening the next capture', async () => {
+    let finishStart;
+    let finishClear;
+    let captureOwner = null;
+    const starts = [];
+    createMockDom({ nativeDesktop: true, invokeHandler(command, args) {
+      if (command === 'start_native_dictation') {
+        starts.push(args.requestId);
+        if (starts.length === 1) return new Promise(resolve => {
+          finishStart = () => { captureOwner = args.requestId; resolve(null); };
+        });
+        captureOwner = args.requestId;
+        return null;
+      }
+      if (command === 'cancel_native_dictation') {
+        if (args.requestId) {
+          if (captureOwner === args.requestId) captureOwner = null;
+          return null;
+        }
+        return new Promise(resolve => {
+          finishClear = () => { captureOwner = null; resolve(null); };
+        });
+      }
+    } });
+    const api = await loadAppWithTestApi();
+    api.resetState();
+    await api.refreshMacosPermissions();
+    document.getElementById('startDictation').click();
+    await new Promise(resolve => setTimeout(resolve, 0));
+    document.getElementById('clearTranscript').click();
+    document.getElementById('startDictation').click();
+    finishStart();
+    await new Promise(resolve => setTimeout(resolve, 0));
+    expect(starts).toHaveLength(1);
+    finishClear();
+    await new Promise(resolve => setTimeout(resolve, 0));
+    expect(starts).toHaveLength(2);
+    expect(captureOwner).toBe(starts[1]);
+    expect(api.getState().isDictating).toBe(true);
+  });
+
   it('Stop and Clear cancel pending starts without late listening revival', async () => {
     for (const action of ['stopDictation', 'clearTranscript']) {
       let finishStart;
@@ -1667,12 +1742,16 @@ describe('review regressions', () => {
     document.getElementById('clearTranscript').click();
     document.getElementById('startDictation').click();
     await new Promise(resolve => setTimeout(resolve, 0));
+    // B waits for A's successful response and request-scoped cleanup.
+    expect(starts).toHaveLength(1);
+    starts[0].resolve(null);
+    await new Promise(resolve => setTimeout(resolve, 0));
+    expect(starts).toHaveLength(2);
     api.handleNativeDictationStatePayload({ state: 'idle', session_id: 902, request_id: starts[0].requestId });
     expect(api.getState().isStartingDictation).toBe(true);
     expect(document.getElementById('stopDictation').disabled).toBe(false);
     api.handleNativeDictationStatePayload({ state: 'listening', session_id: 903, request_id: starts[1].requestId });
     starts[1].resolve(null);
-    starts[0].resolve(null);
     await new Promise(resolve => setTimeout(resolve, 0));
     api.handleNativeDictationStatePayload({ state: 'listening', session_id: 902, request_id: starts[0].requestId });
     expect(api.getState().activeNativeSessionId).toBe('903');

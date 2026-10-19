@@ -528,6 +528,6 @@ pub(crate) async fn stop_native_dictation(app: tauri::AppHandle) -> Result<Strin
 }
 
 #[tauri::command]
-pub(crate) fn cancel_native_dictation(app: tauri::AppHandle) -> Result<(), String> {
-    dictation_session::cancel(&app)
+pub(crate) fn cancel_native_dictation(app: tauri::AppHandle, request_id: Option<String>) -> Result<(), String> {
+    dictation_session::cancel(&app, request_id.as_deref())
 }

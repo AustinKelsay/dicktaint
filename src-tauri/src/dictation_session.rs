@@ -64,7 +64,10 @@ impl SessionIntent {
         self.pending_request_id = request_id;
         Ok(reservation)
     }
-    pub(crate) fn cancel(&mut self) -> Option<(u64, Option<String>)> {
+    pub(crate) fn cancel(&mut self, request_id: Option<&str>) -> Option<(u64, Option<String>)> {
+        if request_id.is_some() && self.pending_request_id.as_deref() != request_id {
+            return None;
+        }
         self.pending
             .take()
             .map(|value| (value.session_id, self.pending_request_id.take()))
@@ -227,17 +230,37 @@ fn start_reserved_inner(
 
 /// Invalidates queued startup and takes capture before any deferred stop worker.
 pub(crate) fn prepare_stop(app: &tauri::AppHandle) -> Result<Option<ActiveRecording>, String> {
+    prepare_stop_request(app, None)
+}
+
+/// Scoped cleanup must not take a newer frontend or native Fn recording.
+fn take_recording_for_request(
+    recording: &mut Option<ActiveRecording>,
+    request_id: Option<&str>,
+) -> Option<ActiveRecording> {
+    if request_id.is_some()
+        && recording.as_ref().and_then(|value| value.start_request_id.as_deref()) != request_id
+    {
+        return None;
+    }
+    recording.take()
+}
+
+fn prepare_stop_request(
+    app: &tauri::AppHandle,
+    request_id: Option<&str>,
+) -> Result<Option<ActiveRecording>, String> {
     let dictation = app.state::<DictationState>();
     let mut intent = dictation
         .session_intent
         .lock()
         .map_err(|_| "Failed to lock session intent")?;
-    let pending_id = intent.cancel();
-    let recording = dictation
+    let pending_id = intent.cancel(request_id);
+    let mut active_recording = dictation
         .active_recording
         .lock()
-        .map_err(|_| "Failed to lock dictation state")?
-        .take();
+        .map_err(|_| "Failed to lock dictation state")?;
+    let recording = take_recording_for_request(&mut active_recording, request_id);
     if recording.is_none() {
         if let Some((session_id, request_id)) = pending_id {
             crate::hotkey_overlay::emit_dictation_state_with_request(
@@ -342,9 +365,9 @@ pub(crate) async fn stop_prepared(
     }
 }
 
-/// Cancels any active recording without transcription and returns to idle.
-pub(crate) fn cancel(app: &tauri::AppHandle) -> Result<(), String> {
-    let recording = prepare_stop(app)?;
+/// Cancels capture without transcription; a request id limits cleanup to its owner.
+pub(crate) fn cancel(app: &tauri::AppHandle, request_id: Option<&str>) -> Result<(), String> {
+    let recording = prepare_stop_request(app, request_id)?;
     let Some(recording) = recording else {
         return Ok(());
     };
@@ -360,7 +383,7 @@ pub(crate) fn cancel(app: &tauri::AppHandle) -> Result<(), String> {
 
 /// Cancels the active session when one is running; no-op otherwise.
 pub(crate) fn cancel_if_active(app: &tauri::AppHandle) -> Result<(), String> {
-    cancel(app)
+    cancel(app, None)
 }
 
 #[cfg(test)]
@@ -372,7 +395,7 @@ mod tests {
         let mut intent = super::SessionIntent::default();
         let queued = intent.reserve(Some("start-a".into())).unwrap();
         assert_eq!(
-            intent.cancel(),
+            intent.cancel(None),
             Some((queued.session_id, Some("start-a".into())))
         );
         assert!(!intent.is_current(queued));
@@ -382,6 +405,41 @@ mod tests {
         assert!(intent.reserve(None).is_err());
         intent.finish(next);
         assert!(!intent.has_pending());
+    }
+
+    #[test]
+    fn request_cleanup_preserves_a_different_pending_start_including_native_fn() {
+        let mut intent = super::SessionIntent::default();
+        let pending = intent.reserve(Some("newer".into())).unwrap();
+        assert_eq!(intent.cancel(Some("older")), None);
+        assert!(intent.is_current(pending));
+        assert_eq!(intent.cancel(Some("newer")), Some((pending.session_id, Some("newer".into()))));
+        let native = intent.reserve(None).unwrap();
+        assert_eq!(intent.cancel(Some("older")), None);
+        assert!(intent.is_current(native));
+        assert_eq!(intent.cancel(None), Some((native.session_id, None)));
+    }
+
+    #[test]
+    fn request_cleanup_takes_only_its_own_active_capture() {
+        for (owner, should_take) in [(Some("older"), true), (Some("newer"), false), (None, false)] {
+            let (stop_tx, stop_rx) = std::sync::mpsc::channel();
+            let mut active = Some(crate::state::ActiveRecording {
+                start_request_id: owner.map(str::to_string),
+                session_id: 1,
+                input_device_name: "test capture".into(),
+                stop_tx,
+                thread_handle: std::thread::spawn(move || { let _ = stop_rx.recv(); }),
+                samples: std::sync::Arc::new(std::sync::Mutex::new(Vec::new())),
+                sample_rate: 16000,
+            });
+            let taken = super::take_recording_for_request(&mut active, Some("older"));
+            assert_eq!(taken.is_some(), should_take, "owner: {owner:?}");
+            assert_eq!(active.is_some(), !should_take, "owner: {owner:?}");
+            let recording = taken.or(active).unwrap();
+            recording.stop_tx.send(()).unwrap();
+            recording.thread_handle.join().unwrap();
+        }
     }
 
     #[test]
