@@ -340,7 +340,7 @@ pub(crate) fn insert_text_into_focused_field(
     };
     if !focused_field_insert_enabled {
         return Err(
-            "Focused-field insertion is disabled in settings. Enable \"Dictate Into Focused Field\" to use this command."
+            "Typing into other apps is turned off. Turn it on in Settings first."
                 .to_string(),
         );
     }

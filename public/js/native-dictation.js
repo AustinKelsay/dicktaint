@@ -81,13 +81,13 @@ export async function startNativeDesktopDictation(trigger = 'button') {
   if (!tauriInvoke || !isFocusedMacDesktopMode()) return;
   if (state.nativeStopRequestInFlight) {
     queueNativeStartAfterCurrentStop(trigger);
-    setStatus('Finishing previous dictation... next one will start automatically.', 'working');
+    setStatus('Finishing the last dictation… the next one starts automatically.', 'working');
     return;
   }
   if (state.isDictating || state.isStartingDictation) return;
 
   if (!state.nativeDictationModelReady) {
-    setStatus('Complete setup first, then start dictation.', 'neutral');
+    setStatus('Finish setup in Settings, then start dictating.', 'neutral');
     return;
   }
 
@@ -102,13 +102,13 @@ export async function startNativeDesktopDictation(trigger = 'button') {
     state.rejectNextNativeAppend = false;
     syncControls();
     setUiMode('loading');
-    setStatus('Requesting microphone access...', 'working');
+    setStatus('Checking the microphone…', 'working');
     // A canceled request still owns its native start until scoped cleanup ends.
     await previousStart;
     if (state.nativeStartRequestId !== requestId) return;
     await ensureMicrophoneAccess();
     if (state.nativeStartRequestId !== requestId) return;
-    setStatus('Opening microphone...', 'working');
+    setStatus('Opening the microphone…', 'working');
     state.activeNativeSessionId = null;
     await tauriInvoke('start_native_dictation', { requestId });
     if (state.nativeStartRequestId !== requestId) {
@@ -136,7 +136,7 @@ export async function startNativeDesktopDictation(trigger = 'button') {
       if (!state.isDictating) {
         state.isStartingDictation = true;
         setUiMode('loading');
-        setStatus('Dictation is already starting. Waiting for the microphone...', 'working');
+        setStatus('Dictation is already starting. Waiting for the microphone…', 'working');
       }
       return;
     }
@@ -162,7 +162,7 @@ export async function stopNativeDesktopDictation(trigger = 'button') {
   const sessionId = state.activeNativeSessionId;
   try {
     setUiMode('loading');
-    setStatus('Transcribing captured audio...', 'working');
+    setStatus('Transcribing…', 'working');
     const transcript = await tauriInvoke('stop_native_dictation');
     const didAppendTranscript = appendTranscriptChunk(transcript, {
       source: 'native',
@@ -172,14 +172,14 @@ export async function stopNativeDesktopDictation(trigger = 'button') {
     if (didAppendTranscript) {
       setStatus(completedStatusForTrigger(trigger), 'ok');
     } else {
-      setStatus('No new dictation content to save.', 'neutral');
+      setStatus('Nothing new was heard. Try again, a little closer to the mic.', 'neutral');
     }
   } catch (error) {
     const details = getErrorMessage(error);
     if (isStopNoopDictationError(details)) {
       setUiMode('idle');
       state.activeNativeSessionId = null;
-      setStatus('No active dictation session to stop.', 'neutral');
+      setStatus('Nothing was recording.', 'neutral');
       return;
     }
     setUiMode('error');
@@ -212,13 +212,13 @@ export function applyNativeFnHoldState(pressed) {
     state.nativeFnStopRequested = false;
     if (state.nativeStopRequestInFlight) {
       queueNativeStartAfterCurrentStop('hotkey-hold');
-      setHotkeyPill('finishing previous dictation...', 'working', true);
+      setHotkeyPill('Finishing the last dictation…', 'working', true);
       return;
     }
 
     if (state.isDictating || state.isStartingDictation || state.nativeHotkeyActionInFlight) return;
     state.nativeHotkeyActionInFlight = true;
-    setHotkeyPill('fn down - starting dictation...', 'working', true);
+    setHotkeyPill('Starting…', 'working', true);
     const startFn = state.startNativeDesktopDictationOverride || startNativeDesktopDictation;
     Promise.resolve(startFn('hotkey-hold'))
       .catch(() => {})
@@ -241,7 +241,7 @@ export function applyNativeFnHoldState(pressed) {
 
   if (!state.isDictating || state.nativeHotkeyActionInFlight) return;
   state.nativeHotkeyActionInFlight = true;
-  setHotkeyPill('fn released - transcribing...', 'working', true);
+  setHotkeyPill('Transcribing…', 'working', true);
   Promise.resolve(stopNativeDesktopDictation('hotkey-hold'))
     .catch(() => {})
     .finally(() => {
@@ -297,12 +297,12 @@ export function triggerDictationToggleFromHotkey() {
 
   if (state.isInstallingDictationModel || state.isDeletingDictationModel) return;
   if (!state.nativeDictationModelReady) {
-    setStatus('Complete setup first, then start dictation.', 'neutral');
+    setStatus('Finish setup in Settings, then start dictating.', 'neutral');
     return;
   }
   if (state.nativeStopRequestInFlight) {
     queueNativeStartAfterCurrentStop('hotkey');
-    setStatus('Finishing previous dictation... next one will start automatically.', 'working');
+    setStatus('Finishing the last dictation… the next one starts automatically.', 'working');
     return;
   }
 
@@ -348,7 +348,7 @@ export function handleNativeDictationStatePayload(payload) {
     }
     state.isStartingDictation = false;
     setUiMode('loading');
-    setStatus('Transcribing captured audio...', 'working');
+    setStatus('Transcribing…', 'working');
     return;
   }
 
@@ -371,7 +371,7 @@ export function handleNativeDictationStatePayload(payload) {
       state.activeNativeSessionId = null;
     }
     if (didAppendTranscript && sessionMatchesCurrent) {
-      setStatus('Dictation captured and transcribed.', 'ok');
+      setStatus('Transcribed and added to your draft.', 'ok');
     }
     return;
   }

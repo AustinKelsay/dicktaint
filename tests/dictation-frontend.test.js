@@ -627,7 +627,7 @@ describe('dictation frontend hotkey polish', () => {
     const state = api.getState();
     expect(state.dictationTriggerMode).toBe('focused-window-hold');
     expect(state.savedDictationHotkey).toBe('Fn');
-    expect(document.getElementById('dictationHotkeyStatus').textContent).toContain('Current hotkey: Fn');
+    expect(document.getElementById('dictationHotkeyStatus').textContent).toContain('Shortcut saved: Fn');
     expect(document.getElementById('dictationHotkeyStatus').textContent).toContain('focused');
   });
 
@@ -639,7 +639,7 @@ describe('dictation frontend hotkey polish', () => {
       trigger_status: 'Press CmdOrCtrl+Shift+D anywhere to start or stop dictation.'
     });
 
-    expect(api.summarizeHotkeyPillStatus('Listening...', 'live')).toBe('Listening - press CmdOrCtrl+Shift+D again');
+    expect(api.summarizeHotkeyPillStatus('Listening...', 'live')).toBe('Listening - press Cmd+Shift+D again');
 
     api.applyDictationHotkeyPayload({
       trigger: 'Fn',
@@ -915,7 +915,7 @@ describe('dictation frontend hotkey save/clear', () => {
     const state = api.getState();
     expect(state.savedDictationHotkey).toBe('CmdOrCtrl+Shift+D');
     expect(state.dictationTriggerMode).toBe('global-toggle');
-    expect(document.getElementById('dictationHotkeyStatus').textContent).toContain('Current hotkey: CmdOrCtrl+Shift+D');
+    expect(document.getElementById('dictationHotkeyStatus').textContent).toContain('Shortcut saved: Cmd+Shift+D');
   });
 
   it('clears the saved hotkey through clear_dictation_trigger', async () => {
@@ -933,7 +933,7 @@ describe('dictation frontend hotkey save/clear', () => {
     const state = api.getState();
     expect(state.savedDictationHotkey).toBeNull();
     expect(state.dictationTriggerMode).toBe('disabled');
-    expect(document.getElementById('dictationHotkeyStatus').textContent).toContain('Hotkey disabled');
+    expect(document.getElementById('dictationHotkeyStatus').textContent).toContain('Shortcut off');
   });
 
   it('rejects invalid hotkey combos without invoking Tauri', async () => {
@@ -1214,7 +1214,7 @@ describe('dictation frontend web speech error/restart', () => {
     jest.advanceTimersByTime(250);
     expect(starts).toEqual(['start']);
     expect(document.body.dataset.mode).toBe('loading');
-    expect(document.getElementById('status').textContent).toBe('Reconnecting dictation...');
+    expect(document.getElementById('status').textContent).toBe('Reconnecting…');
   });
 
   it('does not restart when a fatal-style keep flag is cleared', () => {
@@ -1551,7 +1551,7 @@ describe('native Mac clipboard copy', () => {
     expect(invokeCalls.filter(call => call.command === 'copy_text_to_clipboard').map(call => call.args))
       .toEqual([{ text: 'Keep this dictation.' }]);
     expect(api.getState().focusedFieldInsertPermissionGranted).toBe(false);
-    expect(document.getElementById('status').textContent).toBe('Copied dictation entry to clipboard.');
+    expect(document.getElementById('status').textContent).toBe('Copied. Paste it anywhere.');
   });
   it('reports native clipboard failure without claiming success or falling back to another clipboard writer', async () => {
     const { clipboardCalls } = createMockDom({ nativeDesktop: true, invokeHandler(command) {
@@ -1575,7 +1575,7 @@ it('describes toggle shortcuts accurately and does not suggest a disabled shortc
   api.resetState();
   api.applyDictationHotkeyPayload({ trigger: 'CmdOrCtrl+Shift+D', trigger_mode: 'global-toggle' });
   await api.refreshMacosPermissions();
-  expect(document.getElementById('captureGuidance').textContent).toContain('press CmdOrCtrl+Shift+D');
+  expect(document.getElementById('captureGuidance').textContent).toContain('press Cmd+Shift+D');
   await api.clearDictationHotkey();
   expect(document.getElementById('captureGuidance').textContent).toBe('Start with the button. Speak naturally, then stop to transcribe.');
   await api.saveDictationHotkey('Fn');

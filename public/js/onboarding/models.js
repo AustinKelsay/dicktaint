@@ -25,7 +25,9 @@ export function describeDeviceProfile(device) {
   const ram = Number(device.total_memory_gb) || 0;
   const cores = Number(device.logical_cpu_cores) || 1;
   const machine = describeMachineLabel(device).replace(/^This /u, '');
-  return `${machine} • ${ram} GB RAM • ${cores} logical CPU cores • ${device.os || 'unknown os'}`;
+  const os = String(device.os || '').toLowerCase();
+  const osLabel = os === 'macos' ? 'macOS' : (os === 'windows' ? 'Windows' : (os === 'linux' ? 'Linux' : (device.os || 'unknown OS')));
+  return `${machine} · ${ram} GB memory · ${cores} CPU cores · ${osLabel}`;
 }
 
 /**
@@ -35,12 +37,12 @@ export function describeDeviceProfile(device) {
 export function buildDictationModelLabel(model) {
   const fit = model.recommended
     ? 'Recommended'
-    : (model.likely_runnable ? 'Likely runnable' : 'Heavy for this machine');
+    : (model.likely_runnable ? 'Fits this Mac' : 'May be slow here');
   const sizeValue = Number(model.approx_size_gb);
   const local = model.installed
-    ? 'Installed'
+    ? 'Downloaded'
     : (Number.isFinite(sizeValue) ? `${sizeValue} GB` : 'size unknown');
-  return `${modelDisplayName(model)} • ${local} • ${fit}`;
+  return `${modelDisplayName(model)} · ${local} · ${fit}`;
 }
 
 /**
@@ -89,11 +91,11 @@ export async function installSelectedDictationModel() {
 
   const selected = getSelectedDictationModel();
   if (!selected) {
-    setStatus('Pick a speech model first.', 'error');
+    setStatus('Choose a speech model first.', 'error');
     return;
   }
   if (!state.whisperCliAvailable) {
-    setStatus('The local speech engine needs attention. Recheck setup or reopen Murmur.', 'error');
+    setStatus('The speech engine needs attention. Recheck, or quit and reopen Murmur.', 'error');
     return;
   }
 
@@ -107,18 +109,18 @@ export async function installSelectedDictationModel() {
 
     const isAlreadyInstalled = Boolean(selected.installed);
     if (isAlreadyInstalled) {
-      setDictationModelBusy(`Switching active model to ${modelDisplayName(selected)}...`);
-      setDictationModelStatus(`Switching to ${modelDisplayName(selected)}...`, 'neutral');
-      setStatus(`Switching active model to ${modelDisplayName(selected)}...`, 'working');
+      setDictationModelBusy(`Switching to ${modelDisplayName(selected)}…`);
+      setDictationModelStatus(`Switching to ${modelDisplayName(selected)}…`, 'neutral');
+      setStatus(`Switching to ${modelDisplayName(selected)}…`, 'working');
     } else {
       const sizeValue = Number(selected.approx_size_gb);
-      const sizeLabel = Number.isFinite(sizeValue) ? `~${sizeValue} GB` : 'size unknown';
-      setDictationModelBusy(`Downloading ${modelDisplayName(selected)} (${sizeLabel}). Keep this window open...`);
+      const sizeLabel = Number.isFinite(sizeValue) ? `about ${sizeValue} GB` : 'size unknown';
+      setDictationModelBusy(`Downloading ${modelDisplayName(selected)} (${sizeLabel}). Keep Murmur open…`);
       setDictationModelStatus(
-        `Downloading ${modelDisplayName(selected)} (${sizeLabel}). Keep this window open while it downloads...`,
+        `Downloading ${modelDisplayName(selected)} (${sizeLabel}). This happens once. Keep Murmur open until it finishes…`,
         'neutral'
       );
-      setStatus(`Downloading ${modelDisplayName(selected)} model...`, 'working');
+      setStatus(`Downloading ${modelDisplayName(selected)}…`, 'working');
     }
 
     await tauriInvoke('install_dictation_model', { model: selected.id });
@@ -126,19 +128,19 @@ export async function installSelectedDictationModel() {
     onboardingAfterInstall = onboarding;
 
     if (!onboarding) {
-      throw new Error('Model update completed, but setup refresh failed. Click Recheck setup.');
+      throw new Error('The model updated, but the setup check failed. Click Recheck.');
     }
     if (!onboarding.selected_model_exists) {
-      throw new Error('Model update finished, but selected model is not ready yet. Click Recheck setup.');
+      throw new Error('The model updated, but it isn’t ready yet. Click Recheck.');
     }
     if (!onboarding.whisper_cli_available) {
-      throw new Error('Model is ready, but whisper-cli is unavailable. Click Recheck setup.');
+      throw new Error('The model is ready, but the speech engine is unavailable. Click Recheck.');
     }
 
     const selectedAfter = (onboarding.models || []).find((item) => item.id === onboarding.selected_model_id);
     setDictationModelBusy('');
     setUiMode('idle');
-    setStatus(`Ready: ${modelDisplayName(selectedAfter) || modelDisplayName(selected)} is active for local dictation.`, 'ok');
+    setStatus(`${modelDisplayName(selectedAfter) || modelDisplayName(selected)} is ready. You can dictate now.`, 'ok');
 
   } catch (error) {
     const details = getErrorMessage(error);
@@ -147,8 +149,8 @@ export async function installSelectedDictationModel() {
     state.nativeDictationModelReady = modelNoLongerUsable ? false : prevNativeDictationModelReady;
     setUiMode('error');
     setDictationModelBusy('');
-    setDictationModelStatus(`Model update failed: ${details}`, 'error');
-    setStatus(`Could not update model: ${details}`, 'error');
+    setDictationModelStatus(`Could not update the model: ${details}`, 'error');
+    setStatus(`Could not update the model: ${details}`, 'error');
   } finally {
     state.isInstallingDictationModel = false;
     syncControls();
@@ -159,43 +161,43 @@ export async function installSelectedDictationModel() {
 export async function deleteSelectedDictationModel() {
   const tauriInvoke = getTauriInvoke();
   if (!isFocusedMacDesktopMode()) {
-    setStatus('Model deletion is only available in macOS desktop mode.', 'error');
+    setStatus('Models can only be removed in the Mac app.', 'error');
     return;
   }
   if (!tauriInvoke) {
-    setStatus('Desktop bridge is not ready yet. Retry in a moment.', 'error');
+    setStatus('Murmur is still starting. Try again in a moment.', 'error');
     return;
   }
 
   const selected = getSelectedDictationModel();
   if (!selected) {
-    setStatus('Pick a speech model first.', 'error');
-    setDictationModelStatus('Pick a downloaded model before deleting.', 'error');
+    setStatus('Choose a speech model first.', 'error');
+    setDictationModelStatus('Choose a downloaded model to remove.', 'error');
     return;
   }
   if (!selected.installed) {
-    setStatus('Selected model is not downloaded.', 'error');
-    setDictationModelStatus(`${modelDisplayName(selected)} is not downloaded, so there is nothing to delete.`, 'neutral');
+    setStatus(`${modelDisplayName(selected)} isn’t downloaded.`, 'error');
+    setDictationModelStatus(`${modelDisplayName(selected)} isn’t downloaded, so there’s nothing to remove.`, 'neutral');
     return;
   }
 
   if (typeof window.confirm !== 'function') {
-    setStatus('Delete confirmation is unavailable in this runtime.', 'error');
-    setDictationModelStatus('Delete confirmation is unavailable. Restart the app and try again.', 'error');
+    setStatus('Murmur couldn’t ask you to confirm. Quit and reopen, then try again.', 'error');
+    setDictationModelStatus('Murmur couldn’t ask you to confirm. Quit and reopen, then try again.', 'error');
     return;
   }
 
   let confirmed = false;
   try {
-    confirmed = window.confirm(`Delete ${modelDisplayName(selected)} from local storage?`);
+    confirmed = window.confirm(`Remove ${modelDisplayName(selected)} from this Mac? You can download it again later.`);
   } catch (error) {
     const details = getErrorMessage(error);
-    setStatus(`Could not open delete confirmation: ${details}`, 'error');
-    setDictationModelStatus(`Could not open delete confirmation: ${details}`, 'error');
+    setStatus(`Could not ask you to confirm: ${details}`, 'error');
+    setDictationModelStatus(`Could not ask you to confirm: ${details}`, 'error');
     return;
   }
   if (!confirmed) {
-    setStatus(`Delete canceled for ${modelDisplayName(selected)}.`, 'neutral');
+    setStatus(`Kept ${modelDisplayName(selected)}.`, 'neutral');
     return;
   }
 
@@ -203,26 +205,26 @@ export async function deleteSelectedDictationModel() {
     state.isDeletingDictationModel = true;
     syncControls();
     setUiMode('loading');
-    setDictationModelBusy(`Deleting ${modelDisplayName(selected)} from local storage...`);
-    setDictationModelStatus(`Deleting ${modelDisplayName(selected)} from local storage...`, 'neutral');
-    setStatus(`Deleting ${modelDisplayName(selected)}...`, 'working');
+    setDictationModelBusy(`Removing ${modelDisplayName(selected)}…`);
+    setDictationModelStatus(`Removing ${modelDisplayName(selected)}…`, 'neutral');
+    setStatus(`Removing ${modelDisplayName(selected)}…`, 'working');
 
     await tauriInvoke('delete_dictation_model', { model: selected.id });
     const onboarding = await refreshDictationOnboarding({ quietStatus: true });
 
     if (!onboarding) {
-      throw new Error('Delete completed, but setup refresh failed. Click Recheck setup.');
+      throw new Error('The model was removed, but the setup check failed. Click Recheck.');
     }
 
     if (onboarding.selected_model_exists) {
       const selectedAfter = (onboarding.models || []).find((item) => item.id === onboarding.selected_model_id);
       setStatus(
-        `Deleted ${modelDisplayName(selected)}. Active model: ${modelDisplayName(selectedAfter) || onboarding.selected_model_id}.`,
+        `Removed ${modelDisplayName(selected)}. ${modelDisplayName(selectedAfter) || onboarding.selected_model_id} is now in use.`,
         'ok'
       );
 
     } else {
-      setStatus(`Deleted ${modelDisplayName(selected)}. Download another model to continue local dictation.`, 'neutral');
+      setStatus(`Removed ${modelDisplayName(selected)}. Download a model to keep dictating.`, 'neutral');
 
     }
     setDictationModelBusy('');
@@ -231,8 +233,8 @@ export async function deleteSelectedDictationModel() {
     const details = getErrorMessage(error);
     setUiMode('error');
     setDictationModelBusy('');
-    setDictationModelStatus(`Delete failed: ${details}`, 'error');
-    setStatus(`Could not delete model: ${details}`, 'error');
+    setDictationModelStatus(`Could not remove the model: ${details}`, 'error');
+    setStatus(`Could not remove the model: ${details}`, 'error');
   } finally {
     state.isDeletingDictationModel = false;
     syncControls();
@@ -248,9 +250,9 @@ export async function openWhisperSetupPage() {
     } else {
       window.open('https://github.com/ggml-org/whisper.cpp#quick-start', '_blank', 'noopener,noreferrer');
     }
-    setStatus('Opened whisper.cpp setup guide for tauri:dev troubleshooting.', 'ok');
+    setStatus('Opened the whisper.cpp setup guide.', 'ok');
   } catch (error) {
     const details = getErrorMessage(error);
-    setStatus(`Could not open setup page: ${details}`, 'error');
+    setStatus(`Could not open the setup guide: ${details}`, 'error');
   }
 }

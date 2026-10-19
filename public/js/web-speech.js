@@ -8,33 +8,33 @@ export function describeSpeechError(errorCode) {
   if (errorCode === 'not-allowed' || errorCode === 'service-not-allowed') {
     if (state.hasMicrophoneAccess) {
       return isFocusedMacDesktopMode()
-        ? 'Speech recognition permission denied. In macOS Settings > Privacy & Security > Speech Recognition, allow this app/terminal and relaunch.'
-        : 'Speech recognition permission denied by browser/runtime. Allow speech recognition and retry.';
+        ? 'speech recognition isn’t allowed. In System Settings > Privacy & Security > Speech Recognition, allow Murmur, then reopen it.'
+        : 'speech recognition isn’t allowed in this browser. Allow it for this site and try again.';
     }
 
     return isFocusedMacDesktopMode()
-      ? 'Microphone permission denied. In macOS Settings > Privacy & Security > Microphone, allow this app (or Terminal during tauri:dev), then relaunch.'
-      : 'Microphone permission denied in your browser. Allow mic access for this site and try again.';
+      ? 'microphone access isn’t allowed. In System Settings > Privacy & Security > Microphone, allow Murmur, then reopen it.'
+      : 'microphone access isn’t allowed in this browser. Allow it for this site and try again.';
   }
 
   if (errorCode === 'audio-capture') {
-    return 'No microphone input was found. In macOS Settings > Sound > Input, select your AirPods microphone and retry.';
+    return 'no microphone was found. Check System Settings > Sound > Input, then try again.';
   }
 
   if (errorCode === 'no-speech') {
-    return 'Mic opened but no speech was detected. Check input level and speak again.';
+    return 'the mic opened but no speech was detected. Try again, a little closer to the mic.';
   }
 
   if (errorCode === 'network') {
-    return 'Speech recognition service was unreachable. Check connectivity or try again in web mode.';
+    return 'the speech service couldn’t be reached. Check your connection and try again.';
   }
 
   if (errorCode === 'aborted') {
-    return 'Speech recognition stopped unexpectedly.';
+    return 'speech recognition stopped unexpectedly.';
   }
 
   if (errorCode === 'language-not-supported') {
-    return 'Speech recognition does not support the configured language.';
+    return 'this language isn’t supported for speech recognition.';
   }
 
   return errorCode || 'unknown';

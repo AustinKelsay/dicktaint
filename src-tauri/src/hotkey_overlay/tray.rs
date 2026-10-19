@@ -19,8 +19,8 @@ use super::emit_dictation_state;
 
 fn tray_primary_action_label(status: BackendDictationStatus) -> &'static str {
     match status {
-        BackendDictationStatus::Listening => "Stop + Transcribe",
-        BackendDictationStatus::Processing => "Transcribing...",
+        BackendDictationStatus::Listening => "Stop and Transcribe",
+        BackendDictationStatus::Processing => "Transcribing…",
         BackendDictationStatus::Idle | BackendDictationStatus::Error => "Start Dictation",
     }
 }
@@ -235,11 +235,11 @@ mod tests {
         );
         assert_eq!(
             tray_primary_action_label(BackendDictationStatus::Listening),
-            "Stop + Transcribe"
+            "Stop and Transcribe"
         );
         assert_eq!(
             tray_primary_action_label(BackendDictationStatus::Processing),
-            "Transcribing..."
+            "Transcribing…"
         );
         assert!(!tray_primary_action_enabled(
             BackendDictationStatus::Processing

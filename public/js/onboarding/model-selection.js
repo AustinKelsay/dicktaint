@@ -23,7 +23,7 @@ export function updateModelActionLabels() {
 
   const selected = getSelectedDictationModel();
   if (!selected) {
-    dom.installDictationModelBtn.textContent = 'Download + Use';
+    dom.installDictationModelBtn.textContent = 'Download and use';
     return;
   }
 
@@ -31,9 +31,9 @@ export function updateModelActionLabels() {
     && state.currentOnboarding?.selected_model_id === selected.id;
 
   if (!selected.installed) {
-    dom.installDictationModelBtn.textContent = 'Download + Use';
+    dom.installDictationModelBtn.textContent = 'Download and use';
     return;
   }
 
-  dom.installDictationModelBtn.textContent = isCurrent ? 'Using Now' : 'Use Installed';
+  dom.installDictationModelBtn.textContent = isCurrent ? 'In use' : 'Use this model';
 }

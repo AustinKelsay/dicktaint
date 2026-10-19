@@ -78,12 +78,12 @@ export function updateDictationWaveform(level = 0, bars = defaultLiveAudioBars()
     const audioState = audioStateForLevel(state.liveAudioLevel, mode);
     dom.dictationWaveformLevelEl.dataset.audioState = audioState;
     dom.dictationWaveformLevelEl.textContent = audioState === 'idle'
-      ? 'Mic level: waiting...'
+      ? 'Mic level: waiting…'
       : (audioState === 'error'
-        ? 'Mic level unavailable.'
+        ? 'Mic level: unavailable'
         : (audioState === 'low'
-          ? 'Mic level: low'
-          : (audioState === 'hot' ? 'Mic level: hot' : 'Mic level: good')));
+          ? 'Mic level: quiet'
+          : (audioState === 'hot' ? 'Mic level: too loud' : 'Mic level: good')));
   }
 }
 

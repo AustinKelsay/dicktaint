@@ -60,9 +60,9 @@ export function formatHistoryTimestamp(value) {
  */
 export function historySourceLabel(source) {
   const value = String(source || '').trim().toLowerCase();
-  if (value === 'web') return 'WEB';
-  if (value === 'native' || value === 'native-event') return 'DESKTOP';
-  return 'DICTATION';
+  if (value === 'web') return 'Browser';
+  if (value === 'native' || value === 'native-event') return 'This Mac';
+  return 'Dictation';
 }
 
 /**
@@ -75,7 +75,7 @@ export async function copyTextToClipboard(text) {
 
   if (isFocusedMacDesktopMode()) {
     const invoke = getTauriInvoke();
-    if (!invoke) throw new Error('Desktop clipboard bridge is unavailable.');
+    if (!invoke) throw new Error('The clipboard isn’t available yet.');
     await invoke('copy_text_to_clipboard', { text: trimmed });
     return true;
   }
@@ -110,14 +110,14 @@ export async function runDictationHistoryAction(historyAction, historyId) {
   const id = String(historyId || '').trim();
   const entry = findDictationHistoryEntry(id);
   if (!entry) {
-    setStatus('That history entry is no longer available.', 'error');
+    setStatus('That dictation is no longer in the list.', 'error');
     return false;
   }
 
   if (action === 'reinsert') {
     if (appendToDraftTranscript(entry.text)) {
       dom.transcriptInput.focus();
-      setStatus('Added previous dictation to your draft.', 'ok');
+      setStatus('Added to your draft.', 'ok');
       return true;
     }
     return false;
@@ -127,9 +127,9 @@ export async function runDictationHistoryAction(historyAction, historyId) {
     try {
       const copied = await copyTextToClipboard(entry.text);
       if (copied) {
-        setStatus('Copied dictation entry to clipboard.', 'ok');
+        setStatus('Copied. Paste it anywhere.', 'ok');
       } else {
-        setStatus('Could not copy dictation entry to clipboard.', 'error');
+        setStatus('Could not copy that dictation.', 'error');
       }
       return copied;
     } catch (error) {
@@ -139,7 +139,7 @@ export async function runDictationHistoryAction(historyAction, historyId) {
     }
   }
 
-  setStatus(`Unknown history action: ${action || '(empty)'}.`, 'error');
+  setStatus('That action isn’t available.', 'error');
   return false;
 }
 
@@ -166,7 +166,7 @@ export function renderDictationHistory() {
     meta.className = 'dictation-history-meta';
     const stamp = formatHistoryTimestamp(entry.createdAt);
     const source = historySourceLabel(entry.source);
-    meta.textContent = stamp ? `${stamp} • ${source}` : source;
+    meta.textContent = stamp ? `${stamp} · ${source}` : source;
 
     const actions = document.createElement('div');
     actions.className = 'dictation-history-actions';

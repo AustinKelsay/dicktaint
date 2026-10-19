@@ -39,29 +39,29 @@ export function renderPermissionGuidance() {
 
   const machineLabel = describeMachineLabel();
   if (!isFocusedMacDesktopMode()) {
-    dom.dictationPermissionSummaryEl.textContent = `${machineLabel} is outside the supported macOS desktop path.`;
+    dom.dictationPermissionSummaryEl.textContent = `${machineLabel} can’t dictate natively. Murmur’s dictation engine runs on macOS.`;
     dom.dictationPermissionListEl.innerHTML = '';
     return;
   }
 
   dom.dictationPermissionSummaryEl.textContent = isNativeSetupReady()
-    ? 'Ready for local dictation. Optional permissions add background Fn and insertion.'
-    : 'Complete the local model, speech engine, and microphone steps to start dictating.';
+    ? 'You’re ready to dictate. These optional permissions add background Fn and typing into other apps.'
+    : 'Finish the three checks above to start dictating. Everything here is optional.';
   const facts = state.macosPermissions;
   const microphone = facts?.microphone || 'unknown';
   const descriptions = {
-    unknown: 'Microphone: status unknown. Retry the permission check.',
-    not_determined: 'Microphone: allow access to record your voice.',
-    authorized: 'Microphone: access granted.',
-    denied: 'Microphone: access denied. Enable Murmur in System Settings, then return and recheck.',
-    restricted: 'Microphone: restricted by system policy. Contact your device administrator.',
-    unavailable: 'Microphone: status unavailable. Retry the check.'
+    unknown: 'Microphone: status unknown. Recheck to try again.',
+    not_determined: 'Microphone: not allowed yet. Murmur asks macOS once.',
+    authorized: 'Microphone: allowed.',
+    denied: 'Microphone: access denied. Allow Murmur in System Settings, then recheck.',
+    restricted: 'Microphone: restricted by a system policy. Ask your device administrator.',
+    unavailable: 'Microphone: couldn’t be checked. Recheck to try again.'
   };
   const items = [
     { text: descriptions[microphone], permission: 'microphone', action: microphoneRecoveryAction(microphone) },
-    { text: `Accessibility: ${facts ? (facts.accessibility ? 'granted' : 'not granted') : 'unknown'}. Optional for inserting text into other apps and background Fn.`, permission: 'accessibility', action: 'settings' },
-    { text: `Input Monitoring: ${facts ? (facts.input_monitoring ? 'granted' : 'not granted') : 'unknown'}. Optional alternative for background Fn.`, permission: 'input_monitoring', action: 'settings' },
-    { text: state.dictationTriggerMode === 'global-hold' ? 'Background Fn listener is armed. Try holding Fn in another app to verify delivery.' : 'Button dictation works without optional permissions. Fn can also work while Murmur is focused.', action: 'recheck' }
+    { text: `Accessibility: ${facts ? (facts.accessibility ? 'allowed' : 'not granted') : 'unknown'}. Lets Murmur paste into other apps and hear Fn while you’re in them.`, permission: 'accessibility', action: 'settings' },
+    { text: `Input Monitoring: ${facts ? (facts.input_monitoring ? 'allowed' : 'not granted') : 'unknown'}. Another way to hear Fn in the background. Not needed when Accessibility is allowed.`, permission: 'input_monitoring', action: 'settings' },
+    { text: state.dictationTriggerMode === 'global-hold' ? 'Background Fn is on. Hold Fn in another app to try it.' : 'The button always works without these. Fn also works while Murmur is in front.', action: 'recheck' }
   ];
   dom.dictationPermissionListEl.innerHTML = '';
   for (const item of items) {
@@ -70,7 +70,7 @@ export function renderPermissionGuidance() {
     const button = document.createElement('button');
     button.type = 'button';
     button.className = 'ghost quiet';
-    button.textContent = item.action === 'allow' ? (state.isRequestingMicrophone ? 'Waiting for macOS…' : 'Allow microphone') : item.action === 'settings' ? 'Open Settings' : 'Recheck permissions';
+    button.textContent = item.action === 'allow' ? (state.isRequestingMicrophone ? 'Waiting for macOS…' : 'Allow microphone') : item.action === 'settings' ? 'Open System Settings' : 'Recheck permissions';
     button.disabled = state.isRequestingMicrophone;
     button.dataset.permissionAction = item.action;
     button.dataset.permission = item.permission || '';
@@ -98,7 +98,7 @@ export function syncDictationHotkeyUi() {
     dom.dictationHotkeyInputEl.placeholder = state.defaultDictationHotkey || DEFAULT_DICTATION_HOTKEY;
   }
   if (dom.recordDictationHotkeyBtn) {
-    dom.recordDictationHotkeyBtn.textContent = state.isCapturingDictationHotkey ? 'Press Keys...' : 'Record';
+    dom.recordDictationHotkeyBtn.textContent = state.isCapturingDictationHotkey ? 'Press keys…' : 'Record keys';
   }
   renderDictationHotkeyPresets();
   renderPermissionGuidance();

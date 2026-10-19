@@ -39,12 +39,12 @@ export async function savePillVisibilityMode(mode) {
       mode: normalizePillVisibilityMode(mode)
     });
     applyBackgroundUiPreferencesPayload(payload);
-    setStatus('Floating pill preference saved.', 'ok');
+    setStatus('Floating pill setting saved.', 'ok');
   } catch (error) {
     const details = getErrorMessage(error);
     syncBackgroundUiControls();
-    setBackgroundUiStatus(`Could not save floating pill setting: ${details}`, 'error');
-    setStatus(`Could not save floating pill setting: ${details}`, 'error');
+    setBackgroundUiStatus(`Could not save the floating pill setting: ${details}`, 'error');
+    setStatus(`Could not save the floating pill setting: ${details}`, 'error');
   } finally {
     state.isSavingBackgroundUiSettings = false;
     syncControls();
@@ -65,12 +65,12 @@ export async function saveMenuBarMode(mode) {
       mode: normalizeMenuBarMode(mode)
     });
     applyBackgroundUiPreferencesPayload(payload);
-    setStatus('Menu bar preference saved.', 'ok');
+    setStatus('Menu bar setting saved.', 'ok');
   } catch (error) {
     const details = getErrorMessage(error);
     syncBackgroundUiControls();
-    setBackgroundUiStatus(`Could not save menu bar setting: ${details}`, 'error');
-    setStatus(`Could not save menu bar setting: ${details}`, 'error');
+    setBackgroundUiStatus(`Could not save the menu bar setting: ${details}`, 'error');
+    setStatus(`Could not save the menu bar setting: ${details}`, 'error');
   } finally {
     state.isSavingBackgroundUiSettings = false;
     syncControls();
@@ -91,12 +91,12 @@ export async function saveCloseAction(nextAction) {
       action: normalizeCloseAction(nextAction, state.menuBarMode)
     });
     applyBackgroundUiPreferencesPayload(payload);
-    setStatus('Close button behavior saved.', 'ok');
+    setStatus('Close button setting saved.', 'ok');
   } catch (error) {
     const details = getErrorMessage(error);
     syncBackgroundUiControls();
-    setBackgroundUiStatus(`Could not save close button behavior: ${details}`, 'error');
-    setStatus(`Could not save close button behavior: ${details}`, 'error');
+    setBackgroundUiStatus(`Could not save the close button setting: ${details}`, 'error');
+    setStatus(`Could not save the close button setting: ${details}`, 'error');
   } finally {
     state.isSavingBackgroundUiSettings = false;
     syncControls();

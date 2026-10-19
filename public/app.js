@@ -47,13 +47,13 @@ export function bootstrapApp() {
   } catch (error) {
     const details = getErrorMessage(error);
     setUiMode('error');
-    setStatus(`UI initialization failed: ${details}`, 'error');
+    setStatus(`Murmur couldn’t finish starting: ${details}`, 'error');
   }
 
   loadDictationOnboarding().catch((error) => {
     const details = getErrorMessage(error);
     setUiMode('error');
-    setStatus(`Could not initialize setup: ${details}`, 'error');
+    setStatus(`Could not load your setup: ${details}`, 'error');
   });
 }
 

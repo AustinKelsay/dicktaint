@@ -2,6 +2,7 @@
 
 ## Unreleased
 
+- polished the Murmur interface and copy end to end: one voice across setup, settings, the workspace, status messages, menu bar, and macOS permission guidance; shortcuts are named the way the keyboard labels them; the draft shows a word count; browser mode reports a real status; dead overlay stylesheet removed
 - fixed Stop/Clear arriving before a delayed native start: canceled requests release their own capture, and later frontend starts wait for cleanup and Clear acknowledgement
 
 - renamed the visible product to **Murmur** and rebuilt the Mac workspace around Dictation, editable text, recent dictations, and progressively disclosed Settings

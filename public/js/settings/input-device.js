@@ -31,8 +31,8 @@ export function renderInputDeviceOptions(devices, selectedDeviceName) {
   systemOption.value = '';
   const systemDefault = available.find((device) => device?.is_default)?.name;
   systemOption.textContent = systemDefault
-    ? `System Default (${systemDefault})`
-    : 'System Default';
+    ? `System default (${systemDefault})`
+    : 'System default';
   dom.dictationInputSelectEl.appendChild(systemOption);
 
   for (const device of available) {
@@ -40,16 +40,16 @@ export function renderInputDeviceOptions(devices, selectedDeviceName) {
     if (!name) continue;
     const option = document.createElement('option');
     option.value = name;
-    option.textContent = device?.is_default ? `${name} (Default)` : name;
+    option.textContent = device?.is_default ? `${name} (default)` : name;
     dom.dictationInputSelectEl.appendChild(option);
   }
 
   dom.dictationInputSelectEl.value = selectedDeviceName || '';
 
   if (selectedDeviceName) {
-    setDictationInputStatus(`Preferred microphone: ${selectedDeviceName}.`, 'ok');
+    setDictationInputStatus(`Always using ${selectedDeviceName}.`, 'ok');
   } else if (systemDefault) {
-    setDictationInputStatus(`Using the system default microphone: ${systemDefault}.`, 'neutral');
+    setDictationInputStatus(`Following the system default. Right now that’s ${systemDefault}.`, 'neutral');
   } else {
     setDictationInputStatus('Using the system default microphone.', 'neutral');
   }
@@ -74,15 +74,15 @@ export async function savePreferredInputDevice(deviceName) {
     state.currentOnboarding = await refreshDictationOnboarding({ quietStatus: true });
     setStatus(
       state.preferredInputDevice
-        ? `Preferred microphone saved: ${state.preferredInputDevice}.`
-        : 'Microphone reset to system default.',
+        ? `Microphone saved: ${state.preferredInputDevice}.`
+        : 'Microphone set to follow the system default.',
       'ok'
     );
   } catch (error) {
     const details = getErrorMessage(error);
     renderInputDeviceOptions(state.currentOnboarding?.available_input_devices, state.preferredInputDevice);
-    setDictationInputStatus(`Could not save microphone: ${details}`, 'error');
-    setStatus(`Could not save microphone: ${details}`, 'error');
+    setDictationInputStatus(`Could not save the microphone: ${details}`, 'error');
+    setStatus(`Could not save the microphone: ${details}`, 'error');
   } finally {
     state.isSavingInputDevice = false;
     syncControls();

@@ -50,7 +50,7 @@ export function emitHotkeyPillOverlay(message, pillState = 'idle', visible = tru
   if (typeof tauriEvent?.emit !== 'function') return;
 
   tauriEvent.emit(PILL_STATUS_EVENT, {
-    message: String(message || '').trim() || 'Hold fn to dictate',
+    message: String(message || '').trim() || 'Hold Fn to dictate',
     state: String(pillState || 'idle'),
     visible: Boolean(visible)
   }).catch(() => {});
@@ -58,7 +58,7 @@ export function emitHotkeyPillOverlay(message, pillState = 'idle', visible = tru
 
 
 export function summarizeHotkeyPillStatus(message, tone = 'neutral') {
-  if (!isFocusedMacDesktopMode()) return 'Desktop MVP: macOS only';
+  if (!isFocusedMacDesktopMode()) return 'Murmur dictates on macOS';
   const normalized = String(message || '').toLowerCase();
   const hotkeyLabel = instructionHotkeyLabel(state.savedDictationHotkey);
 
@@ -69,11 +69,11 @@ export function summarizeHotkeyPillStatus(message, tone = 'neutral') {
     return `Listening - press ${hotkeyLabel} again`;
   }
   if (tone === 'working') {
-    if (normalized.includes('transcrib')) return 'Transcribing...';
+    if (normalized.includes('transcrib')) return 'Transcribing…';
     if (normalized.includes('microphone') || normalized.includes('starting') || normalized.includes('opening')) {
-      return 'Starting dictation...';
+      return 'Starting…';
     }
-    return 'Working...';
+    return 'Working…';
   }
   if (tone === 'ok') {
     if (normalized.includes('transcrib') || normalized.includes('captured') || normalized.includes('transcript')) {
@@ -82,7 +82,7 @@ export function summarizeHotkeyPillStatus(message, tone = 'neutral') {
     return idlePillMessage();
   }
   if (tone === 'error') {
-    return 'Dictation error - check status';
+    return 'Something went wrong · see Murmur';
   }
   return idlePillMessage();
 }
@@ -136,8 +136,8 @@ export function syncSetupHealthPills() {
   }
 
   if (!state.currentOnboarding) {
-    setHealthPill(dom.whisperCliHealthEl, 'pending', 'Speech engine · checking');
-    setHealthPill(dom.dictationModelHealthEl, 'pending', 'Speech model · checking');
+    setHealthPill(dom.whisperCliHealthEl, 'pending', 'Speech engine · checking…');
+    setHealthPill(dom.dictationModelHealthEl, 'pending', 'Speech model · checking…');
     return;
   }
 
@@ -148,13 +148,13 @@ export function syncSetupHealthPills() {
   }
 
   if (state.isInstallingDictationModel) {
-    setHealthPill(dom.dictationModelHealthEl, 'working', 'Speech model · downloading');
+    setHealthPill(dom.dictationModelHealthEl, 'working', 'Speech model · downloading…');
   } else if (state.isDeletingDictationModel) {
-    setHealthPill(dom.dictationModelHealthEl, 'working', 'Speech model · removing');
+    setHealthPill(dom.dictationModelHealthEl, 'working', 'Speech model · removing…');
   } else if (modelExists) {
     setHealthPill(dom.dictationModelHealthEl, 'ok', 'Speech model · ready');
   } else {
-    setHealthPill(dom.dictationModelHealthEl, 'pending', 'Speech model · download needed');
+    setHealthPill(dom.dictationModelHealthEl, 'pending', 'Speech model · not downloaded yet');
   }
 }
 
@@ -163,7 +163,7 @@ export function refreshSelectedModelMeta() {
   if (!dom.dictationModelMetaEl) return;
   const selected = getSelectedDictationModel();
   if (!selected) {
-    dom.dictationModelMetaEl.textContent = 'Pick a model to view speed, quality, and local install state.';
+    dom.dictationModelMetaEl.textContent = 'Choose a model to see its size, speed, and quality.';
     return;
   }
 
@@ -177,10 +177,10 @@ export function refreshSelectedModelMeta() {
     sizeLabel,
     selected.speed_note || 'speed unknown',
     selected.quality_note || 'quality unknown',
-    selected.installed ? 'downloaded locally' : 'not downloaded',
-    selected.recommended ? 'recommended for this machine' : (selected.likely_runnable ? 'fits this machine' : 'likely heavy on this machine')
+    selected.installed ? 'downloaded' : 'not downloaded',
+    selected.recommended ? 'recommended for this Mac' : (selected.likely_runnable ? 'fits this Mac' : 'may be slow on this Mac')
   ];
-  dom.dictationModelMetaEl.textContent = parts.join(' • ');
+  dom.dictationModelMetaEl.textContent = parts.join(' · ');
 }
 
 
@@ -251,8 +251,8 @@ export function syncControls() {
   if (dom.onboardingContinueBtn) {
     dom.onboardingContinueBtn.disabled = false;
     dom.onboardingContinueBtn.textContent = state.setupScreenMode === 'settings'
-      ? 'Back to dictation'
-      : (setupReady ? 'Try dictation' : 'Open draft while you set up');
+      ? 'Done'
+      : (setupReady ? 'Start dictating' : 'Skip to the draft');
   }
   if (dom.openSettingsBtn) {
     dom.openSettingsBtn.disabled = false;

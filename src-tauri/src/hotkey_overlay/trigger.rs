@@ -221,22 +221,38 @@ pub(crate) fn focused_field_insert_enabled(settings: &LocalSettings) -> bool {
     matches!(settings.focused_field_insert_enabled, Some(true))
 }
 
+/// Names modifier keys the way this platform's keyboard does, for status copy only.
+/// The canonical trigger string itself is unchanged.
+fn display_trigger(trigger: &str) -> String {
+    #[cfg(target_os = "macos")]
+    {
+        trigger.replace("CmdOrCtrl", "Cmd").replace("Alt", "Option")
+    }
+    #[cfg(not(target_os = "macos"))]
+    {
+        trigger.replace("CmdOrCtrl", "Ctrl")
+    }
+}
+
 fn global_toggle_status(trigger: &str) -> String {
+    let trigger = display_trigger(trigger);
     format!("Press {trigger} anywhere to start or stop dictation.")
 }
 
 fn global_hold_status(trigger: &str) -> String {
+    let trigger = display_trigger(trigger);
     format!("Hold {trigger} anywhere to dictate, then release to transcribe.")
 }
 
 fn focused_window_hold_status(trigger: &str) -> String {
+    let trigger = display_trigger(trigger);
     format!(
-        "Hold {trigger} to dictate while Murmur is focused. Accessibility or Input Monitoring can enable background hold-to-talk."
+        "Hold {trigger} while Murmur is focused to dictate. Allow Accessibility or Input Monitoring to use it from any app."
     )
 }
 
 fn fn_permission_hint() -> String {
-    "For background Fn, enable Murmur in System Settings > Privacy & Security > Accessibility or Input Monitoring, then return and recheck.".to_string()
+    "To use Fn from any app, allow Murmur under System Settings > Privacy & Security > Accessibility (or Input Monitoring), then recheck.".to_string()
 }
 
 fn set_trigger_runtime_details(

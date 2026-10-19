@@ -95,10 +95,10 @@ pub(crate) fn focused_field_insert_permission_status(
             return FocusedFieldInsertPermissionStatus {
                 granted: true,
                 status: if enabled {
-                    "Accessibility permission granted. Finished transcripts can be pasted into the focused field of other apps."
+                    "On. Accessibility is allowed, so finished dictations are pasted where you’re typing in other apps."
                         .to_string()
                 } else {
-                    "Accessibility permission granted. Enable focused-field insertion to paste dictated text into other apps."
+                    "Off. Accessibility is already allowed, so you can turn this on any time."
                         .to_string()
                 },
             };
@@ -106,7 +106,7 @@ pub(crate) fn focused_field_insert_permission_status(
 
         return FocusedFieldInsertPermissionStatus {
             granted: false,
-            status: "Focused-field insertion needs Accessibility permission. Open System Settings > Privacy & Security > Accessibility, enable Murmur, then return and recheck. Button dictation and copying remain available.".to_string(),
+            status: "This needs Accessibility access. Open System Settings > Privacy & Security > Accessibility, allow Murmur, then recheck. The button and Copy keep working either way.".to_string(),
         };
     }
 
@@ -114,9 +114,9 @@ pub(crate) fn focused_field_insert_permission_status(
     FocusedFieldInsertPermissionStatus {
         granted: false,
         status: if enabled {
-            "Focused-field insertion is currently supported on macOS desktop only.".to_string()
+            "Typing into other apps is only available in the Mac app.".to_string()
         } else {
-            "Focused-field insertion is unavailable on this platform.".to_string()
+            "Typing into other apps isn’t available on this system.".to_string()
         },
     }
 }
@@ -235,7 +235,7 @@ pub(crate) fn insert_text_into_focused_field_impl(text: &str) -> Result<(), Stri
 
     paste_result.map_err(|error| {
         format!(
-            "Focused field insertion failed while sending native paste keystrokes. Allow Accessibility for Murmur in System Settings > Privacy & Security > Accessibility, then retry. Details: {error}"
+            "Murmur couldn’t paste into the other app. Allow Accessibility for Murmur in System Settings > Privacy & Security > Accessibility, then try again. Details: {error}"
         )
     })
 }
