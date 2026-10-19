@@ -15,6 +15,23 @@ import { appendTranscriptChunk, normalizeNativeSessionId } from './transcript.js
 import { ensureMicrophoneAccess } from './media-permissions.js';
 import { clampAudioLevel, normalizeLiveAudioBars, updateDictationWaveform } from './waveform.js';
 
+let nextStartRequest = 0;
+let nativeStartOperation = Promise.resolve();
+
+/** Rejects local completion/event delivery; the caller also sends native Stop or Clear. */
+export function invalidateNativeStart() {
+  state.nativeStartRequestId = null;
+}
+
+/** Clears native capture and keeps later starts behind its acknowledgement. */
+export function cancelNativeDesktopDictation() {
+  invalidateNativeStart();
+  const invoke = getTauriInvoke();
+  if (!invoke || !isFocusedMacDesktopMode()) return;
+  const cancellation = invoke('cancel_native_dictation').catch(() => {});
+  nativeStartOperation = Promise.all([nativeStartOperation, cancellation]).then(() => {});
+}
+
 export function normalizeNativeDictationError(text) {
   return String(text || '').trim().toLowerCase();
 }
@@ -59,55 +76,69 @@ export async function maybeStartQueuedNativeDictation() {
 }
 
 
-export async function startNativeDesktopDictation(trigger = 'button', shouldRetryOnConflict = true) {
+export async function startNativeDesktopDictation(trigger = 'button') {
   const tauriInvoke = getTauriInvoke();
   if (!tauriInvoke || !isFocusedMacDesktopMode()) return;
   if (state.nativeStopRequestInFlight) {
     queueNativeStartAfterCurrentStop(trigger);
-    setStatus('Finishing previous dictation... next one will start automatically.', 'working');
+    setStatus('Finishing the last dictation… the next one starts automatically.', 'working');
     return;
   }
   if (state.isDictating || state.isStartingDictation) return;
 
   if (!state.nativeDictationModelReady) {
-    setStatus('Complete setup first, then start dictation.', 'neutral');
+    setStatus('Finish setup in Settings, then start dictating.', 'neutral');
     return;
   }
 
+  const requestId = `frontend-${++nextStartRequest}`;
+  const previousStart = nativeStartOperation;
+  let releaseStart;
+  nativeStartOperation = new Promise(resolve => { releaseStart = resolve; });
+  state.nativeStartRequestId = requestId;
   try {
     state.isStartingDictation = true;
     state.nativeSessionIdToIgnore = null;
     state.rejectNextNativeAppend = false;
     syncControls();
     setUiMode('loading');
-    setStatus('Requesting microphone access...', 'working');
+    setStatus('Checking the microphone…', 'working');
+    // A canceled request still owns its native start until scoped cleanup ends.
+    await previousStart;
+    if (state.nativeStartRequestId !== requestId) return;
     await ensureMicrophoneAccess();
-    setStatus('Opening microphone...', 'working');
+    if (state.nativeStartRequestId !== requestId) return;
+    setStatus('Opening the microphone…', 'working');
     state.activeNativeSessionId = null;
-    await tauriInvoke('start_native_dictation');
+    await tauriInvoke('start_native_dictation', { requestId });
+    if (state.nativeStartRequestId !== requestId) {
+      // Stop/Clear can reach Rust before this async command reserves capture.
+      await tauriInvoke('cancel_native_dictation', { requestId });
+      return;
+    }
     state.isStartingDictation = false;
     setDictationState(true);
     setUiMode('listening');
     setStatus(listeningStatusForTrigger(trigger), 'live');
   } catch (error) {
+    if (state.nativeStartRequestId !== requestId) return;
     const details = getErrorMessage(error);
-    if (shouldRetryOnConflict && isStartConflictDictationError(details)) {
-      setStatus('Recovering from stale dictation state...', 'working');
-      state.nativeSessionIdToIgnore = null;
-      state.rejectNextNativeAppend = false;
-      state.activeNativeSessionId = null;
+    if (details.includes('Dictation start canceled.')) {
+      invalidateNativeStart();
       state.isStartingDictation = false;
       setDictationState(false);
-      try {
-        await tauriInvoke('cancel_native_dictation');
-        return startNativeDesktopDictation(trigger, false);
-      } catch (recoverError) {
-        state.isStartingDictation = false;
-        setDictationState(false);
-        setUiMode('error');
-        setStatus(`Could not recover dictation session: ${getErrorMessage(recoverError)}`, 'error');
-        return;
+      setUiMode('idle');
+      return;
+    }
+    if (isStartConflictDictationError(details)) {
+      // Global Fn and focused Fn can deliver the same press. Joining that live
+      // or pending session must never cancel its capture as "stale" recovery.
+      if (!state.isDictating) {
+        state.isStartingDictation = true;
+        setUiMode('loading');
+        setStatus('Dictation is already starting. Waiting for the microphone…', 'working');
       }
+      return;
     }
 
     state.isStartingDictation = false;
@@ -115,6 +146,8 @@ export async function startNativeDesktopDictation(trigger = 'button', shouldRetr
     state.activeNativeSessionId = null;
     setUiMode('error');
     setStatus(`Could not start dictation: ${details}`, 'error');
+  } finally {
+    releaseStart();
   }
 }
 
@@ -124,11 +157,12 @@ export async function stopNativeDesktopDictation(trigger = 'button') {
   if (!tauriInvoke || (!state.isDictating && !state.isStartingDictation)) return;
   if (state.nativeStopRequestInFlight) return;
 
+  invalidateNativeStart();
   state.nativeStopRequestInFlight = true;
   const sessionId = state.activeNativeSessionId;
   try {
     setUiMode('loading');
-    setStatus('Transcribing captured audio...', 'working');
+    setStatus('Transcribing…', 'working');
     const transcript = await tauriInvoke('stop_native_dictation');
     const didAppendTranscript = appendTranscriptChunk(transcript, {
       source: 'native',
@@ -138,14 +172,14 @@ export async function stopNativeDesktopDictation(trigger = 'button') {
     if (didAppendTranscript) {
       setStatus(completedStatusForTrigger(trigger), 'ok');
     } else {
-      setStatus('No new dictation content to save.', 'neutral');
+      setStatus('Nothing new was heard. Try again, a little closer to the mic.', 'neutral');
     }
   } catch (error) {
     const details = getErrorMessage(error);
     if (isStopNoopDictationError(details)) {
       setUiMode('idle');
       state.activeNativeSessionId = null;
-      setStatus('No active dictation session to stop.', 'neutral');
+      setStatus('Nothing was recording.', 'neutral');
       return;
     }
     setUiMode('error');
@@ -178,13 +212,13 @@ export function applyNativeFnHoldState(pressed) {
     state.nativeFnStopRequested = false;
     if (state.nativeStopRequestInFlight) {
       queueNativeStartAfterCurrentStop('hotkey-hold');
-      setHotkeyPill('finishing previous dictation...', 'working', true);
+      setHotkeyPill('Finishing the last dictation…', 'working', true);
       return;
     }
 
     if (state.isDictating || state.isStartingDictation || state.nativeHotkeyActionInFlight) return;
     state.nativeHotkeyActionInFlight = true;
-    setHotkeyPill('fn down - starting dictation...', 'working', true);
+    setHotkeyPill('Starting…', 'working', true);
     const startFn = state.startNativeDesktopDictationOverride || startNativeDesktopDictation;
     Promise.resolve(startFn('hotkey-hold'))
       .catch(() => {})
@@ -200,15 +234,14 @@ export function applyNativeFnHoldState(pressed) {
 
   state.nativeFnHoldActive = false;
   if (state.isStartingDictation && !state.isDictating) {
-    // Release can arrive while startup is in-flight; defer stop until capture is live.
-    state.nativeFnStopRequested = true;
-    setHotkeyPill('fn released - waiting for microphone...', 'working', true);
+    state.nativeFnStopRequested = false;
+    void stopNativeDesktopDictation('hotkey-hold');
     return;
   }
 
   if (!state.isDictating || state.nativeHotkeyActionInFlight) return;
   state.nativeHotkeyActionInFlight = true;
-  setHotkeyPill('fn released - transcribing...', 'working', true);
+  setHotkeyPill('Transcribing…', 'working', true);
   Promise.resolve(stopNativeDesktopDictation('hotkey-hold'))
     .catch(() => {})
     .finally(() => {
@@ -264,12 +297,12 @@ export function triggerDictationToggleFromHotkey() {
 
   if (state.isInstallingDictationModel || state.isDeletingDictationModel) return;
   if (!state.nativeDictationModelReady) {
-    setStatus('Complete setup first, then start dictation.', 'neutral');
+    setStatus('Finish setup in Settings, then start dictating.', 'neutral');
     return;
   }
   if (state.nativeStopRequestInFlight) {
     queueNativeStartAfterCurrentStop('hotkey');
-    setStatus('Finishing previous dictation... next one will start automatically.', 'working');
+    setStatus('Finishing the last dictation… the next one starts automatically.', 'working');
     return;
   }
 
@@ -289,12 +322,14 @@ export function triggerDictationToggleFromHotkey() {
 
 export function handleNativeDictationStatePayload(payload) {
   const s = payload?.state ?? 'idle';
+  if (payload?.request_id && payload.request_id !== state.nativeStartRequestId) return;
   const payloadSessionId = normalizeNativeSessionId(payload?.session_id);
   const sessionMatchesCurrent = !payloadSessionId
     || !state.activeNativeSessionId
     || payloadSessionId === state.activeNativeSessionId;
 
   if (s === 'listening') {
+    if (payloadSessionId && payloadSessionId === state.nativeSessionIdToIgnore) return;
     // Ignore late listening events from a superseded session; allow first
     // listening when activeNativeSessionId is still null (sessionMatchesCurrent).
     if (!sessionMatchesCurrent) return;
@@ -307,16 +342,18 @@ export function handleNativeDictationStatePayload(payload) {
   }
 
   if (s === 'processing') {
+    if (!sessionMatchesCurrent) return;
     if (payloadSessionId && !state.activeNativeSessionId) {
       state.activeNativeSessionId = payloadSessionId;
     }
     state.isStartingDictation = false;
     setUiMode('loading');
-    setStatus('Transcribing captured audio...', 'working');
+    setStatus('Transcribing…', 'working');
     return;
   }
 
   if (s === 'idle') {
+    if (payload?.request_id) invalidateNativeStart();
     const transcriptSessionId = payloadSessionId || state.activeNativeSessionId;
     const didAppendTranscript = state.nativeStopRequestInFlight
       ? false
@@ -334,7 +371,7 @@ export function handleNativeDictationStatePayload(payload) {
       state.activeNativeSessionId = null;
     }
     if (didAppendTranscript && sessionMatchesCurrent) {
-      setStatus('Dictation captured and transcribed.', 'ok');
+      setStatus('Transcribed and added to your draft.', 'ok');
     }
     return;
   }

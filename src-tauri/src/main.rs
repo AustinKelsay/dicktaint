@@ -7,6 +7,7 @@ mod hotkey_overlay;
 mod insert;
 mod models;
 mod onboarding;
+mod permissions;
 mod state;
 mod transcribe;
 mod whisper_cli;
@@ -160,6 +161,11 @@ fn main() {
             insert_text_into_focused_field,
             install_dictation_model,
             delete_dictation_model,
+            permissions::get_macos_permissions,
+            permissions::request_microphone_permission,
+            permissions::open_macos_permission_settings,
+            permissions::recheck_macos_permissions,
+            commands::copy_text_to_clipboard,
             start_native_dictation,
             stop_native_dictation,
             cancel_native_dictation

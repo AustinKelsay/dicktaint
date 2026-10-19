@@ -2,7 +2,7 @@
 import { dom } from './dom-elements.js';
 import { state } from './state.js';
 import { DICTATION_HISTORY_LIMIT } from './constants.js';
-import { getErrorMessage } from './platform.js';
+import { getErrorMessage, getTauriInvoke, isFocusedMacDesktopMode } from './platform.js';
 import { setStatus } from './ui.js';
 import { appendToDraftTranscript } from './draft-transcript.js';
 
@@ -55,23 +55,19 @@ export function formatHistoryTimestamp(value) {
 }
 
 /**
- * @param {string} source
- * @returns {string}
- */
-export function historySourceLabel(source) {
-  const value = String(source || '').trim().toLowerCase();
-  if (value === 'web') return 'WEB';
-  if (value === 'native' || value === 'native-event') return 'DESKTOP';
-  return 'DICTATION';
-}
-
-/**
  * @param {string} text
  * @returns {Promise<boolean>}
  */
 export async function copyTextToClipboard(text) {
   const trimmed = String(text || '').trim();
   if (!trimmed) return false;
+
+  if (isFocusedMacDesktopMode()) {
+    const invoke = getTauriInvoke();
+    if (!invoke) throw new Error('The clipboard isn’t available yet.');
+    await invoke('copy_text_to_clipboard', { text: trimmed });
+    return true;
+  }
 
   const tauriClipboard = window.__TAURI__?.clipboardManager
     || window.TAURI?.clipboardManager
@@ -103,14 +99,14 @@ export async function runDictationHistoryAction(historyAction, historyId) {
   const id = String(historyId || '').trim();
   const entry = findDictationHistoryEntry(id);
   if (!entry) {
-    setStatus('That history entry is no longer available.', 'error');
+    setStatus('That dictation is no longer in the list.', 'error');
     return false;
   }
 
   if (action === 'reinsert') {
     if (appendToDraftTranscript(entry.text)) {
       dom.transcriptInput.focus();
-      setStatus('Reinserted previous dictation into transcript.', 'ok');
+      setStatus('Added to your draft.', 'ok');
       return true;
     }
     return false;
@@ -120,9 +116,9 @@ export async function runDictationHistoryAction(historyAction, historyId) {
     try {
       const copied = await copyTextToClipboard(entry.text);
       if (copied) {
-        setStatus('Copied dictation entry to clipboard.', 'ok');
+        setStatus('Copied. Paste it anywhere.', 'ok');
       } else {
-        setStatus('Could not copy dictation entry to clipboard.', 'error');
+        setStatus('Could not copy that dictation.', 'error');
       }
       return copied;
     } catch (error) {
@@ -132,7 +128,7 @@ export async function runDictationHistoryAction(historyAction, historyId) {
     }
   }
 
-  setStatus(`Unknown history action: ${action || '(empty)'}.`, 'error');
+  setStatus('That action isn’t available.', 'error');
   return false;
 }
 
@@ -142,7 +138,7 @@ export function renderDictationHistory() {
   dom.dictationHistorySection.hidden = false;
   const hasHistory = state.dictationHistory.length > 0;
   dom.dictationHistoryEmptyEl.hidden = hasHistory;
-  if (dom.clearDictationHistoryBtn) dom.clearDictationHistoryBtn.disabled = !hasHistory;
+  if (dom.clearDictationHistoryBtn) dom.clearDictationHistoryBtn.hidden = !hasHistory;
 
   dom.dictationHistoryListEl.innerHTML = '';
   if (!hasHistory) return;
@@ -157,9 +153,7 @@ export function renderDictationHistory() {
 
     const meta = document.createElement('p');
     meta.className = 'dictation-history-meta';
-    const stamp = formatHistoryTimestamp(entry.createdAt);
-    const source = historySourceLabel(entry.source);
-    meta.textContent = stamp ? `${stamp} • ${source}` : source;
+    meta.textContent = formatHistoryTimestamp(entry.createdAt);
 
     const actions = document.createElement('div');
     actions.className = 'dictation-history-actions';
@@ -167,7 +161,7 @@ export function renderDictationHistory() {
     const reuseBtn = document.createElement('button');
     reuseBtn.type = 'button';
     reuseBtn.className = 'ghost quiet';
-    reuseBtn.textContent = 'Reinsert';
+    reuseBtn.textContent = 'Add to draft';
     reuseBtn.dataset.historyAction = 'reinsert';
     reuseBtn.dataset.historyId = entry.id;
 

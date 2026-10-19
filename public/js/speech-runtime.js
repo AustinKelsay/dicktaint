@@ -22,7 +22,7 @@ export function scheduleRecognitionRestart() {
       syncControls();
       state.recognition.start();
       setUiMode('loading');
-      setStatus('Reconnecting dictation...', 'working');
+      setStatus('Reconnecting…', 'working');
     } catch {
       state.isStartingDictation = false;
       syncControls();

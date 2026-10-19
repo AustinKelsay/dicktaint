@@ -1,9 +1,11 @@
+import { isNativeSetupReady } from '../readiness.js';
+import { refreshMacosPermissions } from '../permissions.js';
 /** Onboarding payload hydration and setup flow. */
 import { dom } from '../dom-elements.js';
 import { state } from '../state.js';
 import {
   DEFAULT_PILL_VISIBILITY_MODE, DEFAULT_MENU_BAR_MODE,
-  DEFAULT_CLOSE_ACTION, MAC_DESKTOP_ONLY_MESSAGE
+  DEFAULT_CLOSE_ACTION, MAC_DESKTOP_ONLY_MESSAGE, SpeechRecognitionApi
 } from '../constants.js';
 import {
   getTauriInvoke, detectDesktopOs, isNativeDesktopMode, isFocusedMacDesktopMode, getErrorMessage
@@ -33,7 +35,6 @@ function hideSetupCards() {
   if (dom.dictationInputCardEl) dom.dictationInputCardEl.hidden = true;
   if (dom.focusedFieldInsertCardEl) dom.focusedFieldInsertCardEl.hidden = true;
   if (dom.backgroundUiCardEl) dom.backgroundUiCardEl.hidden = true;
-  if (dom.openSettingsBtn) dom.openSettingsBtn.hidden = true;
 }
 
 /**
@@ -78,7 +79,6 @@ function resetSetupBailoutState({
   state.isSavingBackgroundUiSettings = false;
   state.isSavingFocusedFieldInsertSetting = false;
   setFocusedFieldInsertStatus(focusedFieldInsertStatusMessage, focusedFieldInsertStatusTone);
-  setSetupScreenMode('onboarding');
   hideSetupCards();
 }
 
@@ -93,13 +93,22 @@ export async function loadDictationOnboarding({ quietStatus = false } = {}) {
     resetSetupBailoutState({
       nativeDictationModelReady: true,
       whisperCliAvailable: true,
-      dictationTriggerStatus: 'Hotkey disabled.',
-      focusedFieldInsertPermissionStatus: 'Focused-field insertion is disabled.',
-      focusedFieldInsertStatusMessage: 'Focused-field insertion is disabled.'
+      dictationTriggerStatus: 'Shortcut off.',
+      focusedFieldInsertPermissionStatus: 'Typing into other apps isn’t available in a browser.',
+      focusedFieldInsertStatusMessage: 'Typing into other apps isn’t available in a browser.'
     });
-    setAppScreen('dictation');
+    state.onboardingCheckComplete = true;
+    syncFlowForSetupReadiness();
     syncDictationHotkeyUi();
     syncControls();
+    if (!state.isDictating && !state.isStartingDictation) {
+      document.body.dataset.mode = 'idle';
+      if (!quietStatus) {
+        setStatus(SpeechRecognitionApi
+          ? 'Ready. Start, speak, then stop.'
+          : 'Speech recognition isn’t available in this browser. You can type or paste a draft.', 'neutral');
+      }
+    }
     return null;
   }
   if (!isFocusedMacDesktopMode()) {
@@ -107,11 +116,12 @@ export async function loadDictationOnboarding({ quietStatus = false } = {}) {
       nativeDictationModelReady: false,
       whisperCliAvailable: false,
       currentDeviceProfile: { os: detectDesktopOs(), architecture: navigator.platform || '' },
-      dictationTriggerStatus: 'Hotkey unavailable on this platform.',
-      focusedFieldInsertPermissionStatus: 'Focused-field insertion is unavailable on this platform.',
-      focusedFieldInsertStatusMessage: 'Focused-field insertion is unavailable on this platform.'
+      dictationTriggerStatus: 'Shortcuts aren’t available on this system.',
+      focusedFieldInsertPermissionStatus: 'Typing into other apps isn’t available on this system.',
+      focusedFieldInsertStatusMessage: 'Typing into other apps isn’t available on this system.'
     });
-    setAppScreen('onboarding');
+    state.onboardingCheckComplete = true;
+    syncFlowForSetupReadiness();
     setDictationModelBusy('');
     setDictationModelStatus(MAC_DESKTOP_ONLY_MESSAGE, 'error');
     if (!quietStatus) {
@@ -123,23 +133,26 @@ export async function loadDictationOnboarding({ quietStatus = false } = {}) {
 
   const tauriInvoke = getTauriInvoke();
   if (!tauriInvoke) {
+    state.permissionCheckComplete = true;
     resetSetupBailoutState({
       nativeDictationModelReady: false,
       whisperCliAvailable: false,
-      dictationTriggerStatus: 'Desktop bridge offline.',
-      focusedFieldInsertPermissionStatus: 'Focused-field insertion is unavailable while desktop bridge is offline.',
-      focusedFieldInsertStatusMessage: 'Focused-field insertion is unavailable while desktop bridge is offline.'
+      dictationTriggerStatus: 'Murmur is still starting.',
+      focusedFieldInsertPermissionStatus: 'Typing into other apps becomes available once Murmur finishes starting.',
+      focusedFieldInsertStatusMessage: 'Typing into other apps becomes available once Murmur finishes starting.'
     });
-    setAppScreen('onboarding');
+    state.onboardingCheckComplete = true;
+    syncFlowForSetupReadiness();
     syncDictationHotkeyUi();
     syncControls();
     return null;
   }
 
   try {
-    if (!quietStatus) {
-      setStatus('Checking local speech-to-text setup...', 'working');
+    if (!quietStatus && !state.isDictating && !state.isStartingDictation) {
+      setStatus('Checking your setup…', 'working');
     }
+    const readinessStatusRevision = state.statusRevision;
     setDictationModelBusy('');
 
     const onboarding = await tauriInvoke('get_dictation_onboarding');
@@ -164,9 +177,6 @@ export async function loadDictationOnboarding({ quietStatus = false } = {}) {
     if (dom.backgroundUiCardEl) {
       dom.backgroundUiCardEl.hidden = false;
     }
-    if (dom.openSettingsBtn) {
-      dom.openSettingsBtn.hidden = false;
-    }
     if (dom.dictationDeviceProfileEl) {
       dom.dictationDeviceProfileEl.textContent = describeDeviceProfile(onboarding.device);
     }
@@ -180,54 +190,60 @@ export async function loadDictationOnboarding({ quietStatus = false } = {}) {
     if (dom.openWhisperSetupBtn) {
       dom.openWhisperSetupBtn.hidden = Boolean(onboarding.whisper_cli_available);
     }
+    if (dom.developerHintEl) {
+      dom.developerHintEl.hidden = Boolean(onboarding.whisper_cli_available);
+    }
 
     if (!onboarding.whisper_cli_available && !onboarding.selected_model_exists) {
       setDictationModelStatus(
-        `whisper-cli is unavailable. Packaged builds should include it. In tauri:dev, click "Open CLI Setup (dev)", then "Refresh Setup". Checked: ${onboarding.whisper_cli_path}`,
+        'Murmur couldn’t find its speech engine. Recheck, or quit and reopen Murmur.',
         'error'
       );
       state.nativeDictationModelReady = false;
     } else if (!onboarding.whisper_cli_available && onboarding.selected_model_exists) {
       setDictationModelStatus(
-        `Model is ready, but whisper-cli is unavailable. In tauri:dev, click "Open CLI Setup (dev)", then "Refresh Setup". Checked: ${onboarding.whisper_cli_path}`,
+        'Your model is ready, but the speech engine needs attention. Recheck, or quit and reopen Murmur.',
         'neutral'
       );
     } else if (onboarding.selected_model_exists) {
       const selected = (onboarding.models || []).find((item) => item.id === onboarding.selected_model_id);
       setDictationModelStatus(
-        `Speech-to-text ready: ${modelDisplayName(selected) || onboarding.selected_model_id}.`,
+        `${modelDisplayName(selected) || onboarding.selected_model_id} is ready to use.`,
         'ok'
       );
-      if (!quietStatus) {
-        setStatus('Local speech-to-text is ready on this device.', 'ok');
-      }
     } else {
-      setDictationModelStatus(
-        'Choose a model and click "Download + Use" to enable local speech-to-text.',
-        'neutral'
-      );
-      if (!quietStatus) {
-        setStatus('Setup required: download a local speech model for this device.', 'neutral');
+      // The checklist and status bar already name the next step.
+      setDictationModelStatus('', 'neutral');
+      if (!quietStatus && !state.isDictating && !state.isStartingDictation) {
+        setStatus('Download a speech model to finish setup.', 'neutral');
       }
     }
 
+    state.onboardingCheckComplete = true;
+    await refreshMacosPermissions();
+    if (!quietStatus && state.statusRevision === readinessStatusRevision && !state.isDictating && !state.isStartingDictation && state.nativeDictationModelReady) {
+      setStatus(isNativeSetupReady() ? 'Ready to dictate.' : 'Allow microphone access in Settings to start dictating.', isNativeSetupReady() ? 'ok' : 'neutral');
+    }
     syncFlowForSetupReadiness();
     syncControls();
+    if (document.body.dataset.mode === 'loading' && !state.isDictating && !state.isStartingDictation && !state.nativeStopRequestInFlight) document.body.dataset.mode = 'idle';
     return onboarding;
   } catch (error) {
     resetSetupBailoutState({
       nativeDictationModelReady: false,
       whisperCliAvailable: false,
-      dictationTriggerStatus: 'Could not load hotkey state.',
-      focusedFieldInsertPermissionStatus: 'Focused-field insertion is unavailable while setup is loading.',
-      focusedFieldInsertStatusMessage: 'Focused-field insertion is unavailable while setup is loading.'
+      dictationTriggerStatus: 'Could not load the shortcut.',
+      focusedFieldInsertPermissionStatus: 'Typing into other apps becomes available once setup loads.',
+      focusedFieldInsertStatusMessage: 'Typing into other apps becomes available once setup loads.'
     });
-    setAppScreen('onboarding');
+    state.onboardingCheckComplete = true;
+    await refreshMacosPermissions();
+    syncFlowForSetupReadiness();
     const details = getErrorMessage(error);
-    setDictationModelStatus(`Could not read setup state: ${details}`, 'error');
+    setDictationModelStatus(`Could not read your setup: ${details}`, 'error');
     setDictationModelBusy('');
     if (!quietStatus) {
-      setStatus(`Could not load setup state: ${details}`, 'error');
+      setStatus(`Could not load your setup: ${details}`, 'error');
     }
     syncDictationHotkeyUi();
     syncControls();

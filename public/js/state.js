@@ -41,6 +41,7 @@ const webSpeech = {
 };
 
 const nativeSession = {
+  nativeStartRequestId: null,
   lastHotkeyToggleAtMs: 0,
   nativeHotkeyActionInFlight: false,
   nativeFnHoldActive: false,
@@ -95,6 +96,9 @@ const uiBusy = {
 };
 
 export const state = {
+  macosPermissions: null,
+  macosPermissionError: '',
+  isRequestingMicrophone: false,
   webSpeech,
   nativeSession,
   onboarding,
@@ -113,6 +117,7 @@ aliasSliceFields(state, 'webSpeech', [
 ]);
 
 aliasSliceFields(state, 'nativeSession', [
+  'nativeStartRequestId',
   'lastHotkeyToggleAtMs',
   'nativeHotkeyActionInFlight',
   'nativeFnHoldActive',

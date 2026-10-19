@@ -68,29 +68,11 @@ pub(crate) fn open_whisper_setup_page() -> Result<(), String> {
 
 #[tauri::command]
 pub(crate) fn get_dictation_onboarding(
-    app: tauri::AppHandle,
     config: State<'_, AppConfig>,
     model_state: State<'_, LocalModelState>,
     hotkey_state: State<'_, GlobalHotkeyState>,
 ) -> Result<DictationOnboardingPayload, String> {
-    let mut payload =
-        build_onboarding_payload(config.inner(), model_state.inner(), hotkey_state.inner())?;
-    match apply_registered_hotkey(
-        &app,
-        hotkey_state.inner(),
-        payload.dictation_trigger.as_deref(),
-    ) {
-        Ok(runtime) => {
-            payload.dictation_trigger_mode = runtime.mode.as_str().to_string();
-            payload.dictation_trigger_status = runtime.status;
-            payload.dictation_trigger_permission_hint = runtime.permission_hint;
-        }
-        Err(error) => {
-            log::warn!("get_dictation_onboarding: failed to apply global hotkey: {error}");
-        }
-    }
-    sync_background_ui(&app);
-    Ok(payload)
+    build_onboarding_payload(config.inner(), model_state.inner(), hotkey_state.inner())
 }
 
 #[tauri::command]
@@ -283,7 +265,7 @@ pub(crate) fn set_focused_field_insert_enabled(
     enabled: bool,
     model_state: State<'_, LocalModelState>,
 ) -> Result<FocusedFieldInsertPayload, String> {
-    let permission = focused_field_insert_permission_status(enabled, enabled);
+    let permission = focused_field_insert_permission_status(enabled);
     let settings_path = model_state.settings_path.clone();
     let mut settings = model_state
         .settings
@@ -338,6 +320,13 @@ pub(crate) fn set_preferred_input_device(
 }
 
 #[tauri::command]
+pub(crate) async fn copy_text_to_clipboard(text: String) -> Result<(), String> {
+    tauri::async_runtime::spawn_blocking(move || crate::insert::copy_text_to_clipboard_impl(&text))
+        .await
+        .map_err(|error| format!("Could not copy text to the clipboard: {error}"))?
+}
+
+#[tauri::command]
 pub(crate) fn insert_text_into_focused_field(
     state: State<'_, LocalModelState>,
     text: String,
@@ -351,7 +340,7 @@ pub(crate) fn insert_text_into_focused_field(
     };
     if !focused_field_insert_enabled {
         return Err(
-            "Focused-field insertion is disabled in settings. Enable \"Dictate Into Focused Field\" to use this command."
+            "Typing into other apps is turned off. Turn it on in Settings first."
                 .to_string(),
         );
     }
@@ -517,11 +506,15 @@ pub(crate) async fn delete_dictation_model(
 }
 
 #[tauri::command]
-pub(crate) fn start_native_dictation(app: tauri::AppHandle) -> Result<(), String> {
-    match dictation_session::start(&app) {
+pub(crate) async fn start_native_dictation(app: tauri::AppHandle, request_id: Option<String>) -> Result<(), String> {
+    let reservation = dictation_session::reserve_start(&app, request_id.clone())?;
+    let handle = app.clone();
+    let result = tauri::async_runtime::spawn_blocking(move || dictation_session::start_reserved(&handle, reservation, None, request_id))
+        .await.map_err(|e| format!("Could not start dictation: {e}"))?;
+    match result {
         Ok(_) => Ok(()),
         Err(error) => {
-            if error.trim() != "Dictation already running." {
+            if !dictation_session::is_benign_session_error(&error) {
                 emit_dictation_state(&app, "error", Some(error.clone()), None, None);
             }
             Err(error)
@@ -535,6 +528,6 @@ pub(crate) async fn stop_native_dictation(app: tauri::AppHandle) -> Result<Strin
 }
 
 #[tauri::command]
-pub(crate) fn cancel_native_dictation(app: tauri::AppHandle) -> Result<(), String> {
-    dictation_session::cancel(&app)
+pub(crate) fn cancel_native_dictation(app: tauri::AppHandle, request_id: Option<String>) -> Result<(), String> {
+    dictation_session::cancel(&app, request_id.as_deref())
 }

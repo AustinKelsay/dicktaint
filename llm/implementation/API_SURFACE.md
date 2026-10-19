@@ -2,7 +2,7 @@
 
 ## Status Snapshot
 
-- Date: 2026-07-30
+- Date: 2026-10-18
 - Runtime interfaces: HTTP server contract and Tauri invoke/event contract
 
 ## Purpose
@@ -25,6 +25,7 @@ Out of scope:
 - `server.js`
 - `src-tauri/src/main.rs` (thin entry)
 - `src-tauri/src/commands.rs`
+- `src-tauri/src/permissions.rs`
 - `src-tauri/src/hotkey_overlay/mod.rs`
 - `src-tauri/src/state.rs`
 - `public/js/constants.js`
@@ -44,21 +45,35 @@ HTTP interface:
 
 Tauri commands:
 
-- `get_dictation_onboarding() -> DictationOnboardingPayload`
-- `get_dictation_trigger() -> DictationTriggerPayload`
-- `set_dictation_trigger(trigger: String) -> DictationTriggerPayload`
-- `clear_dictation_trigger() -> DictationTriggerPayload`
-- `set_focused_field_insert_enabled(enabled: bool) -> FocusedFieldInsertPayload`
+- `get_dictation_onboarding() -> Result<DictationOnboardingPayload, String>`
+- `get_macos_permissions() -> MacosPermissions` (quiet snapshot)
+- `request_microphone_permission() -> Result<MacosPermissions, String>` (explicit request)
+- `open_macos_permission_settings(permission: PermissionPane) -> Result<(), String>`
+- `recheck_macos_permissions() -> Result<MacosPermissions, String>` (quiet snapshot + recording-safe optional Fn refresh)
+- `get_dictation_trigger() -> Result<DictationTriggerPayload, String>`
+- `set_dictation_trigger(trigger: String) -> Result<DictationTriggerPayload, String>`
+- `clear_dictation_trigger() -> Result<DictationTriggerPayload, String>`
+- `set_pill_visibility_mode(mode: String) -> Result<BackgroundUiPreferencesPayload, String>`
+- `set_menu_bar_mode(mode: String) -> Result<BackgroundUiPreferencesPayload, String>`
+- `set_close_action(action: String) -> Result<BackgroundUiPreferencesPayload, String>`
+- `set_preferred_input_device(device_name: Option<String>) -> Result<Option<String>, String>`
+- `set_focused_field_insert_enabled(enabled: bool) -> Result<FocusedFieldInsertPayload, String>`
 - `insert_text_into_focused_field(text: String) -> Result<(), String>`
+- `copy_text_to_clipboard(text: String) -> Result<(), String>` (macOS manual Copy; no Accessibility requirement, key event, or clipboard restore)
 - `open_whisper_setup_page() -> Result<(), String>`
-- `install_dictation_model(model: String) -> DictationModelSelection`
-- `delete_dictation_model(model: String) -> DictationModelDeletion`
-- `start_native_dictation() -> Result<(), String>`
+- `install_dictation_model(model: String) -> Result<DictationModelSelection, String>`
+- `delete_dictation_model(model: String) -> Result<DictationModelDeletion, String>`
+- `start_native_dictation(request_id?: String) -> Result<(), String>`
 - `stop_native_dictation() -> Result<String, String>`
-- `cancel_native_dictation() -> Result<(), String>`
+- `cancel_native_dictation(request_id?: String) -> Result<(), String>`
 
 Command payload notes:
 
+- `cancel_native_dictation` without `request_id` cancels the current pending or active capture. With `request_id` (invoke key `requestId`), it cancels only a pending or active capture owned by that frontend start; other frontend requests and native Fn captures are preserved. See [`NATIVE_DESKTOP_DICTATION.md`](NATIVE_DESKTOP_DICTATION.md) for cleanup ordering.
+
+- `MacosPermissions` contains `supported`, independent `microphone`, `accessibility`, and `input_monitoring` facts; microphone vocabulary is `not_determined | authorized | denied | restricted | unavailable`
+- `PermissionPane` is the allowlisted `microphone | accessibility | input_monitoring`; arbitrary URLs are rejected
+- see [`MACOS_PERMISSIONS.md`](MACOS_PERMISSIONS.md) for request/recheck semantics
 - `DictationOnboardingPayload` includes `focused_field_insert_enabled: bool`
 - `DictationOnboardingPayload` also includes `dictation_trigger_mode`, `dictation_trigger_status`, and `dictation_trigger_permission_hint`
 - `DictationTriggerPayload` includes `trigger`, `default_trigger`, `trigger_mode`, `trigger_status`, and `trigger_permission_hint`
@@ -67,7 +82,8 @@ Command payload notes:
 Event channels:
 
 - frontend local fallback only: `dictation:hotkey-triggered` payload `{ pressed }`
-- backend to frontend (and overlay): `dictation:state-changed` payload `{ state, error?, transcript?, session_id? }`
+- backend to frontend (and overlay): `dictation:state-changed` payload `{ state, error?, transcript?, session_id?, request_id? }`
+  - optional `request_id` on listening and cancellation idle correlates a frontend start with its event; existing native callers may omit it
   - dictation session `state` vocabulary: `idle` | `listening` | `processing` | `error`
 - backend to frontend/overlay: `dictation:audio-level` payload `{ session_id, peak_abs, rms, level, bars }` (always present; matches `DictationAudioLevelPayload`)
 - backend/frontend to overlay: `dicktaint://pill-status` payload `{ message, state, visible }`

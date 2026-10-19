@@ -451,8 +451,21 @@ fn microphone_media_type() -> Result<&'static objc2_av_foundation::AVMediaType, 
 }
 
 #[cfg(target_os = "macos")]
+pub(crate) fn microphone_permission() -> crate::permissions::MicrophonePermission {
+    use crate::permissions::MicrophonePermission;
+    let Ok(media_type) = microphone_media_type() else { return MicrophonePermission::Unavailable; };
+    match unsafe { AVCaptureDevice::authorizationStatusForMediaType(media_type) } {
+        AVAuthorizationStatus::NotDetermined => MicrophonePermission::NotDetermined,
+        AVAuthorizationStatus::Authorized => MicrophonePermission::Authorized,
+        AVAuthorizationStatus::Denied => MicrophonePermission::Denied,
+        AVAuthorizationStatus::Restricted => MicrophonePermission::Restricted,
+        _ => MicrophonePermission::Unavailable,
+    }
+}
+
+#[cfg(target_os = "macos")]
 fn microphone_permission_denied_error() -> String {
-    "Microphone permission is denied for this app. In macOS Settings > Privacy & Security > Microphone, allow dicktaint and relaunch the app.".to_string()
+    "Microphone permission is denied for this app. In macOS Settings > Privacy & Security > Microphone, enable Murmur, then return and recheck.".to_string()
 }
 
 #[cfg(target_os = "macos")]
@@ -520,7 +533,7 @@ pub(crate) fn ensure_microphone_access_authorized(app: &tauri::AppHandle) -> Res
     match rx.recv_timeout(Duration::from_secs(15)) {
         Ok(result) => result,
         Err(_) => Err(
-            "Timed out waiting for macOS microphone permission. Bring dicktaint to the foreground, approve access in Privacy & Security > Microphone, then retry."
+            "Microphone permission is still unconfirmed. Return to Murmur after answering the macOS prompt, then recheck or retry."
                 .to_string(),
         ),
     }

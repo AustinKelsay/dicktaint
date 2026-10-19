@@ -3,10 +3,10 @@
 <plist version="1.0">
 <dict>
   <key>NSMicrophoneUsageDescription</key>
-  <string>dicktaint needs microphone access for live local dictation.</string>
+  <string>Murmur uses your microphone to transcribe your voice on your Mac.</string>
   <key>NSSpeechRecognitionUsageDescription</key>
-  <string>dicktaint needs speech recognition access to convert your voice into text locally.</string>
+  <string>Murmur uses speech recognition for dictation where supported.</string>
   <key>NSInputMonitoringUsageDescription</key>
-  <string>dicktaint needs Input Monitoring so holding Fn / Globe can start dictation while other apps are focused.</string>
+  <string>Murmur can use Input Monitoring so holding Fn / Globe starts dictation while another app is focused.</string>
 </dict>
 </plist>

@@ -24,8 +24,6 @@ use objc2::rc::Retained;
 use objc2_app_kit::{NSPasteboard, NSPasteboardTypeString};
 #[cfg(target_os = "macos")]
 use objc2_foundation::NSString;
-#[cfg(target_os = "macos")]
-use std::process::Command;
 
 /// Process-wide lock so pasteboard write → Cmd+V → restore never overlaps.
 #[cfg(target_os = "macos")]
@@ -87,61 +85,8 @@ fn macos_accessibility_permission_granted() -> bool {
     false
 }
 
-#[cfg(target_os = "macos")]
-fn open_accessibility_settings() -> Result<(), String> {
-    let status = Command::new("open")
-        .arg("x-apple.systempreferences:com.apple.preference.security?Privacy_Accessibility")
-        .status()
-        .map_err(|e| format!("Failed to open macOS Accessibility settings: {e}"))?;
-    if status.success() {
-        Ok(())
-    } else {
-        Err("Failed to open macOS Accessibility settings.".to_string())
-    }
-}
-
-/// Minimum gap between Accessibility Settings reopen attempts.
-///
-/// Paste attempts used to call `open` on every failed insert, which felt like a
-/// permission loop when the Accessibility toggle looked on but TCC still denied
-/// the current ad-hoc binary (`AXIsProcessTrusted` false after rebuild/re-sign).
-#[cfg(target_os = "macos")]
-const ACCESSIBILITY_SETTINGS_REOPEN_COOLDOWN: Duration = Duration::from_secs(60);
-
-#[cfg(target_os = "macos")]
-fn maybe_open_accessibility_settings() -> bool {
-    use std::sync::Mutex;
-    use std::time::Instant;
-
-    static LAST_OPENED: Mutex<Option<Instant>> = Mutex::new(None);
-
-    let mut guard = match LAST_OPENED.lock() {
-        Ok(guard) => guard,
-        Err(_) => {
-            log::warn!("Failed to lock Accessibility settings reopen cooldown");
-            return false;
-        }
-    };
-
-    if guard.is_some_and(|last| last.elapsed() < ACCESSIBILITY_SETTINGS_REOPEN_COOLDOWN) {
-        return false;
-    }
-
-    match open_accessibility_settings() {
-        Ok(()) => {
-            *guard = Some(Instant::now());
-            true
-        }
-        Err(error) => {
-            log::warn!("Failed to open Accessibility settings: {error}");
-            false
-        }
-    }
-}
-
 pub(crate) fn focused_field_insert_permission_status(
     enabled: bool,
-    prompt_if_missing: bool,
 ) -> FocusedFieldInsertPermissionStatus {
     #[cfg(target_os = "macos")]
     {
@@ -150,30 +95,18 @@ pub(crate) fn focused_field_insert_permission_status(
             return FocusedFieldInsertPermissionStatus {
                 granted: true,
                 status: if enabled {
-                    "Accessibility permission granted. Finished transcripts can be pasted into the focused field of other apps."
+                    "On. Accessibility is allowed, so finished dictations are pasted where you’re typing in other apps."
                         .to_string()
                 } else {
-                    "Accessibility permission granted. Enable focused-field insertion to paste dictated text into other apps."
+                    "Off. Accessibility is already allowed, so you can turn this on any time."
                         .to_string()
                 },
             };
         }
 
-        let opened = if prompt_if_missing {
-            maybe_open_accessibility_settings()
-        } else {
-            false
-        };
-
         return FocusedFieldInsertPermissionStatus {
             granted: false,
-            status: if opened {
-                "Focused-field insertion needs Accessibility permission. Opened System Settings > Privacy & Security > Accessibility. Remove dicktaint if it is already listed, add /Applications/dicktaint.app again, enable it, then relaunch dicktaint."
-                    .to_string()
-            } else {
-                "Focused-field insertion needs Accessibility permission. In System Settings > Privacy & Security > Accessibility, remove dicktaint if listed, add /Applications/dicktaint.app again, enable it, then relaunch dicktaint."
-                    .to_string()
-            },
+            status: "This needs Accessibility access. Open System Settings > Privacy & Security > Accessibility, allow Murmur, then recheck. The button and Copy keep working either way.".to_string(),
         };
     }
 
@@ -181,9 +114,9 @@ pub(crate) fn focused_field_insert_permission_status(
     FocusedFieldInsertPermissionStatus {
         granted: false,
         status: if enabled {
-            "Focused-field insertion is currently supported on macOS desktop only.".to_string()
+            "Typing into other apps is only available in the Mac app.".to_string()
         } else {
-            "Focused-field insertion is unavailable on this platform.".to_string()
+            "Typing into other apps isn’t available on this system.".to_string()
         },
     }
 }
@@ -202,6 +135,21 @@ fn write_text_to_general_pasteboard(
     }
 
     Ok((pasteboard, snapshot))
+}
+
+/// Explicit Copy keeps the chosen text on the clipboard without requiring AX trust.
+#[cfg(target_os = "macos")]
+pub(crate) fn copy_text_to_clipboard_impl(text: &str) -> Result<(), String> {
+    // Wait for any insertion's conditional restore before taking clipboard ownership.
+    let _guard = FOCUSED_FIELD_INSERT_LOCK
+        .lock()
+        .unwrap_or_else(|poisoned| poisoned.into_inner());
+    write_text_to_general_pasteboard(text).map(|_| ())
+}
+
+#[cfg(not(target_os = "macos"))]
+pub(crate) fn copy_text_to_clipboard_impl(_text: &str) -> Result<(), String> {
+    Err("Native clipboard copying is currently supported on macOS desktop only.".to_string())
 }
 
 #[cfg(target_os = "macos")]
@@ -270,9 +218,8 @@ pub(crate) fn insert_text_into_focused_field_impl(text: &str) -> Result<(), Stri
         .lock()
         .unwrap_or_else(|poisoned| poisoned.into_inner());
 
-    // Do not reopen Settings on every paste — only surface the status. Enabling
-    // the setting (and the cooldown helper) is what prompts System Settings.
-    let permission = focused_field_insert_permission_status(true, false);
+    // Insertion only checks trust; opening System Settings is an explicit UI action.
+    let permission = focused_field_insert_permission_status(true);
     if !permission.granted {
         return Err(permission.status);
     }
@@ -288,7 +235,7 @@ pub(crate) fn insert_text_into_focused_field_impl(text: &str) -> Result<(), Stri
 
     paste_result.map_err(|error| {
         format!(
-            "Focused field insertion failed while sending native paste keystrokes. Allow Accessibility for dicktaint in System Settings > Privacy & Security > Accessibility, then retry. Details: {error}"
+            "Murmur couldn’t paste into the other app. Allow Accessibility for Murmur in System Settings > Privacy & Security > Accessibility, then try again. Details: {error}"
         )
     })
 }

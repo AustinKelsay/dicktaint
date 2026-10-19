@@ -160,7 +160,7 @@ fn create_pill_overlay_window_for_monitor(
 
     let window =
         tauri::WebviewWindowBuilder::new(app, label, tauri::WebviewUrl::App("pill.html".into()))
-            .title("dicktaint overlay")
+            .title("Murmur overlay")
             .decorations(false)
             .transparent(true)
             .shadow(false)

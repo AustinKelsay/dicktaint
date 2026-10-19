@@ -93,7 +93,7 @@ export function normalizeHotkeyKey(token) {
 export function parseHotkeyCombo(raw) {
   const source = String(raw || '').trim();
   if (!source) {
-    return { ok: false, error: 'Hotkey cannot be empty.' };
+    return { ok: false, error: 'Enter a shortcut first.' };
   }
 
   const modifiers = new Set();
@@ -102,7 +102,7 @@ export function parseHotkeyCombo(raw) {
   for (const token of source.split('+')) {
     const trimmed = token.trim();
     if (!trimmed) {
-      return { ok: false, error: 'Hotkey contains an empty token.' };
+      return { ok: false, error: 'That shortcut has an empty part. Check the plus signs.' };
     }
 
     const modifier = normalizeHotkeyModifier(trimmed);
@@ -113,16 +113,16 @@ export function parseHotkeyCombo(raw) {
     }
 
     if (key) {
-      return { ok: false, error: 'Hotkey can only have one main key.' };
+      return { ok: false, error: 'A shortcut can only have one main key.' };
     }
     key = normalizeHotkeyKey(trimmed);
     if (!key) {
-      return { ok: false, error: `Unsupported key "${trimmed}".` };
+      return { ok: false, error: `“${trimmed}” isn’t a supported key.` };
     }
   }
 
   if (key === 'Fn') {
-    if (modifiers.size) return { ok: false, error: 'Fn hotkey must be used by itself.' };
+    if (modifiers.size) return { ok: false, error: 'Fn works on its own, without other keys.' };
     return {
       ok: true,
       display: 'Fn',
@@ -138,8 +138,8 @@ export function parseHotkeyCombo(raw) {
     };
   }
 
-  if (!modifiers.size) return { ok: false, error: 'Hotkey must include at least one modifier (or use Fn by itself on macOS).' };
-  if (!key) return { ok: false, error: 'Hotkey is missing its main key.' };
+  if (!modifiers.size) return { ok: false, error: 'Add a modifier like Cmd or Shift, or use Fn on its own.' };
+  if (!key) return { ok: false, error: 'The shortcut is missing its main key.' };
   if (modifiers.has('CmdOrCtrl') && (modifiers.has('Cmd') || modifiers.has('Ctrl'))) {
     return { ok: false, error: 'Use CmdOrCtrl by itself, or use Cmd/Ctrl explicitly.' };
   }
@@ -242,10 +242,29 @@ export function eventMatchesHotkey(event, spec) {
  * @returns {Array<{ label: string, value: string }>}
  */
 export function getSuggestedHotkeyOptions() {
-  if (isFocusedMacDesktopMode()) {
-    return HOTKEY_PRESET_OPTIONS;
-  }
-  return HOTKEY_PRESET_OPTIONS.filter((option) => option.value !== 'Fn');
+  const options = isFocusedMacDesktopMode()
+    ? HOTKEY_PRESET_OPTIONS
+    : HOTKEY_PRESET_OPTIONS.filter((option) => option.value !== 'Fn');
+  return options.map((option) => ({
+    value: option.value,
+    label: option.value === 'Fn' ? 'Hold Fn' : humanizeHotkeyLabel(option.value)
+  }));
+}
+
+/**
+ * Shows a canonical shortcut the way this platform names its keys.
+ * @param {unknown} raw
+ * @returns {string}
+ */
+export function humanizeHotkeyLabel(raw) {
+  const value = String(raw || '').trim();
+  if (!value) return '';
+  const mac = isMacPlatform();
+  return value.split('+').map((token) => {
+    if (token === 'CmdOrCtrl') return mac ? 'Cmd' : 'Ctrl';
+    if (token === 'Alt') return mac ? 'Option' : 'Alt';
+    return token;
+  }).join('+');
 }
 
 /**
@@ -278,8 +297,8 @@ export function describeMachineLabel(device = state.currentDeviceProfile) {
  */
 export function instructionHotkeyLabel(raw = state.savedDictationHotkey || state.pendingDictationHotkey || state.defaultDictationHotkey) {
   const value = String(raw || '').trim();
-  if (!value) return 'a hotkey';
-  return value === 'Fn' ? 'Fn / Globe' : value;
+  if (!value) return 'your shortcut';
+  return value === 'Fn' ? 'Fn / Globe' : humanizeHotkeyLabel(value);
 }
 
 /** @returns {boolean} */
@@ -292,12 +311,12 @@ export function isHoldToTalkHotkey() {
 /** @returns {string} */
 export function idlePillMessage() {
   if (!isNativeDesktopMode()) return '';
-  if (!isFocusedMacDesktopMode()) return 'Desktop MVP: macOS only';
-  if (!state.currentOnboarding) return 'Checking dictation setup...';
-  if (!state.nativeDictationModelReady) return 'Finish setup in dicktaint';
-  if (!state.savedDictationHotkey) return 'Hotkey disabled - open settings';
+  if (!isFocusedMacDesktopMode()) return 'Murmur dictates on macOS';
+  if (!state.currentOnboarding) return 'Checking your setup…';
+  if (!state.nativeDictationModelReady) return 'Finish setup in Murmur';
+  if (!state.savedDictationHotkey) return 'Shortcut off · open Settings';
   if (state.dictationTriggerMode === 'focused-window-hold') {
-    return `Focus dicktaint, then hold ${instructionHotkeyLabel(state.savedDictationHotkey)}`;
+    return `Focus Murmur, then hold ${instructionHotkeyLabel(state.savedDictationHotkey)}`;
   }
   if (isHoldToTalkHotkey()) {
     return `Hold ${instructionHotkeyLabel(state.savedDictationHotkey)} to dictate`;
@@ -311,12 +330,12 @@ export function idlePillMessage() {
  */
 export function listeningStatusForTrigger(trigger) {
   if (trigger === 'hotkey-hold' || isHoldToTalkHotkey()) {
-    return `Listening... release ${instructionHotkeyLabel(state.savedDictationHotkey)} to stop and transcribe.`;
+    return `Listening… release ${instructionHotkeyLabel(state.savedDictationHotkey)} to transcribe.`;
   }
   if (trigger === 'hotkey') {
-    return `Listening... press ${instructionHotkeyLabel(state.savedDictationHotkey)} again to stop and transcribe.`;
+    return `Listening… press ${instructionHotkeyLabel(state.savedDictationHotkey)} again to transcribe.`;
   }
-  return 'Listening... click Stop to transcribe.';
+  return 'Listening… click Stop to transcribe.';
 }
 
 /**
@@ -324,11 +343,8 @@ export function listeningStatusForTrigger(trigger) {
  * @returns {string}
  */
 export function completedStatusForTrigger(trigger) {
-  if (trigger === 'hotkey-hold' || isHoldToTalkHotkey()) {
-    return `Dictation captured from ${instructionHotkeyLabel(state.savedDictationHotkey)} hold and transcribed.`;
+  if (trigger === 'hotkey-hold' || trigger === 'hotkey' || isHoldToTalkHotkey()) {
+    return 'Transcribed and added to your draft. Ready for the next one.';
   }
-  if (trigger === 'hotkey') {
-    return `Dictation captured from ${instructionHotkeyLabel(state.savedDictationHotkey)} and transcribed.`;
-  }
-  return 'Dictation captured and transcribed.';
+  return 'Transcribed and added to your draft.';
 }

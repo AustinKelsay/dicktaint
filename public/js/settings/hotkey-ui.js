@@ -5,10 +5,7 @@ import { dom } from '../dom-elements.js';
 import { state } from '../state.js';
 import { DEFAULT_DICTATION_HOTKEY } from '../constants.js';
 import { isNativeDesktopMode, isFocusedMacDesktopMode } from '../platform.js';
-import {
-  parseHotkeyCombo, getSuggestedHotkeyOptions, describeMachineLabel,
-  instructionHotkeyLabel
-} from './hotkey-logic.js';
+import { parseHotkeyCombo, getSuggestedHotkeyOptions } from './hotkey-logic.js';
 
 /** Renders suggested hotkey preset chips. */
 export function renderDictationHotkeyPresets() {
@@ -30,70 +27,41 @@ export function renderDictationHotkeyPresets() {
   }
 }
 
-/** Renders microphone / hotkey / accessibility permission guidance. */
+/**
+ * Renders the optional Mac access rows. The microphone lives in the required setup checks,
+ * and the shortcut card already says whether Fn works from any app.
+ */
 export function renderPermissionGuidance() {
-  if (!dom.dictationPermissionsCardEl || !dom.dictationPermissionSummaryEl || !dom.dictationPermissionListEl) return;
+  if (!dom.dictationPermissionsCardEl || !dom.dictationPermissionListEl) return;
+  dom.dictationPermissionsCardEl.hidden = !isFocusedMacDesktopMode();
+  if (!isFocusedMacDesktopMode()) return;
 
-  dom.dictationPermissionsCardEl.hidden = !isNativeDesktopMode();
-  if (!isNativeDesktopMode()) return;
-
-  const machineLabel = describeMachineLabel();
-  if (!isFocusedMacDesktopMode()) {
-    dom.dictationPermissionSummaryEl.textContent = `${machineLabel} is outside the supported macOS desktop path.`;
-    dom.dictationPermissionListEl.innerHTML = '';
-    return;
-  }
-
-  dom.dictationPermissionSummaryEl.textContent = state.nativeDictationModelReady
-    ? `${machineLabel} is ready. ${state.dictationTriggerStatus}`
-    : `${machineLabel} still needs local setup. ${state.dictationTriggerStatus}`;
-
+  const facts = state.macosPermissions;
+  const grant = (allowed) => (facts ? (allowed ? 'allowed' : 'not allowed') : 'unknown');
   const items = [
-    {
-      tone: state.nativeDictationModelReady ? 'ok' : 'neutral',
-      text: 'Microphone: macOS asks the first time you start dictation. If audio fails later, relaunch after changing permission.'
-    }
+    { text: `Accessibility · ${grant(facts?.accessibility)}. Pastes into other apps and hears Fn from any app.`, permission: 'accessibility', allowed: facts?.accessibility },
+    // Input Monitoring is only an alternative Fn route, so it drops away once Accessibility covers it.
+    ...(facts?.accessibility ? [] : [{ text: `Input Monitoring · ${grant(facts?.input_monitoring)}. Hears Fn from any app, without pasting.`, permission: 'input_monitoring', allowed: facts?.input_monitoring }])
   ];
-
-  if (state.savedDictationHotkey) {
-    if (state.dictationTriggerMode === 'focused-window-hold') {
-      items.push({
-        tone: 'warn',
-        text: state.dictationTriggerPermissionHint || 'Input Monitoring is required for global Fn hold-to-talk. Without it, Fn only works while dicktaint is focused.'
-      });
-    } else if (state.dictationTriggerMode === 'global-hold') {
-      items.push({
-        tone: 'ok',
-        text: 'Input Monitoring: global Fn hold-to-talk is active for this app while it is running.'
-      });
-    } else {
-      items.push({
-        tone: 'ok',
-        text: `Hotkey: ${instructionHotkeyLabel(state.savedDictationHotkey)} is registered globally while dicktaint is running.`
-      });
-    }
-  } else {
-    items.push({
-      tone: 'neutral',
-      text: 'Hotkey: disabled. Open Settings if you want a system-wide trigger again.'
-    });
-  }
-
-  items.push({
-    tone: state.focusedFieldInsertEnabled
-      ? (state.focusedFieldInsertPermissionGranted ? 'ok' : 'warn')
-      : 'neutral',
-    text: state.focusedFieldInsertEnabled
-      ? (state.focusedFieldInsertPermissionStatus
-        || 'Accessibility is required for Dictate Into Focused Field.')
-      : 'Accessibility is only needed if you enable Dictate Into Focused Field.'
-  });
-
   dom.dictationPermissionListEl.innerHTML = '';
   for (const item of items) {
     const li = document.createElement('li');
-    li.dataset.tone = item.tone;
     li.textContent = item.text;
+    if (!item.allowed) {
+      const button = document.createElement('button');
+      button.type = 'button';
+      button.className = 'ghost quiet';
+      button.textContent = 'Open System Settings';
+      button.dataset.permissionAction = 'settings';
+      button.dataset.permission = item.permission;
+      li.appendChild(button);
+    }
+    dom.dictationPermissionListEl.appendChild(li);
+  }
+  if (state.macosPermissionError) {
+    const li = document.createElement('li');
+    li.textContent = state.macosPermissionError;
+    li.dataset.tone = 'error';
     dom.dictationPermissionListEl.appendChild(li);
   }
 }
@@ -103,7 +71,7 @@ export function syncDictationHotkeyUi() {
   const nativeDesktop = isNativeDesktopMode();
   if (dom.dictationHotkeyCardEl) dom.dictationHotkeyCardEl.hidden = !nativeDesktop;
   if (dom.focusedFieldInsertCardEl) dom.focusedFieldInsertCardEl.hidden = !nativeDesktop;
-  if (dom.dictationPermissionsCardEl) dom.dictationPermissionsCardEl.hidden = !nativeDesktop;
+  renderPermissionGuidance();
   if (!nativeDesktop) return;
 
   if (dom.dictationHotkeyInputEl) {
@@ -111,8 +79,7 @@ export function syncDictationHotkeyUi() {
     dom.dictationHotkeyInputEl.placeholder = state.defaultDictationHotkey || DEFAULT_DICTATION_HOTKEY;
   }
   if (dom.recordDictationHotkeyBtn) {
-    dom.recordDictationHotkeyBtn.textContent = state.isCapturingDictationHotkey ? 'Press Keys...' : 'Record';
+    dom.recordDictationHotkeyBtn.textContent = state.isCapturingDictationHotkey ? 'Press keys…' : 'Record keys';
   }
   renderDictationHotkeyPresets();
-  renderPermissionGuidance();
 }

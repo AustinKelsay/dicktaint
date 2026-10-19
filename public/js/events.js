@@ -1,3 +1,4 @@
+import { initPermissionListeners, isNativeSetupReady } from './permissions.js';
 /**
  * DOM and Tauri event wiring for dictation.
  *
@@ -11,28 +12,27 @@
 import { dom } from './dom-elements.js';
 import { state } from './state.js';
 import {
-  DEFAULT_DICTATION_HOTKEY,
   DICTATION_HOTKEY_EVENT, DICTATION_STATE_EVENT, DICTATION_AUDIO_LEVEL_EVENT, SpeechRecognitionApi
 } from './constants.js';
 import { isNativeDesktopMode, isFocusedMacDesktopMode, shouldUseTauriCommands, getTauriInvoke, getErrorMessage } from './platform.js';
 import {
   setUiMode, setStatus, setAppScreen, setSetupScreenMode, syncControls, setDictationState,
-  setDictationModelStatus, refreshSelectedModelMeta
+  setDictationModelStatus
 } from './ui.js';
-import { modelDisplayName } from './labels.js';
-import { renderDictationHistory, runDictationHistoryAction } from './history.js';
+import { renderDictationHistory, runDictationHistoryAction, copyTextToClipboard } from './history.js';
 import { setDraftTranscriptText, appendTranscriptChunk } from './transcript.js';
 import { clearRestartTimer, scheduleRecognitionRestart } from './speech-runtime.js';
 import {
   applyNativeFnHoldState, handleNativeHoldKeydown, handleNativeHoldKeyup,
   handleNativeDictationStatePayload, handleNativeDictationAudioLevelPayload,
   shouldHandleNativeFnHoldInFocusedWindow,
-  startNativeDesktopDictation, stopNativeDesktopDictation, triggerDictationToggleFromHotkey
+  startNativeDesktopDictation, stopNativeDesktopDictation, cancelNativeDesktopDictation,
+  triggerDictationToggleFromHotkey
 } from './native-dictation.js';
 import {
   handleDictationHotkeyEvent, beginDictationHotkeyCapture, saveDictationHotkey, clearDictationHotkey
 } from './settings/hotkeys.js';
-import { setDictationHotkeyStatus } from './settings/hotkey-logic.js';
+import { setDictationHotkeyStatus, humanizeHotkeyLabel } from './settings/hotkey-logic.js';
 import {
   saveFocusedFieldInsertSetting
 } from './settings/focused-field-insert.js';
@@ -42,7 +42,7 @@ import {
 import { savePreferredInputDevice } from './settings/input-device.js';
 import {
   installSelectedDictationModel, deleteSelectedDictationModel, openWhisperSetupPage,
-  getSelectedDictationModel, updateModelActionLabels
+  updateModelActionLabels
 } from './onboarding/models.js';
 import { loadDictationOnboarding } from './onboarding/index.js';
 import {
@@ -64,14 +64,14 @@ export function initNativeListeners() {
       triggerDictationToggleFromHotkey();
     }).catch(err => {
       console.error('Failed to register DICTATION_HOTKEY_EVENT listener', err);
-      setStatus('Could not register dictation hotkey listener.', 'error');
+      setStatus('Could not listen for the dictation shortcut.', 'error');
     });
 
     tauriEventApi.listen(DICTATION_STATE_EVENT, ({ payload }) => {
       handleNativeDictationStatePayload(payload);
     }).catch(err => {
       console.error('Failed to register DICTATION_STATE_EVENT listener', err);
-      setStatus('Could not register dictation state listener.', 'error');
+      setStatus('Could not listen for dictation updates.', 'error');
     });
 
     tauriEventApi.listen(DICTATION_AUDIO_LEVEL_EVENT, ({ payload }) => {
@@ -124,9 +124,9 @@ export function initSettingsListeners() {
       state.pendingDictationHotkey = String(event?.currentTarget?.value || '').trim();
       state.isCapturingDictationHotkey = false;
       if (!state.pendingDictationHotkey) {
-        setDictationHotkeyStatus(`Hotkey disabled. Default: ${state.defaultDictationHotkey || DEFAULT_DICTATION_HOTKEY}.`, 'neutral');
+        setDictationHotkeyStatus('Pick a preset or record keys.', 'neutral');
       } else {
-        setDictationHotkeyStatus(`Pending hotkey: ${state.pendingDictationHotkey}. Click "Save Hotkey" to apply.`, 'neutral');
+        setDictationHotkeyStatus(`Ready to save: ${humanizeHotkeyLabel(state.pendingDictationHotkey)}.`, 'neutral');
       }
       syncControls();
     });
@@ -143,7 +143,7 @@ export function initSettingsListeners() {
       if (dom.dictationHotkeyInputEl) {
         dom.dictationHotkeyInputEl.value = state.pendingDictationHotkey;
       }
-      setDictationHotkeyStatus(`Preset selected: ${state.pendingDictationHotkey}. Click "Save Hotkey" to apply.`, 'neutral');
+      setDictationHotkeyStatus(`Ready to save: ${humanizeHotkeyLabel(state.pendingDictationHotkey)}.`, 'neutral');
       syncControls();
     });
   }
@@ -151,12 +151,6 @@ export function initSettingsListeners() {
     dom.saveDictationHotkeyBtn.addEventListener('click', async () => {
       const nextValue = String(dom.dictationHotkeyInputEl?.value || state.pendingDictationHotkey || '').trim();
       await saveDictationHotkey(nextValue);
-    });
-  }
-  if (dom.resetDictationHotkeyBtn) {
-    dom.resetDictationHotkeyBtn.addEventListener('click', async () => {
-      state.pendingDictationHotkey = state.defaultDictationHotkey || DEFAULT_DICTATION_HOTKEY;
-      await saveDictationHotkey(state.pendingDictationHotkey);
     });
   }
   if (dom.clearDictationHotkeyBtn) {
@@ -194,25 +188,7 @@ export function initSettingsListeners() {
   }
   if (dom.dictationModelSelect) {
     dom.dictationModelSelect.addEventListener('change', () => {
-      const selected = getSelectedDictationModel();
-      if (!selected) {
-        setDictationModelStatus('Pick a model to manage download/use state.', 'neutral');
-      } else if (selected.installed) {
-        const isCurrent = Boolean(state.currentOnboarding?.selected_model_exists)
-          && state.currentOnboarding?.selected_model_id === selected.id;
-        setDictationModelStatus(
-          isCurrent
-            ? `${modelDisplayName(selected)} is active for dictation.`
-            : `${modelDisplayName(selected)} is installed. Click "Use Installed" to switch.`,
-          'neutral'
-        );
-      } else {
-        setDictationModelStatus(
-          `${modelDisplayName(selected)} is not downloaded yet. Click "Download + Use" to install it.`,
-          'neutral'
-        );
-      }
-      refreshSelectedModelMeta();
+      setDictationModelStatus('', 'neutral');
       updateModelActionLabels();
       syncControls();
     });
@@ -221,11 +197,16 @@ export function initSettingsListeners() {
 
 /** Wires shared transcript / history / navigation controls. */
 export function initSharedUiListeners() {
-  dom.clearTranscriptBtn.addEventListener('click', () => {
-    const tauriInvoke = shouldUseTauriCommands() ? getTauriInvoke() : null;
-    if (tauriInvoke) {
-      tauriInvoke('cancel_native_dictation').catch(() => {});
+  dom.copyTranscriptBtn?.addEventListener('click', async () => {
+    try {
+      const copied = await copyTextToClipboard(dom.transcriptInput.value);
+      setStatus(copied ? 'Copied. Paste it anywhere.' : 'Nothing to copy yet. Dictate or type something first.', copied ? 'ok' : 'neutral');
+    } catch (error) {
+      setStatus(`Could not copy the draft: ${getErrorMessage(error)}. Select the text and use Copy from the Edit menu.`, 'error');
     }
+  });
+  dom.clearTranscriptBtn.addEventListener('click', () => {
+    cancelNativeDesktopDictation();
 
     state.shouldKeepDictating = false;
     state.isStartingDictation = false;
@@ -239,14 +220,14 @@ export function initSharedUiListeners() {
     clearRestartTimer();
     setDraftTranscriptText('');
     setUiMode('idle');
-    setStatus('Transcript cleared. Recent dictation history is still available in app state.', 'neutral');
+    setStatus('Draft cleared. Recent dictations are still below.', 'neutral');
   });
 
   if (dom.clearDictationHistoryBtn) {
     dom.clearDictationHistoryBtn.addEventListener('click', () => {
       state.dictationHistory = [];
       renderDictationHistory();
-      setStatus('Recent dictation history cleared.', 'neutral');
+      setStatus('Recent dictations cleared.', 'neutral');
     });
   }
 
@@ -277,24 +258,18 @@ export function initSharedUiListeners() {
     state.currentDraftText = dom.transcriptInput.value;
   });
 
+  dom.dictationNav?.addEventListener('click', () => setAppScreen('dictation'));
+  dom.settingsNav?.addEventListener('click', () => {
+    setSetupScreenMode('settings');
+    setAppScreen('onboarding');
+  });
+  dom.sessionStopBtn?.addEventListener('click', () => dom.stopDictationBtn?.click());
   renderDictationHistory();
 
   if (dom.onboardingContinueBtn) {
     dom.onboardingContinueBtn.addEventListener('click', () => {
-      if (state.setupScreenMode === 'onboarding' && isFocusedMacDesktopMode() && !state.nativeDictationModelReady) {
-        setStatus('Complete setup first, then start dictation.', 'neutral');
-        return;
-      }
       setAppScreen('dictation');
-      setStatus(state.setupScreenMode === 'settings' ? 'Settings closed.' : 'Dictation ready.', 'ok');
-    });
-  }
-
-  if (dom.openSettingsBtn) {
-    dom.openSettingsBtn.addEventListener('click', () => {
-      setSetupScreenMode('settings');
-      setAppScreen('onboarding');
-      setStatus('Settings opened. Manage local model setup here.', 'neutral');
+      setStatus(isNativeSetupReady() ? 'Ready to dictate.' : 'Your draft is ready. Finish setup any time in Settings.', isNativeSetupReady() ? 'ok' : 'neutral');
     });
   }
 }
@@ -315,7 +290,7 @@ export function initWebSpeechDictation() {
     state.isStartingDictation = false;
     setDictationState(true);
     setUiMode('listening');
-    setStatus('Listening... speak now.', 'live');
+    setStatus('Listening… speak now.', 'live');
   };
 
   state.recognition.onresult = (event) => {
@@ -341,7 +316,7 @@ export function initWebSpeechDictation() {
     state.isStartingDictation = false;
     syncControls();
     setUiMode('error');
-    setStatus(`Dictation error: ${speechError}`, 'error');
+    setStatus(`Dictation stopped: ${speechError}`, 'error');
 
     if (isFatalSpeechError(errorCode)) {
       state.shouldKeepDictating = false;
@@ -373,10 +348,10 @@ export function initWebSpeechDictation() {
       state.isStartingDictation = true;
       syncControls();
       setUiMode('loading');
-      setStatus('Requesting microphone access...', 'working');
+      setStatus('Asking for microphone access…', 'working');
       await ensureMicrophoneAccess();
       state.recognition.start();
-      setStatus('Starting dictation...', 'working');
+      setStatus('Starting…', 'working');
     } catch (error) {
       const details = getErrorMessage(error);
       state.hasMicrophoneAccess = false;
@@ -407,6 +382,7 @@ export function initDictation() {
 
   if (isFocusedMacDesktopMode()) {
     initSettingsListeners();
+    initPermissionListeners();
     syncControls();
     return;
   }

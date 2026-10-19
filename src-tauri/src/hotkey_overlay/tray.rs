@@ -1,7 +1,7 @@
 //! macOS menu bar tray runtime, labels, and menu event handling.
 
 use crate::dictation_session::{
-    cancel_if_active, current_active_session_id, is_benign_session_error, start, stop,
+    cancel_if_active, current_active_session_id,
 };
 use crate::state::{
     BackendDictationStatus, MAIN_TRAY_ID, MenuBarMode, TRAY_MENU_FORCE_STOP_ID, TRAY_MENU_OPEN_ID,
@@ -19,8 +19,8 @@ use super::emit_dictation_state;
 
 fn tray_primary_action_label(status: BackendDictationStatus) -> &'static str {
     match status {
-        BackendDictationStatus::Listening => "Stop + Transcribe",
-        BackendDictationStatus::Processing => "Transcribing...",
+        BackendDictationStatus::Listening => "Stop and Transcribe",
+        BackendDictationStatus::Processing => "Transcribing…",
         BackendDictationStatus::Idle | BackendDictationStatus::Error => "Start Dictation",
     }
 }
@@ -35,7 +35,7 @@ fn tray_force_stop_enabled(status: BackendDictationStatus) -> bool {
 
 fn tray_title_for_backend_status(status: BackendDictationStatus) -> &'static str {
     match status {
-        BackendDictationStatus::Idle => "DT",
+        BackendDictationStatus::Idle => "Murmur",
         BackendDictationStatus::Listening => "REC",
         BackendDictationStatus::Processing => "...",
         BackendDictationStatus::Error => "ERR",
@@ -88,24 +88,8 @@ fn handle_tray_menu_event(app: &tauri::AppHandle, menu_id: &tauri::menu::MenuId)
         return;
     }
 
-    let handle = app.clone();
-    tauri::async_runtime::spawn(async move {
-        let result = match current_backend_dictation_status(&handle) {
-            Ok(BackendDictationStatus::Listening) => stop(handle.clone()).await.map(|_| ()),
-            Ok(BackendDictationStatus::Processing) => Ok(()),
-            Ok(BackendDictationStatus::Idle | BackendDictationStatus::Error) => {
-                start(&handle).map(|_| ())
-            }
-            Err(error) => Err(error),
-        };
-
-        if let Err(error) = result {
-            if !is_benign_session_error(&error) {
-                log::warn!("Tray dictation action failed: {error}");
-                emit_dictation_state(&handle, "error", Some(error), None, None);
-            }
-        }
-    });
+    if matches!(current_backend_dictation_status(app), Ok(BackendDictationStatus::Processing)) { return; }
+    super::dispatch_backend_hotkey_action(app, crate::state::BackendHotkeyAction::Toggle);
 }
 
 fn ensure_macos_tray_runtime(
@@ -128,7 +112,7 @@ fn ensure_macos_tray_runtime(
     .enabled(false)
     .build(app)
     .map_err(|e| format!("Failed to build tray status item: {e}"))?;
-    let open_item = MenuItemBuilder::with_id(TRAY_MENU_OPEN_ID, "Open dicktaint")
+    let open_item = MenuItemBuilder::with_id(TRAY_MENU_OPEN_ID, "Open Murmur")
         .build(app)
         .map_err(|e| format!("Failed to build tray open item: {e}"))?;
     let toggle_item =
@@ -141,7 +125,7 @@ fn ensure_macos_tray_runtime(
             .enabled(tray_force_stop_enabled(status))
             .build(app)
             .map_err(|e| format!("Failed to build tray force-stop item: {e}"))?;
-    let quit_item = MenuItemBuilder::with_id(TRAY_MENU_QUIT_ID, "Quit dicktaint")
+    let quit_item = MenuItemBuilder::with_id(TRAY_MENU_QUIT_ID, "Quit Murmur")
         .build(app)
         .map_err(|e| format!("Failed to build tray quit item: {e}"))?;
 
@@ -159,7 +143,7 @@ fn ensure_macos_tray_runtime(
         .menu(&menu)
         .title(tray_title_for_backend_status(status))
         .show_menu_on_left_click(true)
-        .tooltip("dicktaint")
+        .tooltip("Murmur")
         .on_menu_event(|app, event: tauri::menu::MenuEvent| {
             handle_tray_menu_event(app, event.id());
         })
@@ -210,7 +194,7 @@ pub(super) fn sync_macos_tray(app: &tauri::AppHandle, status: BackendDictationSt
         .map_err(|e| format!("Failed to update tray force-stop enabled state: {e}"))?;
     runtime
         .tray_icon
-        .set_tooltip(Some(format!("dicktaint: {}", status.tray_label())))
+        .set_tooltip(Some(format!("Murmur: {}", status.tray_label())))
         .map_err(|e| format!("Failed to update tray tooltip: {e}"))?;
     runtime
         .tray_icon
@@ -251,11 +235,11 @@ mod tests {
         );
         assert_eq!(
             tray_primary_action_label(BackendDictationStatus::Listening),
-            "Stop + Transcribe"
+            "Stop and Transcribe"
         );
         assert_eq!(
             tray_primary_action_label(BackendDictationStatus::Processing),
-            "Transcribing..."
+            "Transcribing…"
         );
         assert!(!tray_primary_action_enabled(
             BackendDictationStatus::Processing

@@ -2,7 +2,7 @@
 
 ## Status Snapshot
 
-- Date: 2026-02-17
+- Date: 2026-10-18
 - this runbook covers day-to-day dev flow for web, desktop, and iOS commands
 
 ## Purpose
@@ -28,6 +28,7 @@ Out of scope:
 - `scripts/build-whisper-sidecar.sh`
 - `scripts/smoke-whisper-sidecar.sh`
 - `scripts/verify-docs.sh`
+- `scripts/verify-macos-bundle.sh`
 
 ## Runbook
 
@@ -45,6 +46,8 @@ Desktop mode:
 1. optional sidecar rebuild: `bun run whisper:sidecar`
 2. optional sidecar smoke: `bun run whisper:smoke`
 3. run desktop dev: `bun run tauri:dev`
+4. complete engine/model/microphone setup; optional Mac access does not gate button dictation
+5. for a reviewable local bundle, follow the build/sign/verify sequence in [`RELEASE_AND_DISTRIBUTION.md`](RELEASE_AND_DISTRIBUTION.md); keep the installed working app untouched
 
 Tests:
 

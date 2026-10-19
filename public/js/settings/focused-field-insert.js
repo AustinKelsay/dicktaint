@@ -43,17 +43,17 @@ export function applyFocusedFieldInsertPayload(payload) {
 
   if (enabled && state.focusedFieldInsertPermissionGranted) {
     setFocusedFieldInsertStatus(
-      state.focusedFieldInsertPermissionStatus || 'Focused-field insertion is enabled.',
+      state.focusedFieldInsertPermissionStatus || 'On. Finished dictations are pasted where you’re typing.',
       'ok'
     );
   } else if (enabled) {
     setFocusedFieldInsertStatus(
-      state.focusedFieldInsertPermissionStatus || 'Focused-field insertion needs Accessibility permission.',
+      state.focusedFieldInsertPermissionStatus || 'This needs Accessibility access. Allow Murmur in System Settings, then recheck.',
       'error'
     );
   } else {
     setFocusedFieldInsertStatus(
-      state.focusedFieldInsertPermissionStatus || 'Focused-field insertion is disabled.',
+      state.focusedFieldInsertPermissionStatus || 'Off. Dictations stay in Murmur’s draft.',
       'neutral'
     );
   }
@@ -73,9 +73,9 @@ export async function saveFocusedFieldInsertSetting(enabled) {
     setStatus(
       state.focusedFieldInsertEnabled
         ? (state.focusedFieldInsertPermissionGranted
-          ? 'Focused-field insertion enabled.'
-          : (state.focusedFieldInsertPermissionStatus || 'Focused-field insertion needs Accessibility permission.'))
-        : 'Focused-field insertion disabled.',
+          ? 'Finished dictations will now be pasted where you’re typing.'
+          : (state.focusedFieldInsertPermissionStatus || 'This needs Accessibility access. Allow Murmur in System Settings, then recheck.'))
+        : 'Dictations will stay in Murmur’s draft.',
       state.focusedFieldInsertEnabled && !state.focusedFieldInsertPermissionGranted ? 'error' : 'ok'
     );
   } catch (error) {
@@ -83,8 +83,8 @@ export async function saveFocusedFieldInsertSetting(enabled) {
     if (dom.focusedFieldInsertToggleEl) {
       dom.focusedFieldInsertToggleEl.checked = state.focusedFieldInsertEnabled;
     }
-    setFocusedFieldInsertStatus(`Could not save setting: ${details}`, 'error');
-    setStatus(`Could not save focused-field insertion setting: ${details}`, 'error');
+    setFocusedFieldInsertStatus(`Could not save this setting: ${details}`, 'error');
+    setStatus(`Could not save the typing setting: ${details}`, 'error');
   } finally {
     state.isSavingFocusedFieldInsertSetting = false;
     syncControls();
@@ -114,8 +114,8 @@ export async function maybeInsertTranscriptIntoFocusedField(chunk) {
       await tauriInvoke('insert_text_into_focused_field', { text: trimmed });
     } catch (error) {
       const details = getErrorMessage(error);
-      setFocusedFieldInsertStatus(`Insert failed: ${details}`, 'error');
-      setStatus(`Transcript captured, but focused-field insert failed: ${details}`, 'error');
+      setFocusedFieldInsertStatus(`Pasting into the other app failed: ${details}`, 'error');
+      setStatus(`Your words are in the draft, but pasting into the other app failed: ${details}`, 'error');
     }
   }
 

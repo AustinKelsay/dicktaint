@@ -88,6 +88,7 @@ class MockElement {
   }
 
   closest(selector) {
+    if (selector === 'button[data-permission-action]') return this.dataset.permissionAction ? this : null;
     if (selector === 'button[data-history-action][data-history-id]') {
       if (
         this.tagName === 'BUTTON'
@@ -116,19 +117,27 @@ class MockElement {
 function createMockDom({ nativeDesktop = false, onboardingPayload = null, invokeHandler = null } = {}) {
   const ids = [
     'status',
+    'dictationNav',
+    'settingsNav',
+    'copyTranscript',
+    'runtimeNote',
+    'captureGuidance',
+    'microphoneHealth',
+    'requiredMicrophoneAction',
+    'sessionStop',
+    'requiredSetup',
+    'optionalSettings',
+    'setupTechnicalDetails',
+    'workspaceTitle',
     'onboardingScreen',
     'dictationScreen',
     'onboardingContinue',
-    'openSettings',
-    'setupModeChip',
     'setupTitle',
     'setupLead',
-    'setupSteps',
     'startDictation',
     'stopDictation',
     'clearTranscript',
     'dictationWaveform',
-    'dictationWaveformLevel',
     'dictationWaveBar0',
     'dictationWaveBar1',
     'dictationWaveBar2',
@@ -157,12 +166,10 @@ function createMockDom({ nativeDesktop = false, onboardingPayload = null, invoke
     'dictationModelStatus',
     'dictationModelBusy',
     'dictationDeviceProfile',
-    'dictationModelMeta',
     'dictationHotkeyCard',
     'dictationHotkeyInput',
     'recordDictationHotkey',
     'saveDictationHotkey',
-    'resetDictationHotkey',
     'clearDictationHotkey',
     'dictationHotkeyStatus',
     'dictationHotkeyPresets',
@@ -175,7 +182,6 @@ function createMockDom({ nativeDesktop = false, onboardingPayload = null, invoke
     'pillVisibilityModeSelect',
     'backgroundUiStatus',
     'dictationPermissionsCard',
-    'dictationPermissionSummary',
     'dictationPermissionList',
     'quickDictationFab'
   ];
@@ -318,6 +324,9 @@ function createMockDom({ nativeDesktop = false, onboardingPayload = null, invoke
             });
             if (handled !== undefined) return handled;
           }
+          if (command === 'get_macos_permissions' || command === 'recheck_macos_permissions') {
+            return { supported: true, microphone: 'authorized', accessibility: false, input_monitoring: false };
+          }
           if (command === 'get_dictation_onboarding') {
             return {
               ...onboardingState,
@@ -425,6 +434,9 @@ function createMockDom({ nativeDesktop = false, onboardingPayload = null, invoke
     addEventListener(type, handler) {
       if (!windowListeners.has(type)) windowListeners.set(type, []);
       windowListeners.get(type).push(handler);
+    },
+    dispatchEvent(event) {
+      for (const handler of windowListeners.get(event.type) || []) handler(event);
     },
     open() {}
   };
@@ -608,7 +620,7 @@ describe('dictation frontend hotkey polish', () => {
     const state = api.getState();
     expect(state.dictationTriggerMode).toBe('focused-window-hold');
     expect(state.savedDictationHotkey).toBe('Fn');
-    expect(document.getElementById('dictationHotkeyStatus').textContent).toContain('Current hotkey: Fn');
+    expect(document.getElementById('dictationHotkeyStatus').textContent).toContain('Shortcut saved: Fn');
     expect(document.getElementById('dictationHotkeyStatus').textContent).toContain('focused');
   });
 
@@ -620,7 +632,7 @@ describe('dictation frontend hotkey polish', () => {
       trigger_status: 'Press CmdOrCtrl+Shift+D anywhere to start or stop dictation.'
     });
 
-    expect(api.summarizeHotkeyPillStatus('Listening...', 'live')).toBe('Listening - press CmdOrCtrl+Shift+D again');
+    expect(api.summarizeHotkeyPillStatus('Listening...', 'live')).toBe('Listening - press Cmd+Shift+D again');
 
     api.applyDictationHotkeyPayload({
       trigger: 'Fn',
@@ -728,7 +740,6 @@ describe('dictation frontend hotkey polish', () => {
     expect(state.liveAudioLevel).toBe(0.52);
     expect(state.waveformAudioState).toBe('ready');
     expect(state.liveAudioBars[11]).toBe(1);
-    expect(document.getElementById('dictationWaveformLevel').textContent).toBe('Mic level: good');
     expect(document.getElementById('dictationWaveBar11').style.getPropertyValue('--bar-level')).toBe('1.000');
   });
 });
@@ -896,7 +907,7 @@ describe('dictation frontend hotkey save/clear', () => {
     const state = api.getState();
     expect(state.savedDictationHotkey).toBe('CmdOrCtrl+Shift+D');
     expect(state.dictationTriggerMode).toBe('global-toggle');
-    expect(document.getElementById('dictationHotkeyStatus').textContent).toContain('Current hotkey: CmdOrCtrl+Shift+D');
+    expect(document.getElementById('dictationHotkeyStatus').textContent).toContain('Shortcut saved: Cmd+Shift+D');
   });
 
   it('clears the saved hotkey through clear_dictation_trigger', async () => {
@@ -914,7 +925,7 @@ describe('dictation frontend hotkey save/clear', () => {
     const state = api.getState();
     expect(state.savedDictationHotkey).toBeNull();
     expect(state.dictationTriggerMode).toBe('disabled');
-    expect(document.getElementById('dictationHotkeyStatus').textContent).toContain('Hotkey disabled');
+    expect(document.getElementById('dictationHotkeyStatus').textContent).toContain('Shortcut off');
   });
 
   it('rejects invalid hotkey combos without invoking Tauri', async () => {
@@ -1195,7 +1206,7 @@ describe('dictation frontend web speech error/restart', () => {
     jest.advanceTimersByTime(250);
     expect(starts).toEqual(['start']);
     expect(document.body.dataset.mode).toBe('loading');
-    expect(document.getElementById('status').textContent).toBe('Reconnecting dictation...');
+    expect(document.getElementById('status').textContent).toBe('Reconnecting…');
   });
 
   it('does not restart when a fatal-style keep flag is cleared', () => {
@@ -1319,4 +1330,454 @@ describe('dictation frontend overlay/pill payloads', () => {
     expect(state.waveformAudioState).toBe('ready');
     expect(document.getElementById('dictationWaveBar0').style.getPropertyValue('--bar-level')).toBe('0.050');
   });
+});
+
+describe('Mac permission setup actions', () => {
+  it('keeps unrequested microphone in setup and only requests on explicit Allow', async () => {
+    let microphone = 'not_determined';
+    const { invokeCalls } = createMockDom({ nativeDesktop: true, invokeHandler(command) {
+      if (command === 'get_macos_permissions' || command === 'request_microphone_permission') {
+        if (command === 'request_microphone_permission') microphone = 'authorized';
+        return { supported: true, microphone, accessibility: false, input_monitoring: false };
+      }
+    } });
+    const api = await loadAppWithTestApi();
+    api.resetState();
+    await api.refreshMacosPermissions();
+    expect(api.isNativeSetupReady()).toBe(false);
+    expect(invokeCalls.some(call => call.command === 'request_microphone_permission')).toBe(false);
+    await api.requestMicrophonePermission();
+    expect(api.isNativeSetupReady()).toBe(true);
+    expect(document.getElementById('startDictation').disabled).toBe(false);
+  });
+  it('retains microphone readiness when optional Fn rearm fails', async () => {
+    createMockDom({ nativeDesktop: true, invokeHandler(command) {
+      if (command === 'recheck_macos_permissions') throw new Error('Background Fn unavailable');
+    } });
+    const api = await loadAppWithTestApi();
+    api.resetState();
+    await api.refreshMacosPermissions();
+    await api.refreshMacosPermissions({ rearm: true });
+    expect(api.isNativeSetupReady()).toBe(true);
+    expect(api.getState().macosPermissions.microphone).toBe('authorized');
+  });
+
+  it('reports failed inspection as unknown and recovers only after a successful retry', async () => {
+    let fail = true;
+    createMockDom({ nativeDesktop: true, invokeHandler(command) {
+      if (command === 'get_macos_permissions' && fail) throw new Error('OS check unavailable');
+    } });
+    const api = await loadAppWithTestApi();
+    api.resetState();
+    await api.refreshMacosPermissions();
+    expect(api.getState().macosPermissions).toBeNull();
+    expect(api.isNativeSetupReady()).toBe(false);
+    expect(document.getElementById('microphoneHealth').textContent).toContain('not checked');
+    expect(document.getElementById('dictationPermissionList').children[0].textContent).toContain('Accessibility · unknown');
+    fail = false;
+    await api.refreshMacosPermissions();
+    expect(api.isNativeSetupReady()).toBe(true);
+  });
+
+  it('quiet focus checks preserve draft and Settings and never rearm during a pending or live recording', async () => {
+    let microphone = 'authorized';
+    const { invokeCalls } = createMockDom({ nativeDesktop: true, invokeHandler(command) {
+      if (command === 'get_macos_permissions') return { supported: true, microphone, accessibility: false, input_monitoring: false };
+    } });
+    const api = await loadAppWithTestApi();
+    api.resetState();
+    await api.refreshMacosPermissions();
+    api.setDraftTranscriptText('Keep these words.');
+    document.getElementById('settingsNav').click();
+    api.setNativeFlags({ isStartingDictation: true });
+    microphone = 'denied';
+    window.dispatchEvent({ type: 'focus' });
+    await api.refreshMacosPermissions();
+    expect(api.getState().macosPermissions.microphone).toBe('denied');
+    expect(api.getState().isStartingDictation).toBe(true);
+    expect(api.getState().currentDraftText).toBe('Keep these words.');
+    expect(document.getElementById('onboardingScreen').hidden).toBe(false);
+    expect(document.getElementById('stopDictation').disabled).toBe(false);
+    api.setNativeFlags({ isStartingDictation: false, isDictating: true });
+    await api.refreshMacosPermissions({ rearm: true });
+    expect(api.getState().isDictating).toBe(true);
+    expect(invokeCalls.some(call => call.command === 'recheck_macos_permissions')).toBe(false);
+    expect(invokeCalls.some(call => call.command === 'open_macos_permission_settings' || call.command === 'request_microphone_permission')).toBe(false);
+  });
+
+  it('shows denied and restricted microphone recovery without inferring Input Monitoring from an armed Fn listener', async () => {
+    let microphone = 'denied';
+    const { invokeCalls } = createMockDom({ nativeDesktop: true, invokeHandler(command) {
+      if (command === 'get_macos_permissions') return { supported: true, microphone, accessibility: true, input_monitoring: false };
+      if (command === 'open_macos_permission_settings') return null;
+    } });
+    const api = await loadAppWithTestApi();
+    api.resetState();
+    await api.refreshMacosPermissions();
+    expect(document.getElementById('microphoneHealth').textContent).toContain('access denied');
+    expect(document.getElementById('requiredMicrophoneAction').textContent).toBe('Open System Settings');
+    const rows = document.getElementById('dictationPermissionList').children;
+    expect(rows.map(row => row.textContent).join(' ')).toContain('Accessibility · allowed');
+    expect(rows.map(row => row.textContent).join(' ')).not.toContain('Input Monitoring · allowed');
+    await api.openMacosPermissionSettings('microphone');
+    expect(invokeCalls.filter(call => call.command === 'open_macos_permission_settings').map(call => call.args)).toEqual([{ permission: 'microphone' }]);
+    expect(api.isNativeSetupReady()).toBe(false);
+    microphone = 'restricted';
+    await api.refreshMacosPermissions();
+    expect(document.getElementById('microphoneHealth').textContent).toContain('restricted');
+    expect(document.getElementById('requiredMicrophoneAction').textContent).toBe('Recheck');
+  });
+
+});
+
+
+describe('Murmur workspace navigation', () => {
+  it('opens ready users in dictation and retains their chosen screen on rechecks', async () => {
+    let microphone = 'authorized';
+    createMockDom({ nativeDesktop: true, invokeHandler(command) {
+      if (command === 'get_macos_permissions') return { supported: true, microphone, accessibility: false, input_monitoring: false };
+    } });
+    const api = await loadAppWithTestApi();
+    await api.refreshMacosPermissions();
+    expect(document.body.dataset.screen).toBe('dictation');
+    expect(document.body.dataset.mode).toBe('idle');
+    expect(document.getElementById('dictationNav').getAttribute('aria-current')).toBe('page');
+    api.setDraftTranscriptText('An idea worth keeping.');
+    microphone = 'denied';
+    await api.refreshMacosPermissions();
+    expect(document.body.dataset.screen).toBe('dictation');
+    expect(document.getElementById('startDictation').disabled).toBe(true);
+    expect(document.getElementById('captureGuidance').textContent).toContain('microphone');
+    document.getElementById('settingsNav').click();
+    microphone = 'authorized';
+    await api.refreshMacosPermissions();
+    document.getElementById('retryWhisperCheck').click();
+    await new Promise(resolve => setTimeout(resolve, 0));
+    expect(document.body.dataset.screen).toBe('onboarding');
+    expect(document.getElementById('settingsNav').getAttribute('aria-current')).toBe('page');
+    expect(api.getState().currentDraftText).toBe('An idea worth keeping.');
+    document.getElementById('dictationNav').click();
+    expect(document.body.dataset.screen).toBe('dictation');
+  });
+
+  it('shows only the required checks on first run and every option in Settings', async () => {
+    let microphone = 'not_determined';
+    createMockDom({ nativeDesktop: true, invokeHandler(command) {
+      if (command === 'get_macos_permissions') return { supported: true, microphone, accessibility: false, input_monitoring: false };
+    } });
+    const api = await loadAppWithTestApi();
+    await api.refreshMacosPermissions();
+    expect(document.body.dataset.screen).toBe('onboarding');
+    expect(document.getElementById('requiredSetup').hidden).toBe(false);
+    expect(document.getElementById('optionalSettings').hidden).toBe(true);
+    expect(document.getElementById('onboardingContinue').hidden).toBe(false);
+    document.getElementById('settingsNav').click();
+    expect(document.getElementById('optionalSettings').hidden).toBe(false);
+    expect(document.getElementById('requiredSetup').hidden).toBe(false);
+    expect(document.getElementById('onboardingContinue').hidden).toBe(true);
+    microphone = 'authorized';
+    await api.refreshMacosPermissions();
+    expect(document.getElementById('requiredSetup').hidden).toBe(true);
+    expect(document.body.dataset.screen).toBe('onboarding');
+    const rows = document.getElementById('dictationPermissionList').children;
+    expect(rows.map(row => row.textContent)).toEqual([
+      'Accessibility · not allowed. Pastes into other apps and hears Fn from any app.',
+      'Input Monitoring · not allowed. Hears Fn from any app, without pasting.'
+    ]);
+  });
+});
+
+
+describe('Murmur draft actions and browser disclosure', () => {
+  it('copies the editable draft and clears it without deleting recent dictations', async () => {
+    const { clipboardCalls } = createMockDom();
+    const api = await loadAppWithTestApi();
+    api.resetState();
+    expect(document.getElementById('clearDictationHistory').hidden).toBe(true);
+    api.appendTranscriptChunk('Original phrase', { source: 'web' });
+    expect(document.getElementById('clearDictationHistory').hidden).toBe(false);
+    const draft = document.getElementById('transcriptInput');
+    draft.value = 'Edited and ready to send.';
+    draft.dispatchEvent({ type: 'input' });
+    document.getElementById('copyTranscript').click();
+    await new Promise(resolve => setTimeout(resolve, 0));
+    expect(clipboardCalls).toEqual(['Edited and ready to send.']);
+    expect(document.getElementById('status').textContent).toContain('Copied');
+    document.getElementById('clearTranscript').click();
+    expect(draft.value).toBe('');
+    expect(api.getState().dictationHistory[0].text).toBe('Original phrase');
+  });
+
+  it('discloses browser processing and keeps manual typing available without speech support', async () => {
+    createMockDom();
+    const api = await loadAppWithTestApi();
+    expect(document.body.dataset.screen).toBe('dictation');
+    expect(document.getElementById('requiredSetup').hidden).toBe(true);
+    expect(document.getElementById('runtimeNote').textContent).toContain('online service');
+    expect(document.getElementById('captureGuidance').textContent).toContain('type, edit, and copy');
+    expect(document.getElementById('transcriptInput').disabled).toBe(false);
+    api.setDraftTranscriptText('Typed without a microphone.');
+    expect(document.getElementById('transcriptInput').value).toBe('Typed without a microphone.');
+  });
+
+  it('retains live capture and an available Stop while opening settings and refreshing setup', async () => {
+    createMockDom({ nativeDesktop: true });
+    const api = await loadAppWithTestApi();
+    await api.refreshMacosPermissions();
+    api.handleNativeDictationStatePayload({ state: 'listening', session_id: 42 });
+    document.getElementById('settingsNav').click();
+    document.getElementById('retryWhisperCheck').click();
+    await new Promise(resolve => setTimeout(resolve, 0));
+    expect(document.body.dataset.mode).toBe('listening');
+    expect(document.body.dataset.screen).toBe('onboarding');
+    expect(document.getElementById('sessionStop').hidden).toBe(false);
+    expect(document.getElementById('sessionStop').disabled).toBe(false);
+    expect(api.getState().activeNativeSessionId).toBe('42');
+  });
+});
+
+
+it('keeps a fresh setup on the required steps after model download until explicit microphone access', async () => {
+  let microphone = 'not_determined';
+  createMockDom({ nativeDesktop: true, onboardingPayload: { selected_model_exists: false }, invokeHandler(command) {
+    if (command === 'get_macos_permissions') return { supported: true, microphone, accessibility: false, input_monitoring: false };
+    if (command === 'request_microphone_permission') { microphone = 'authorized'; return { supported: true, microphone, accessibility: false, input_monitoring: false }; }
+  } });
+  const api = await loadAppWithTestApi();
+  api.resetState();
+  await api.refreshMacosPermissions();
+  await api.installSelectedDictationModel();
+  expect(document.body.dataset.screen).toBe('onboarding');
+  expect(document.getElementById('startDictation').disabled).toBe(true);
+  const allow = document.getElementById('requiredMicrophoneAction');
+  allow.tagName = 'BUTTON';
+  document.getElementById('requiredSetup').dispatchEvent({ type: 'click', target: allow });
+  await new Promise(resolve => setTimeout(resolve, 0));
+  expect(document.getElementById('startDictation').disabled).toBe(false);
+  expect(document.body.dataset.screen).toBe('onboarding');
+  document.getElementById('onboardingContinue').click();
+  expect(document.body.dataset.screen).toBe('dictation');
+});
+
+describe('native Mac clipboard copy', () => {
+  it('copies a history entry through the native clipboard without browser clipboard support or Accessibility', async () => {
+    const { invokeCalls } = createMockDom({ nativeDesktop: true, invokeHandler(command) {
+      if (command === 'copy_text_to_clipboard') return null;
+    } });
+    delete navigator.clipboard;
+    const api = await loadAppWithTestApi();
+    api.resetState();
+    api.appendTranscriptChunk('Keep this dictation.', { source: 'native' });
+    const entry = api.getState().dictationHistory[0];
+    expect(await api.runDictationHistoryAction('copy', entry.id)).toBe(true);
+    expect(invokeCalls.filter(call => call.command === 'copy_text_to_clipboard').map(call => call.args))
+      .toEqual([{ text: 'Keep this dictation.' }]);
+    expect(api.getState().focusedFieldInsertPermissionGranted).toBe(false);
+    expect(document.getElementById('status').textContent).toBe('Copied. Paste it anywhere.');
+  });
+  it('reports native clipboard failure without claiming success or falling back to another clipboard writer', async () => {
+    const { clipboardCalls } = createMockDom({ nativeDesktop: true, invokeHandler(command) {
+      if (command === 'copy_text_to_clipboard') throw new Error('Pasteboard write rejected');
+    } });
+    const api = await loadAppWithTestApi();
+    api.resetState();
+    api.appendTranscriptChunk('Keep the failed copy available.', { source: 'native' });
+    const entry = api.getState().dictationHistory[0];
+    expect(await api.runDictationHistoryAction('copy', entry.id)).toBe(false);
+    expect(clipboardCalls).toEqual([]);
+    expect(document.getElementById('status').textContent).toBe('Could not copy dictation entry: Pasteboard write rejected');
+    expect(api.getState().dictationHistory[0].text).toBe('Keep the failed copy available.');
+  });
+
+});
+
+it('describes toggle shortcuts accurately and does not suggest a disabled shortcut', async () => {
+  createMockDom({ nativeDesktop: true, onboardingPayload: { dictation_trigger: 'CmdOrCtrl+Shift+D', dictation_trigger_mode: 'global-toggle' } });
+  const api = await loadAppWithTestApi();
+  api.resetState();
+  api.applyDictationHotkeyPayload({ trigger: 'CmdOrCtrl+Shift+D', trigger_mode: 'global-toggle' });
+  await api.refreshMacosPermissions();
+  expect(document.getElementById('captureGuidance').textContent).toContain('press Cmd+Shift+D');
+  await api.clearDictationHotkey();
+  expect(document.getElementById('captureGuidance').textContent).toBe('');
+  await api.saveDictationHotkey('Fn');
+  expect(document.getElementById('captureGuidance').textContent).toContain('hold Fn / Globe and release to transcribe');
+});
+
+describe('review regressions', () => {
+  it('Stop and Clear release capture when cancellation reaches the backend before start', async () => {
+    for (const action of ['stopDictation', 'clearTranscript']) {
+      let deliverStart;
+      let captureRunning = false;
+      let captureRequestId;
+      createMockDom({ nativeDesktop: true, invokeHandler(command, args) {
+        if (command === 'start_native_dictation') {
+          return new Promise(resolve => {
+            deliverStart = () => {
+              captureRequestId = args.requestId;
+              captureRunning = true;
+              resolve(null);
+            };
+          });
+        }
+        if (command === 'stop_native_dictation' || command === 'cancel_native_dictation') {
+          if (!args?.requestId || args.requestId === captureRequestId) captureRunning = false;
+          return command === 'stop_native_dictation' ? '' : null;
+        }
+      } });
+      const api = await loadAppWithTestApi();
+      api.resetState();
+      await api.refreshMacosPermissions();
+      document.getElementById('startDictation').click();
+      await new Promise(resolve => setTimeout(resolve, 0));
+      document.getElementById(action).click();
+      await new Promise(resolve => setTimeout(resolve, 0));
+      deliverStart();
+      await new Promise(resolve => setTimeout(resolve, 0));
+      expect(captureRunning).toBe(false);
+      expect(api.getState().isDictating).toBe(false);
+    }
+  });
+
+  it('waits for a delayed Clear acknowledgement before opening the next capture', async () => {
+    let finishStart;
+    let finishClear;
+    let captureOwner = null;
+    const starts = [];
+    createMockDom({ nativeDesktop: true, invokeHandler(command, args) {
+      if (command === 'start_native_dictation') {
+        starts.push(args.requestId);
+        if (starts.length === 1) return new Promise(resolve => {
+          finishStart = () => { captureOwner = args.requestId; resolve(null); };
+        });
+        captureOwner = args.requestId;
+        return null;
+      }
+      if (command === 'cancel_native_dictation') {
+        if (args.requestId) {
+          if (captureOwner === args.requestId) captureOwner = null;
+          return null;
+        }
+        return new Promise(resolve => {
+          finishClear = () => { captureOwner = null; resolve(null); };
+        });
+      }
+    } });
+    const api = await loadAppWithTestApi();
+    api.resetState();
+    await api.refreshMacosPermissions();
+    document.getElementById('startDictation').click();
+    await new Promise(resolve => setTimeout(resolve, 0));
+    document.getElementById('clearTranscript').click();
+    document.getElementById('startDictation').click();
+    finishStart();
+    await new Promise(resolve => setTimeout(resolve, 0));
+    expect(starts).toHaveLength(1);
+    finishClear();
+    await new Promise(resolve => setTimeout(resolve, 0));
+    expect(starts).toHaveLength(2);
+    expect(captureOwner).toBe(starts[1]);
+    expect(api.getState().isDictating).toBe(true);
+  });
+
+  it('Stop and Clear cancel pending starts without late listening revival', async () => {
+    for (const action of ['stopDictation', 'clearTranscript']) {
+      let finishStart;
+      const start = new Promise(resolve => { finishStart = resolve; });
+      let requestId;
+      createMockDom({ nativeDesktop: true, invokeHandler(command, args) {
+        if (command === 'start_native_dictation') { requestId = args.requestId; return start; }
+        if (command === 'stop_native_dictation') throw new Error('Dictation is not running.');
+        if (command === 'cancel_native_dictation') return null;
+      } });
+      const api = await loadAppWithTestApi();
+      api.resetState();
+      await api.refreshMacosPermissions();
+      document.getElementById('startDictation').click();
+      await new Promise(resolve => setTimeout(resolve, 0));
+      expect(api.getState().isStartingDictation).toBe(true);
+      document.getElementById(action).click();
+      await new Promise(resolve => setTimeout(resolve, 0));
+      finishStart(null);
+      await new Promise(resolve => setTimeout(resolve, 0));
+      api.handleNativeDictationStatePayload({ state: 'listening', session_id: 800, request_id: requestId });
+      expect(api.getState().isDictating).toBe(false);
+      expect(api.getState().isStartingDictation).toBe(false);
+    }
+  });
+  it('waits for onboarding before initial focus-driven routing and respects manual navigation while loading', async () => {
+    for (const navigate of [false, true]) {
+      let releaseOnboarding;
+      const waiting = new Promise(resolve => { releaseOnboarding = resolve; });
+      createMockDom({ nativeDesktop: true, async invokeHandler(command) {
+        if (command === 'get_dictation_onboarding') await waiting;
+      } });
+      const api = await loadAppWithTestApi();
+      window.dispatchEvent({ type: 'focus' });
+      await api.refreshMacosPermissions();
+      if (navigate) document.getElementById('settingsNav').click();
+      releaseOnboarding();
+      await new Promise(resolve => setTimeout(resolve, 0));
+      expect(api.isNativeSetupReady()).toBe(true);
+      expect(document.body.dataset.screen).toBe(navigate ? 'onboarding' : 'dictation');
+    }
+  });
+
+  it('reports required microphone setup instead of overall readiness when only model and engine are ready', async () => {
+    createMockDom({ nativeDesktop: true, invokeHandler(command) {
+      if (command === 'get_macos_permissions') return { supported: true, microphone: 'not_determined', accessibility: false, input_monitoring: false };
+    } });
+    const api = await loadAppWithTestApi();
+    await new Promise(resolve => setTimeout(resolve, 0));
+    expect(api.isNativeSetupReady()).toBe(false);
+    expect(document.getElementById('status').textContent).toContain('microphone');
+    expect(document.getElementById('status').dataset.tone).not.toBe('ok');
+  });
+
+  it('joins duplicate Fn delivery without canceling a pending native capture', async () => {
+    const { invokeCalls } = createMockDom({ nativeDesktop: true, invokeHandler(command) {
+      if (command === 'start_native_dictation') throw new Error('Dictation already running.');
+      if (command === 'cancel_native_dictation') return null;
+    } });
+    const api = await loadAppWithTestApi();
+    api.resetState();
+    await api.refreshMacosPermissions();
+    document.getElementById('startDictation').click();
+    await new Promise(resolve => setTimeout(resolve, 0));
+    expect(api.getState().isStartingDictation).toBe(true);
+    expect(invokeCalls.some(call => call.command === 'cancel_native_dictation')).toBe(false);
+    api.handleNativeDictationStatePayload({ state: 'listening', session_id: 901 });
+    expect(api.getState().isDictating).toBe(true);
+  });
+
+  it('a canceled start cannot overwrite a newer session when its promise and event arrive late', async () => {
+    const starts = [];
+    createMockDom({ nativeDesktop: true, invokeHandler(command, args) {
+      if (command === 'start_native_dictation') return new Promise(resolve => starts.push({ resolve, requestId: args.requestId }));
+      if (command === 'cancel_native_dictation') return null;
+    } });
+    const api = await loadAppWithTestApi();
+    api.resetState();
+    await api.refreshMacosPermissions();
+    document.getElementById('startDictation').click();
+    await new Promise(resolve => setTimeout(resolve, 0));
+    document.getElementById('clearTranscript').click();
+    document.getElementById('startDictation').click();
+    await new Promise(resolve => setTimeout(resolve, 0));
+    // B waits for A's successful response and request-scoped cleanup.
+    expect(starts).toHaveLength(1);
+    starts[0].resolve(null);
+    await new Promise(resolve => setTimeout(resolve, 0));
+    expect(starts).toHaveLength(2);
+    api.handleNativeDictationStatePayload({ state: 'idle', session_id: 902, request_id: starts[0].requestId });
+    expect(api.getState().isStartingDictation).toBe(true);
+    expect(document.getElementById('stopDictation').disabled).toBe(false);
+    api.handleNativeDictationStatePayload({ state: 'listening', session_id: 903, request_id: starts[1].requestId });
+    starts[1].resolve(null);
+    await new Promise(resolve => setTimeout(resolve, 0));
+    api.handleNativeDictationStatePayload({ state: 'listening', session_id: 902, request_id: starts[0].requestId });
+    expect(api.getState().activeNativeSessionId).toBe('903');
+    expect(api.getState().isDictating).toBe(true);
+  });
+
 });

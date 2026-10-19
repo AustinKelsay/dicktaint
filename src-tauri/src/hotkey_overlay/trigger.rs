@@ -221,22 +221,38 @@ pub(crate) fn focused_field_insert_enabled(settings: &LocalSettings) -> bool {
     matches!(settings.focused_field_insert_enabled, Some(true))
 }
 
+/// Names modifier keys the way this platform's keyboard does, for status copy only.
+/// The canonical trigger string itself is unchanged.
+fn display_trigger(trigger: &str) -> String {
+    #[cfg(target_os = "macos")]
+    {
+        trigger.replace("CmdOrCtrl", "Cmd").replace("Alt", "Option")
+    }
+    #[cfg(not(target_os = "macos"))]
+    {
+        trigger.replace("CmdOrCtrl", "Ctrl")
+    }
+}
+
 fn global_toggle_status(trigger: &str) -> String {
+    let trigger = display_trigger(trigger);
     format!("Press {trigger} anywhere to start or stop dictation.")
 }
 
 fn global_hold_status(trigger: &str) -> String {
+    let trigger = display_trigger(trigger);
     format!("Hold {trigger} anywhere to dictate, then release to transcribe.")
 }
 
 fn focused_window_hold_status(trigger: &str) -> String {
+    let trigger = display_trigger(trigger);
     format!(
-        "Hold {trigger} to dictate while dicktaint is focused. Grant Input Monitoring for global hold-to-talk."
+        "Hold {trigger} while Murmur is focused to dictate. Allow Accessibility or Input Monitoring to use it from any app."
     )
 }
 
 fn fn_permission_hint() -> String {
-    "System Settings > Privacy & Security > Input Monitoring: allow dicktaint (or Terminal while running tauri:dev), then relaunch dicktaint.".to_string()
+    "To use Fn from any app, allow Murmur under System Settings > Privacy & Security > Accessibility (or Input Monitoring), then recheck.".to_string()
 }
 
 fn set_trigger_runtime_details(
@@ -412,7 +428,7 @@ fn set_macos_fn_listener_enabled(
  * Rebuilds the global Fn listener after the app becomes active again.
  *
  * Users typically toggle Input Monitoring in System Settings then return to
- * dicktaint; without a recreate, the old silent tap stays installed.
+ * Murmur; without a recreate, the old silent tap stays installed.
  */
 #[cfg(target_os = "macos")]
 pub(crate) fn refresh_macos_fn_listener_after_activation(
@@ -423,8 +439,14 @@ pub(crate) fn refresh_macos_fn_listener_after_activation(
 
     use super::macos_fn::claim_fn_listener_activation_refresh_slot;
 
+    use tauri::Manager;
+    let dictation = app.state::<crate::state::DictationState>();
+    let idle_guard = dictation.start_gate.try_lock();
+    let pending = idle_guard.is_err() || dictation.hold_intent.is_held()
+        || dictation.session_intent.lock().map_err(|_| "Failed to lock session intent")?.has_pending();
+    let active = if pending { false } else { crate::dictation_session::is_running(app)? };
     let registered = current_registered_hotkey(hotkey_state)?;
-    if !should_refresh_fn_listener_after_activation(registered.as_deref() == Some("Fn")) {
+    if !should_refresh_fn_listener_after_activation(registered.as_deref() == Some("Fn"), pending, active) {
         return Ok(());
     }
     if !claim_fn_listener_activation_refresh_slot() {

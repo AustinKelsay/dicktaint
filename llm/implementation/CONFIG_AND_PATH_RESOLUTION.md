@@ -2,7 +2,7 @@
 
 ## Status Snapshot
 
-- Date: 2026-02-20
+- Date: 2026-10-18
 - runtime config and path probing behavior are implemented in Rust backend + package scripts
 
 ## Purpose
@@ -63,11 +63,14 @@ Model resolution order:
 1. `WHISPER_MODEL_PATH` override when set and valid
 2. persisted selected model path from local settings
 
+Setup and capture use the same model resolver: known catalog entries must pass the file-size heuristic, while existing saved custom model files remain compatible. An override is trimmed, must be a file, and leaves the persisted selection intact. See [`MODEL_MANAGEMENT.md`](MODEL_MANAGEMENT.md).
+
 Local persistence:
 
 - settings path: `$HOME/Library/Application Support/com.plebdev.dicktaint/.dicktaint/dictation-settings.json`
 - model directory: `$HOME/Library/Application Support/com.plebdev.dicktaint/.dicktaint/whisper-models/`
-- settings include model selection, dictation trigger config, and `focused_field_insert_enabled`
+- settings include model selection, dictation trigger config, microphone selection, background UI preferences, and `focused_field_insert_enabled`
+- the Murmur display rename retains the legacy bundle identifier/executable/storage/env/event contracts; signing continuity is a separate distribution concern (ADR 0002)
 
 ## Verification
 

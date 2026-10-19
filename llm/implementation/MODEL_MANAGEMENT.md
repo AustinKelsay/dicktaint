@@ -2,8 +2,8 @@
 
 ## Status Snapshot
 
-- Date: 2026-02-17
-- model catalog and local lifecycle are implemented in Rust onboarding commands
+- Date: 2026-10-18
+- model catalog and local lifecycle are implemented in Rust; setup and capture share active-model path validation
 
 ## Purpose
 
@@ -49,7 +49,7 @@ Install flow (`install_dictation_model`):
 1. validate model id
 2. verify `whisper-cli` availability
 3. create model directory if needed
-4. download model from Hugging Face if missing
+4. download model from Hugging Face if missing/incomplete, validating the downloaded size before selection
 5. persist selected model id + path
 
 Delete flow (`delete_dictation_model`):
@@ -63,6 +63,15 @@ Persistence paths:
 
 - settings: `$HOME/Library/Application Support/com.plebdev.dicktaint/.dicktaint/dictation-settings.json`
 - models: `$HOME/Library/Application Support/com.plebdev.dicktaint/.dicktaint/whisper-models/`
+
+Readiness and upgrade continuity:
+
+- onboarding and capture both use `resolve_active_model_path`; the selected-model readiness flag follows the same rules
+- known catalog models must be files that pass the existing size heuristic; this does not prove model content or successful transcription
+- an existing saved custom model file remains usable even when its id is outside the catalog
+- `WHISPER_MODEL_PATH` takes precedence, trims surrounding whitespace, must point to a file, and does not replace the saved selection
+- missing files and directories are not usable models
+- the Murmur display rename retains the legacy application storage and settings schema
 
 Write safety:
 

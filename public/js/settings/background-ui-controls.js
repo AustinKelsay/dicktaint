@@ -56,18 +56,18 @@ export function normalizeCloseAction(value, nextMenuBarMode = state.menuBarMode)
 /** @returns {string} */
 export function describeBackgroundUiStatus() {
   const trayText = state.menuBarMode === 'always'
-    ? 'Menu bar: always visible.'
+    ? 'The menu bar icon is always shown.'
     : (state.menuBarMode === 'background-only'
-      ? 'Menu bar: only visible while the main window is hidden.'
-      : 'Menu bar: off.');
+      ? 'The menu bar icon appears only while the window is hidden.'
+      : 'No menu bar icon.');
   const closeText = state.closeAction === 'hide-to-tray'
-    ? 'Close button hides to the menu bar.'
-    : 'Close button quits the app.';
+    ? 'Closing the window keeps Murmur running in the menu bar.'
+    : 'Closing the window quits Murmur.';
   const pillText = state.pillVisibilityMode === 'always'
-    ? 'Floating pill: always visible.'
+    ? 'The floating pill is always shown.'
     : (state.pillVisibilityMode === 'off'
-      ? 'Floating pill: off.'
-      : 'Floating pill: visible only while active.');
+      ? 'The floating pill is off.'
+      : 'The floating pill appears while dictating.');
   return `${trayText} ${closeText} ${pillText}`;
 }
 

@@ -1,7 +1,8 @@
 {
   "$schema": "https://schema.tauri.app/config/2",
-  "productName": "dicktaint",
-  "version": "0.3.12",
+  "productName": "Murmur",
+  "mainBinaryName": "dicktaint",
+  "version": "0.4.0",
   "identifier": "com.plebdev.dicktaint",
   "build": {
     "beforeDevCommand": "HOST=${HOST:-127.0.0.1} PORT=43210 bun run start",
@@ -14,9 +15,11 @@
     "windows": [
       {
         "label": "main",
-        "title": "dicktaint",
-        "width": 1000,
-        "height": 800,
+        "title": "Murmur",
+        "width": 900,
+        "height": 720,
+        "minWidth": 740,
+        "minHeight": 560,
         "resizable": true
       }
     ],

@@ -2,7 +2,7 @@
 
 ## Status Snapshot
 
-- Date: 2026-07-30
+- Date: 2026-10-19
 - Flow descriptions match current app behavior in web and desktop paths
 
 ## Purpose
@@ -42,10 +42,11 @@ Out of scope:
 
 Desktop first-run (macOS):
 
-1. app opens setup screen
-2. onboarding checks CLI, hardware profile, model state
-3. user installs/selects local model
-4. setup unlocks dictation
+1. app quietly checks local speech engine, selected model, hardware profile, and microphone facts
+2. a ready returning user opens Dictation; otherwise the first load opens guided setup, which shows only the required checks and the model picker (optional settings stay in Settings)
+3. user installs/selects a model and explicitly allows microphone access, or opens Microphone settings for denied access
+4. engine + model + authorized microphone unlock native dictation; optional Accessibility/Input Monitoring never gate it
+5. user can open the editable draft while completing setup; later permission refresh does not force navigation or discard the draft
 
 Desktop dictation (button):
 
@@ -70,15 +71,17 @@ Race control detail:
 
 Desktop model maintenance:
 
-- user can download/use installed model or delete model with confirmation.
+- user can download/use an installed model or delete one with confirmation in Settings. The recommended model is highlighted; active model deletion selects a valid installed fallback when available.
 
 Desktop settings maintenance:
 
-- user can enable or disable focused-field insertion in settings; setting persists per device.
+- user can enable or disable focused-field insertion in Settings; the setting persists per device.
+- the required microphone check offers explicit allow/open/recheck actions; Mac access lists optional Accessibility and Input Monitoring (Input Monitoring only while Accessibility is missing) with System Settings buttons and one Recheck. Returning to the app rechecks facts and idle hotkey capability without interrupting capture.
+- Dictation and Settings share an editable draft. Copy draft and recent-item actions use the clipboard; recent history is memory-only and can be cleared.
 
 Web flow:
 
-- browser speech recognition path when available, manual text entry fallback always available.
+- browser speech recognition path when available, manual text entry fallback always available. Browser-provider audio processing may be remote; the desktop local-transcription promise does not extend to browser SpeechRecognition.
 
 ## Verification
 
